@@ -1,0 +1,1193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ChartStead — Full shell · 10 directions</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --primary: #081D3A;
+      --on-primary: #FFFFFF;
+      --primary-hover: #102C56;
+      --primary-active: #06152B;
+      --secondary: #2F5D98;
+      --on-secondary: #FFFFFF;
+      --secondary-hover: #254C7E;
+      --secondary-active: #1D3D67;
+      --tertiary: #22B573;
+      --on-tertiary: #081D3A;
+      --bg: #FFFFFF;
+      --on: #081D3A;
+      --subtle: #F3F5F7;
+      --muted-bg: #E9EDF2;
+      --variant: #526071;
+      --muted: #5B6878;
+      --outline: #D7DEE7;
+      --outline-strong: #AEBAC8;
+      --selection: #EAF2FB;
+      --nav-active: #173B70;
+      --info: #EAF2FB; --on-info: #244E7D;
+      --ok: #E9F8F1; --on-ok: #087A4D;
+      --warn: #FFF4E5; --on-warn: #8A4D09;
+      --err: #FDECEA; --on-err: #8A1C13;
+      --tb: #E8F1FB; --on-tb: #245486;
+      --tg: #E8F7F0; --on-tg: #087A4D;
+      --tp: #F0EBFA; --on-tp: #5C3F8C;
+      --ta: #FFF4E5; --on-ta: #8A4D09;
+      --focus: #2F5D98;
+      --scrim: rgba(8,29,58,.45);
+      --sh1: 0 1px 2px rgba(8,29,58,.06);
+      --sh2: 0 4px 14px rgba(8,29,58,.08);
+      --sh3: 0 16px 40px rgba(8,29,58,.16);
+      --r: 2px;
+      --ease: cubic-bezier(.2,.8,.2,1);
+      --out: cubic-bezier(.16,1,.3,1);
+      --d: 150ms;
+      --d2: 260ms;
+      --mark-d: url("../assets/brand/chartstead-mark-on-dark.png");
+      --mark-l: url("../assets/brand/chartstead-mark-on-light.png");
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, sans-serif;
+      font-size: 14px; line-height: 1.45;
+      color: var(--on); background: #E2E7EE;
+      font-feature-settings: "tnum" 1;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input, textarea, select { font: inherit; color: inherit; }
+    button { cursor: pointer; border: 0; background: none; padding: 0; }
+    a { color: inherit; text-decoration: none; }
+    img { display: block; max-width: 100%; }
+    :focus { outline: none; }
+    :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+    /* proto chrome */
+    .px {
+      position: sticky; top: 0; z-index: 1000;
+      background: var(--primary); color: #fff;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+    }
+    .px-i {
+      max-width: 1540px; margin: 0 auto;
+      padding: 8px 12px; min-height: 46px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .px h1 {
+      margin: 0; font-size: 11px; font-weight: 600;
+      letter-spacing: .08em; text-transform: uppercase;
+      opacity: .75; white-space: nowrap;
+    }
+    .px nav { display: flex; gap: 2px; overflow-x: auto; min-width: 0; scrollbar-width: none; }
+    .px nav::-webkit-scrollbar { display: none; }
+    .px a {
+      flex-shrink: 0; font-size: 11px; font-weight: 600;
+      padding: 6px 8px; color: rgba(255,255,255,.7);
+      transition: background var(--d) var(--ease), color var(--d) var(--ease);
+    }
+    .px a:hover { color: #fff; background: rgba(255,255,255,.08); }
+    .px a b { opacity: .4; font-weight: 600; margin-right: 4px; }
+
+    .stage {
+      max-width: 1540px; margin: 0 auto;
+      padding: 12px 12px 64px;
+      display: flex; flex-direction: column; gap: 28px;
+    }
+    .opt { scroll-margin-top: 52px; }
+    .opt-m { margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; }
+    .opt-m h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -.015em; }
+    .opt-m h2 em { font-style: normal; color: var(--muted); margin-right: 8px; font-weight: 500; }
+    .opt-m p { margin: 0; font-size: 12px; color: var(--variant); max-width: 78ch; }
+
+    .frame {
+      height: calc(100vh - 80px);
+      min-height: 640px; max-height: 900px;
+      overflow: hidden;
+      background: var(--bg);
+      border: 1px solid var(--outline-strong);
+      box-shadow: var(--sh2);
+    }
+    .app { height: 100%; min-height: 0; display: grid; background: var(--bg); }
+
+    /* —— shared atoms —— */
+    .btn {
+      --bgc: var(--bg); --fg: var(--secondary); --bd: var(--outline-strong);
+      --bgh: var(--selection); --bdh: var(--secondary);
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      height: 34px; padding: 0 12px;
+      font-size: 13px; font-weight: 600;
+      color: var(--fg); background: var(--bgc); border: 1px solid var(--bd);
+      border-radius: var(--r);
+      box-shadow: 0 1px 0 rgba(8,29,58,.04);
+      transition: background var(--d) var(--ease), border-color var(--d) var(--ease), color var(--d) var(--ease), transform 90ms var(--ease), box-shadow var(--d) var(--ease);
+      user-select: none; white-space: nowrap;
+    }
+    .btn:hover { background: var(--bgh); border-color: var(--bdh); }
+    .btn:active { transform: translateY(1px); box-shadow: none; }
+    .btn-p { --bgc: var(--secondary); --fg: #fff; --bd: var(--secondary); --bgh: var(--secondary-hover); --bdh: var(--secondary-hover); }
+    .btn-ok { --bgc: var(--ok); --fg: var(--on-ok); --bd: #B7E5CF; --bgh: #D4F3E4; --bdh: var(--on-ok); }
+    .btn-mb { --bgc: var(--warn); --fg: var(--on-warn); --bd: #F0D4A8; --bgh: #FFE8C2; --bdh: var(--on-warn); }
+    .btn-no { --bgc: var(--bg); --fg: var(--on-err); --bd: #E8B4AF; --bgh: var(--err); --bdh: var(--on-err); }
+    .btn-g { --bgc: transparent; --fg: var(--secondary); --bd: transparent; --bgh: var(--selection); --bdh: transparent; box-shadow: none; }
+    .btn-sm { height: 30px; padding: 0 10px; font-size: 12px; }
+    .btn-xs { height: 26px; padding: 0 8px; font-size: 11.5px; }
+    .btn.flash { animation: flash var(--d2) var(--out); }
+    @keyframes flash { from { box-shadow: 0 0 0 0 rgba(47,93,152,.35);} to { box-shadow: 0 0 0 7px transparent;} }
+
+    .flag {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+      color: var(--variant);
+    }
+    .flag::before { content: ""; width: 3px; height: 12px; background: var(--outline-strong); }
+    .flag-u { color: var(--on-info); } .flag-u::before { background: var(--secondary); }
+    .flag-a { color: var(--on-ok); } .flag-a::before { background: var(--tertiary); }
+    .flag-m { color: var(--on-warn); } .flag-m::before { background: #C47A16; }
+    .flag-d { color: var(--on-err); } .flag-d::before { background: #B42318; }
+    .flag-box {
+      height: 22px; padding: 0 8px;
+      border: 1px solid currentColor; background: var(--subtle);
+    }
+    .flag-box::before { display: none; }
+    .flag-box.flag-u { background: var(--info); border-color: #B7CCE8; }
+    .flag-box.flag-a { background: var(--ok); border-color: #B7E5CF; }
+    .flag-box.flag-m { background: var(--warn); border-color: #F0D4A8; }
+    .flag-box.flag-d { background: var(--err); border-color: #E8B4AF; }
+
+    .trk {
+      display: inline-flex; align-items: center; gap: 6px;
+      height: 22px; padding: 0 8px; font-size: 11.5px; font-weight: 600;
+      border-radius: var(--r);
+    }
+    .trk::before { content: ""; width: 6px; height: 6px; background: currentColor; }
+    .trk-p { background: var(--tb); color: var(--on-tb); }
+    .trk-o { background: var(--tg); color: var(--on-tg); }
+    .trk-d { background: var(--tp); color: var(--on-tp); }
+    .trk-c { background: var(--ta); color: var(--on-ta); }
+
+    .av {
+      width: 28px; height: 28px; display: inline-grid; place-items: center;
+      font-size: 10px; font-weight: 700;
+      background: var(--muted-bg); color: var(--variant);
+      border: 1px solid var(--outline); border-radius: var(--r); flex-shrink: 0;
+    }
+
+    .field {
+      display: flex; align-items: center; gap: 8px;
+      height: 34px; padding: 0 10px;
+      background: var(--bg); border: 1px solid var(--outline); border-radius: var(--r);
+      transition: border-color var(--d) var(--ease), box-shadow var(--d) var(--ease);
+    }
+    .field:hover { border-color: var(--outline-strong); }
+    .field:focus-within { border-color: var(--secondary); box-shadow: 0 0 0 3px rgba(47,93,152,.14); }
+    .field svg { width: 15px; height: 15px; stroke: var(--muted); fill: none; stroke-width: 1.75; flex-shrink: 0; }
+    .field:focus-within svg { stroke: var(--secondary); }
+    .field input { flex: 1; min-width: 0; border: 0; background: transparent; height: 100%; font-size: 13px; }
+    .field input::placeholder { color: var(--muted); }
+
+    .seg { display: inline-flex; border: 1px solid var(--outline-strong); background: var(--bg); }
+    .seg button {
+      height: 30px; padding: 0 11px; font-size: 12px; font-weight: 600;
+      color: var(--variant); border-right: 1px solid var(--outline);
+      transition: background var(--d) var(--ease), color var(--d) var(--ease);
+    }
+    .seg button:last-child { border-right: 0; }
+    .seg button:hover { background: var(--subtle); color: var(--on); }
+    .seg button[aria-pressed="true"] { background: var(--primary); color: #fff; }
+    .seg button .n { margin-left: 5px; opacity: .65; font-weight: 500; }
+
+    .ico {
+      width: 18px; height: 18px; stroke: currentColor; fill: none;
+      stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0;
+    }
+    .mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11px; font-weight: 500; color: var(--muted); letter-spacing: .02em; }
+
+    /* table */
+    .tw { overflow: auto; flex: 1; min-height: 0; }
+    table.g { width: 100%; border-collapse: collapse; }
+    table.g th {
+      text-align: left; height: 34px; padding: 0 12px;
+      background: var(--subtle); color: var(--variant);
+      font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+      border-bottom: 1px solid var(--outline); position: sticky; top: 0; z-index: 1; white-space: nowrap;
+    }
+    table.g td {
+      height: 50px; padding: 8px 12px; border-bottom: 1px solid var(--outline);
+      vertical-align: middle; transition: background var(--d) var(--ease);
+    }
+    table.g tbody tr { cursor: pointer; }
+    table.g tbody tr:hover td { background: rgba(234,242,251,.55); }
+    table.g tbody tr.sel td { background: var(--selection); }
+    table.g tbody tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--secondary); }
+    .talk { font-weight: 600; font-size: 13.5px; letter-spacing: -.01em; }
+    .sub { font-size: 12px; color: var(--variant); margin-top: 2px; }
+    .mu { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12.5px; }
+
+    /* inspector */
+    .insp {
+      border-left: 1px solid var(--outline);
+      background: var(--bg);
+      display: flex; flex-direction: column;
+      min-height: 0; overflow: auto;
+    }
+    .insp-h {
+      padding: 14px 16px 12px;
+      border-bottom: 1px solid var(--outline);
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .insp-h .k { font-family: "JetBrains Mono", monospace; font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    .insp-h h3 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -.02em; line-height: 1.3; }
+    .insp-h .who { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--variant); }
+    .insp-b { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
+    .panel {
+      border: 1px solid var(--outline); padding: 11px 12px; background: var(--subtle);
+      transition: border-color var(--d) var(--ease);
+    }
+    .panel:hover { border-color: var(--outline-strong); }
+    .panel h4 { margin: 0 0 5px; font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    .panel p { margin: 0; font-size: 13px; line-height: 1.5; }
+    .panel textarea {
+      width: 100%; min-height: 56px; resize: vertical; border: 1px solid var(--outline);
+      background: #fff; padding: 8px; font-size: 13px; border-radius: var(--r);
+    }
+    .panel textarea:focus { border-color: var(--secondary); box-shadow: 0 0 0 3px rgba(47,93,152,.12); outline: 0; }
+    .insp-f {
+      margin-top: auto; padding: 12px 16px;
+      border-top: 1px solid var(--outline);
+      display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px;
+      background: var(--bg);
+    }
+
+    .work { min-height: 0; display: flex; flex-direction: column; background: var(--bg); position: relative; }
+    .tools {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      padding: 10px 16px; border-bottom: 1px solid var(--outline); background: var(--bg);
+    }
+    .split { display: grid; min-height: 0; flex: 1; }
+    .split-md { grid-template-columns: 1fr minmax(280px, 320px); }
+    .split-md-wide { grid-template-columns: 1fr minmax(300px, 360px); }
+    .split-md-slim { grid-template-columns: 1fr minmax(260px, 300px); }
+
+    .ct {
+      margin-left: auto; font-size: 11px; font-weight: 600;
+      min-width: 20px; height: 18px; padding: 0 5px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.08);
+    }
+
+    /* toast */
+    .toast {
+      position: fixed; bottom: 18px; right: 18px; z-index: 2000;
+      background: var(--primary); color: #fff; padding: 11px 14px;
+      font-size: 13px; font-weight: 600; border-left: 3px solid var(--tertiary);
+      box-shadow: var(--sh3); transform: translateY(10px); opacity: 0;
+      transition: transform var(--d2) var(--out), opacity var(--d2) var(--ease);
+      pointer-events: none; max-width: 300px;
+    }
+    .toast.show { transform: none; opacity: 1; }
+
+    /* ========== SHELL VARIANTS ========== */
+
+    /* A: Classic deep indigo sidebar */
+    .shell-a { grid-template-columns: 248px 1fr; }
+    .shell-a .sb {
+      background: var(--primary); color: #fff;
+      display: flex; flex-direction: column; padding: 14px 10px; min-height: 0;
+    }
+    .shell-a .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 18px; }
+    .shell-a .brand img { width: 32px; height: 32px; }
+    .shell-a .brand .nm { font-size: 15px; font-weight: 600; letter-spacing: -.02em; }
+    .shell-a .brand .ds { font-size: 11px; opacity: .55; }
+    .shell-a .nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+    .shell-a .nav a {
+      display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 12px;
+      font-size: 13.5px; font-weight: 600; color: rgba(255,255,255,.72);
+      border-left: 2px solid transparent;
+      transition: background var(--d) var(--ease), color var(--d) var(--ease), border-color var(--d) var(--ease);
+    }
+    .shell-a .nav a:hover { background: var(--primary-hover); color: #fff; }
+    .shell-a .nav a.on { background: var(--nav-active); color: #fff; border-left-color: var(--tertiary); }
+    .shell-a .foot {
+      margin-top: auto; padding: 12px; text-align: left;
+      border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.04);
+      transition: background var(--d) var(--ease);
+    }
+    .shell-a .foot:hover { background: rgba(255,255,255,.08); }
+    .shell-a .foot .l { font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; opacity: .5; }
+    .shell-a .foot .e { font-size: 13px; font-weight: 600; margin-top: 4px; line-height: 1.3; }
+    .shell-a .main { display: grid; grid-template-rows: 56px 1fr; min-width: 0; min-height: 0; }
+    .shell-a .top {
+      display: flex; align-items: center; gap: 14px; padding: 0 18px;
+      border-bottom: 1px solid var(--outline); background: #fff;
+    }
+    .shell-a .top h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.02em; }
+    .shell-a .top .meta { font-size: 12.5px; color: var(--variant); }
+    .shell-a .top .sp { flex: 1; }
+
+    /* B: Icon rail + content topbar with brand */
+    .shell-b { grid-template-columns: 72px 1fr; }
+    .shell-b .sb {
+      background: var(--primary); color: #fff;
+      display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 4px;
+    }
+    .shell-b .brand { padding: 4px 0 14px; }
+    .shell-b .brand img { width: 36px; height: 36px; transition: transform var(--d2) var(--out); }
+    .shell-b .brand:hover img { transform: rotate(-10deg); }
+    .shell-b .nav { display: flex; flex-direction: column; gap: 4px; flex: 1; width: 100%; align-items: center; }
+    .shell-b .nav a {
+      width: 44px; height: 44px; display: grid; place-items: center;
+      color: rgba(255,255,255,.65);
+      border-bottom: 2px solid transparent;
+      transition: background var(--d) var(--ease), color var(--d) var(--ease), border-color var(--d) var(--ease);
+    }
+    .shell-b .nav a:hover { background: var(--primary-hover); color: #fff; }
+    .shell-b .nav a.on { background: var(--nav-active); color: #fff; border-bottom-color: var(--tertiary); }
+    .shell-b .nav a .lbl, .shell-b .nav a .ct { display: none; }
+    .shell-b .foot { display: none; }
+    .shell-b .main { display: grid; grid-template-rows: 56px 1fr; min-width: 0; min-height: 0; }
+    .shell-b .top {
+      display: flex; align-items: center; gap: 14px; padding: 0 18px;
+      border-bottom: 1px solid var(--outline); background: #fff;
+    }
+    .shell-b .top .word { font-size: 14px; font-weight: 600; letter-spacing: -.01em; padding-right: 14px; border-right: 1px solid var(--outline); }
+    .shell-b .top h1 { margin: 0; font-size: 18px; font-weight: 600; }
+    .shell-b .top .meta { font-size: 12.5px; color: var(--variant); }
+    .shell-b .top .sp { flex: 1; }
+
+    /* C: Light structural sidebar */
+    .shell-c { grid-template-columns: 240px 1fr; background: var(--subtle); }
+    .shell-c .sb {
+      background: #fff; color: var(--on);
+      border-right: 1px solid var(--outline);
+      display: flex; flex-direction: column; padding: 14px 12px; min-height: 0;
+    }
+    .shell-c .brand { display: flex; align-items: center; gap: 10px; padding: 4px 6px 16px; }
+    .shell-c .brand img { width: 30px; height: 30px; }
+    .shell-c .brand .nm { font-size: 15px; font-weight: 600; }
+    .shell-c .brand .ds { font-size: 11px; color: var(--muted); }
+    .shell-c .nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+    .shell-c .nav a {
+      display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px;
+      font-size: 13.5px; font-weight: 600; color: var(--variant);
+      border-left: 2px solid transparent;
+      transition: background var(--d) var(--ease), color var(--d) var(--ease), border-color var(--d) var(--ease);
+    }
+    .shell-c .nav a:hover { background: var(--subtle); color: var(--on); }
+    .shell-c .nav a.on { background: var(--selection); color: var(--nav-active); border-left-color: var(--secondary); }
+    .shell-c .nav a .ct { border-color: var(--outline); background: var(--subtle); color: var(--variant); }
+    .shell-c .nav a.on .ct { background: #fff; border-color: #B7CCE8; color: var(--secondary); }
+    .shell-c .foot {
+      margin-top: auto; padding: 12px; text-align: left;
+      border: 1px solid var(--outline); background: var(--subtle);
+    }
+    .shell-c .foot .l { font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+    .shell-c .foot .e { font-size: 13px; font-weight: 600; margin-top: 4px; }
+    .shell-c .main { display: grid; grid-template-rows: 56px 1fr; min-width: 0; min-height: 0; background: #fff; }
+    .shell-c .top {
+      display: flex; align-items: center; gap: 14px; padding: 0 18px;
+      border-bottom: 1px solid var(--outline);
+    }
+    .shell-c .top h1 { margin: 0; font-size: 18px; font-weight: 600; }
+    .shell-c .top .meta { font-size: 12.5px; color: var(--variant); }
+    .shell-c .top .sp { flex: 1; }
+
+    /* D: Dual keel — icon rail + label column */
+    .shell-d { grid-template-columns: 72px 188px 1fr; }
+    .shell-d .sb-ico {
+      background: var(--primary); color: #fff;
+      display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 4px;
+    }
+    .shell-d .sb-ico .brand img { width: 34px; height: 34px; margin-bottom: 12px; }
+    .shell-d .sb-ico a {
+      width: 44px; height: 44px; display: grid; place-items: center; color: rgba(255,255,255,.65);
+      transition: background var(--d) var(--ease), color var(--d) var(--ease);
+    }
+    .shell-d .sb-ico a:hover, .shell-d .sb-ico a.on { background: var(--nav-active); color: #fff; }
+    .shell-d .sb-lab {
+      background: var(--subtle); border-right: 1px solid var(--outline);
+      display: flex; flex-direction: column; padding: 14px 10px; min-height: 0;
+    }
+    .shell-d .sb-lab .sec { font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); padding: 8px 8px 6px; }
+    .shell-d .sb-lab a {
+      display: flex; align-items: center; justify-content: space-between;
+      height: 36px; padding: 0 8px; font-size: 13px; font-weight: 600; color: var(--variant);
+      border-left: 2px solid transparent;
+      transition: background var(--d) var(--ease), color var(--d) var(--ease), border-color var(--d) var(--ease);
+    }
+    .shell-d .sb-lab a:hover { background: rgba(8,29,58,.04); color: var(--on); }
+    .shell-d .sb-lab a.on { background: #fff; color: var(--nav-active); border-left-color: var(--secondary); box-shadow: var(--sh1); }
+    .shell-d .sb-lab a .ct { border-color: var(--outline); background: #fff; color: var(--variant); }
+    .shell-d .main { display: grid; grid-template-rows: 52px 1fr; min-width: 0; min-height: 0; }
+    .shell-d .top {
+      display: flex; align-items: center; gap: 12px; padding: 0 16px;
+      border-bottom: 1px solid var(--outline); background: #fff;
+    }
+    .shell-d .top h1 { margin: 0; font-size: 17px; font-weight: 600; }
+    .shell-d .top .meta { font-size: 12px; color: var(--variant); }
+    .shell-d .top .sp { flex: 1; }
+
+    /* E: Waterline — top navigation, no left sidebar */
+    .shell-e { grid-template-rows: auto 1fr; grid-template-columns: 1fr; }
+    .shell-e .mast {
+      background: var(--primary); color: #fff;
+      display: flex; align-items: center; gap: 8px; padding: 0 16px; height: 52px;
+    }
+    .shell-e .mast .brand { display: flex; align-items: center; gap: 10px; margin-right: 12px; }
+    .shell-e .mast .brand img { width: 28px; height: 28px; }
+    .shell-e .mast .brand .nm { font-size: 14px; font-weight: 600; }
+    .shell-e .mast nav { display: flex; align-items: stretch; height: 100%; gap: 0; flex: 1; }
+    .shell-e .mast nav a {
+      display: flex; align-items: center; gap: 6px; padding: 0 14px;
+      font-size: 13px; font-weight: 600; color: rgba(255,255,255,.7);
+      border-bottom: 2px solid transparent;
+      transition: color var(--d) var(--ease), border-color var(--d) var(--ease), background var(--d) var(--ease);
+    }
+    .shell-e .mast nav a:hover { color: #fff; background: rgba(255,255,255,.05); }
+    .shell-e .mast nav a.on { color: #fff; border-bottom-color: var(--tertiary); }
+    .shell-e .mast .ct { border-color: rgba(255,255,255,.15); }
+    .shell-e .mast .util { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+    .shell-e .subtop {
+      display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+      border-bottom: 1px solid var(--outline); background: #fff;
+    }
+    .shell-e .subtop h1 { margin: 0; font-size: 18px; font-weight: 600; }
+    .shell-e .subtop .meta { font-size: 12.5px; color: var(--variant); }
+    .shell-e .subtop .sp { flex: 1; }
+    .shell-e .main { display: flex; flex-direction: column; min-height: 0; }
+
+    /* F: Dark header bar + light left nav */
+    .shell-f { grid-template-rows: 52px 1fr; grid-template-columns: 1fr; }
+    .shell-f .mast {
+      background: var(--primary); color: #fff;
+      display: flex; align-items: center; gap: 16px; padding: 0 16px;
+    }
+    .shell-f .mast .brand { display: flex; align-items: center; gap: 10px; }
+    .shell-f .mast .brand img { width: 28px; height: 28px; }
+    .shell-f .mast .brand .nm { font-size: 14px; font-weight: 600; }
+    .shell-f .mast .ev-sel {
+      display: flex; align-items: center; gap: 8px;
+      height: 34px; padding: 0 10px;
+      border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.06);
+      font-size: 13px; font-weight: 600; color: #fff;
+      transition: background var(--d) var(--ease);
+    }
+    .shell-f .mast .ev-sel:hover { background: rgba(255,255,255,.1); }
+    .shell-f .mast .sp { flex: 1; }
+    .shell-f .mast .field {
+      width: 260px; background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.14);
+    }
+    .shell-f .mast .field input { color: #fff; }
+    .shell-f .mast .field input::placeholder { color: rgba(255,255,255,.45); }
+    .shell-f .mast .field svg { stroke: rgba(255,255,255,.5); }
+    .shell-f .mast .field:focus-within { border-color: rgba(255,255,255,.4); box-shadow: 0 0 0 3px rgba(255,255,255,.08); }
+    .shell-f .body { display: grid; grid-template-columns: 200px 1fr; min-height: 0; }
+    .shell-f .sb {
+      background: var(--subtle); border-right: 1px solid var(--outline);
+      padding: 12px 8px; display: flex; flex-direction: column; gap: 2px;
+    }
+    .shell-f .sb .sec { font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); padding: 10px 10px 6px; }
+    .shell-f .sb a {
+      display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px;
+      font-size: 13px; font-weight: 600; color: var(--variant);
+      transition: background var(--d) var(--ease), color var(--d) var(--ease);
+    }
+    .shell-f .sb a:hover { background: rgba(8,29,58,.04); color: var(--on); }
+    .shell-f .sb a.on { background: #fff; color: var(--nav-active); box-shadow: inset 2px 0 0 var(--secondary); }
+    .shell-f .sb a .ct { border-color: var(--outline); background: #fff; color: var(--variant); }
+    .shell-f .main { display: grid; grid-template-rows: 48px 1fr; min-width: 0; min-height: 0; background: #fff; }
+    .shell-f .top {
+      display: flex; align-items: center; gap: 12px; padding: 0 16px;
+      border-bottom: 1px solid var(--outline);
+    }
+    .shell-f .top h1 { margin: 0; font-size: 17px; font-weight: 600; }
+    .shell-f .top .meta { font-size: 12px; color: var(--variant); }
+    .shell-f .top .sp { flex: 1; }
+
+    /* G: Event-forward sidebar (cover strip) */
+    .shell-g { grid-template-columns: 260px 1fr; }
+    .shell-g .sb {
+      background: var(--primary); color: #fff;
+      display: flex; flex-direction: column; min-height: 0;
+    }
+    .shell-g .ev-cover {
+      padding: 16px 14px 14px;
+      border-bottom: 1px solid rgba(255,255,255,.1);
+      background: linear-gradient(160deg, var(--primary-hover), var(--primary));
+    }
+    .shell-g .ev-cover .brand { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; opacity: .85; }
+    .shell-g .ev-cover .brand img { width: 22px; height: 22px; }
+    .shell-g .ev-cover .brand span { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+    .shell-g .ev-cover .en { font-size: 16px; font-weight: 600; letter-spacing: -.015em; line-height: 1.25; }
+    .shell-g .ev-cover .ed { font-size: 12px; opacity: .6; margin-top: 4px; }
+    .shell-g .ev-cover button {
+      margin-top: 12px; height: 30px; padding: 0 10px; width: 100%;
+      border: 1px solid rgba(255,255,255,.18); color: #fff; font-size: 12px; font-weight: 600;
+      text-align: left; transition: background var(--d) var(--ease);
+    }
+    .shell-g .ev-cover button:hover { background: rgba(255,255,255,.08); }
+    .shell-g .nav { display: flex; flex-direction: column; gap: 2px; padding: 10px; flex: 1; }
+    .shell-g .nav a {
+      display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px;
+      font-size: 13.5px; font-weight: 600; color: rgba(255,255,255,.72);
+      transition: background var(--d) var(--ease), color var(--d) var(--ease);
+    }
+    .shell-g .nav a:hover { background: rgba(255,255,255,.06); color: #fff; }
+    .shell-g .nav a.on { background: var(--nav-active); color: #fff; }
+    .shell-g .sb-user {
+      padding: 12px 14px; border-top: 1px solid rgba(255,255,255,.1);
+      display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600;
+    }
+    .shell-g .sb-user .av { background: rgba(255,255,255,.12); color: #fff; border-color: rgba(255,255,255,.2); }
+    .shell-g .main { display: grid; grid-template-rows: 56px 1fr; min-width: 0; min-height: 0; }
+    .shell-g .top {
+      display: flex; align-items: center; gap: 14px; padding: 0 18px;
+      border-bottom: 1px solid var(--outline); background: #fff;
+    }
+    .shell-g .top h1 { margin: 0; font-size: 18px; font-weight: 600; }
+    .shell-g .top .meta { font-size: 12.5px; color: var(--variant); }
+    .shell-g .top .sp { flex: 1; }
+
+    /* H: Dense ops sidebar with groups + descriptions */
+    .shell-h { grid-template-columns: 280px 1fr; }
+    .shell-h .sb {
+      background: var(--primary); color: #fff;
+      display: flex; flex-direction: column; padding: 12px 0; min-height: 0; overflow: auto;
+    }
+    .shell-h .brand { display: flex; align-items: center; gap: 10px; padding: 6px 16px 14px; }
+    .shell-h .brand img { width: 32px; height: 32px; }
+    .shell-h .brand .nm { font-size: 15px; font-weight: 600; }
+    .shell-h .brand .ds { font-size: 11px; opacity: .55; }
+    .shell-h .grp-l {
+      font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase;
+      color: rgba(255,255,255,.4); padding: 14px 16px 6px;
+    }
+    .shell-h .nav a {
+      display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+      padding: 10px 16px; color: rgba(255,255,255,.72);
+      border-left: 2px solid transparent;
+      transition: background var(--d) var(--ease), color var(--d) var(--ease), border-color var(--d) var(--ease);
+    }
+    .shell-h .nav a:hover { background: var(--primary-hover); color: #fff; }
+    .shell-h .nav a.on { background: var(--nav-active); color: #fff; border-left-color: var(--tertiary); }
+    .shell-h .nav a .row { display: flex; align-items: center; gap: 10px; width: 100%; font-size: 13.5px; font-weight: 600; }
+    .shell-h .nav a .desc { font-size: 11.5px; font-weight: 400; opacity: .55; padding-left: 28px; }
+    .shell-h .main { display: grid; grid-template-rows: 56px 1fr; min-width: 0; min-height: 0; }
+    .shell-h .top {
+      display: flex; align-items: center; gap: 14px; padding: 0 18px;
+      border-bottom: 1px solid var(--outline); background: #fff;
+    }
+    .shell-h .top h1 { margin: 0; font-size: 18px; font-weight: 600; }
+    .shell-h .top .meta { font-size: 12.5px; color: var(--variant); }
+    .shell-h .top .sp { flex: 1; }
+
+    /* I: Top utility + slim sidebar, breadcrumbs */
+    .shell-i { grid-template-rows: 40px 1fr; grid-template-columns: 1fr; }
+    .shell-i .util {
+      background: var(--subtle); border-bottom: 1px solid var(--outline);
+      display: flex; align-items: center; gap: 12px; padding: 0 14px;
+      font-size: 12px; color: var(--variant);
+    }
+    .shell-i .util .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--on); }
+    .shell-i .util .brand img { width: 20px; height: 20px; }
+    .shell-i .util .sp { flex: 1; }
+    .shell-i .util button { font-size: 12px; font-weight: 600; color: var(--secondary); padding: 4px 6px; }
+    .shell-i .util button:hover { background: var(--selection); }
+    .shell-i .body { display: grid; grid-template-columns: 220px 1fr; min-height: 0; }
+    .shell-i .sb {
+      background: var(--primary); color: #fff;
+      display: flex; flex-direction: column; padding: 10px 8px; min-height: 0;
+    }
+    .shell-i .sb .nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+    .shell-i .sb .nav a {
+      display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px;
+      font-size: 13px; font-weight: 600; color: rgba(255,255,255,.72);
+      transition: background var(--d) var(--ease), color var(--d) var(--ease);
+    }
+    .shell-i .sb .nav a:hover { background: var(--primary-hover); color: #fff; }
+    .shell-i .sb .nav a.on { background: var(--nav-active); color: #fff; }
+    .shell-i .sb .foot {
+      margin-top: auto; padding: 10px; border: 1px solid rgba(255,255,255,.1);
+      font-size: 12px; font-weight: 600; text-align: left; color: #fff;
+    }
+    .shell-i .sb .foot:hover { background: rgba(255,255,255,.06); }
+    .shell-i .main { display: grid; grid-template-rows: 56px 1fr; min-width: 0; min-height: 0; background: #fff; }
+    .shell-i .top {
+      display: flex; align-items: center; gap: 10px; padding: 0 16px;
+      border-bottom: 1px solid var(--outline);
+    }
+    .shell-i .crumbs { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--variant); }
+    .shell-i .crumbs b { color: var(--on); font-weight: 600; }
+    .shell-i .crumbs button { color: var(--secondary); font-weight: 600; }
+    .shell-i .crumbs button:hover { text-decoration: underline; }
+    .shell-i .top h1 { display: none; }
+    .shell-i .top .sp { flex: 1; }
+
+    /* J: Inset chart desk — page gutter, floating shell */
+    .shell-j {
+      grid-template-columns: 1fr;
+      background: var(--muted-bg);
+      padding: 12px;
+    }
+    .shell-j .desk {
+      height: 100%;
+      display: grid; grid-template-columns: 232px 1fr;
+      background: #fff; border: 1px solid var(--outline-strong);
+      box-shadow: var(--sh2); min-height: 0; overflow: hidden;
+    }
+    .shell-j .sb {
+      background: var(--primary); color: #fff;
+      display: flex; flex-direction: column; padding: 14px 10px; min-height: 0;
+    }
+    .shell-j .brand { display: flex; align-items: center; gap: 10px; padding: 2px 8px 16px; }
+    .shell-j .brand img { width: 30px; height: 30px; }
+    .shell-j .brand .nm { font-size: 14px; font-weight: 600; }
+    .shell-j .brand .ds { font-size: 11px; opacity: .55; }
+    .shell-j .nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+    .shell-j .nav a {
+      display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px;
+      font-size: 13px; font-weight: 600; color: rgba(255,255,255,.72);
+      transition: background var(--d) var(--ease), color var(--d) var(--ease);
+    }
+    .shell-j .nav a:hover { background: var(--primary-hover); color: #fff; }
+    .shell-j .nav a.on { background: var(--nav-active); color: #fff; }
+    .shell-j .foot {
+      margin-top: auto; padding: 10px; border: 1px solid rgba(255,255,255,.1);
+      font-size: 12.5px; font-weight: 600; text-align: left; color: #fff;
+    }
+    .shell-j .main { display: grid; grid-template-rows: 52px 1fr; min-width: 0; min-height: 0; }
+    .shell-j .top {
+      display: flex; align-items: center; gap: 12px; padding: 0 16px;
+      border-bottom: 1px solid var(--outline);
+    }
+    .shell-j .top h1 { margin: 0; font-size: 17px; font-weight: 600; }
+    .shell-j .top .meta { font-size: 12px; color: var(--variant); }
+    .shell-j .top .sp { flex: 1; }
+
+    /* page tabs under top (used in a few) */
+    .ptabs {
+      display: flex; gap: 0; padding: 0 16px;
+      border-bottom: 1px solid var(--outline); background: #fff;
+    }
+    .ptabs button {
+      height: 36px; padding: 0 14px; font-size: 13px; font-weight: 600; color: var(--variant);
+      border-bottom: 2px solid transparent; margin-bottom: -1px;
+      transition: color var(--d) var(--ease), border-color var(--d) var(--ease);
+    }
+    .ptabs button:hover { color: var(--on); }
+    .ptabs button[aria-selected="true"] { color: var(--on); border-bottom-color: var(--secondary); }
+  </style>
+</head>
+<body>
+  <header class="px">
+    <div class="px-i">
+      <h1>Full shell · 10</h1>
+      <nav>
+        <a href="#o1"><b>01</b>Harbor Master Desk</a>
+        <a href="#o2"><b>02</b>Compass Icon Mast</a>
+        <a href="#o3"><b>03</b>Daylight Bulkhead</a>
+        <a href="#o4"><b>04</b>Twin Keel Nav</a>
+        <a href="#o5"><b>05</b>Waterline Bridge</a>
+        <a href="#o6"><b>06</b>Pilot Bar Helm</a>
+        <a href="#o7"><b>07</b>Event Porthole</a>
+        <a href="#o8"><b>08</b>Ops Manifest Rail</a>
+        <a href="#o9"><b>09</b>Utility Gangway</a>
+        <a href="#o10"><b>10</b>Inset Chart Desk</a>
+      </nav>
+    </div>
+  </header>
+  <main class="stage" id="stage"></main>
+  <div class="toast" id="toast" role="status"></div>
+
+  <script>
+    const MD = "../assets/brand/chartstead-mark-on-dark.png";
+    const ML = "../assets/brand/chartstead-mark-on-light.png";
+    const SUBS = [
+      { id:"1042", title:"Rethinking Edge Caching for Multi-Region APIs", speaker:"Maya Chen", pr:"she/her", track:"Platform", tc:"trk-p", st:"u", sl:"Unreviewed", date:"Aug 2", fmt:"45 min", abs:"A practical playbook for cache invalidation across regions without stampedes — drawn from three years running the PODS API edge.", note:"Strong operator story. Check overlap with SUB-1108 before accepting both Platform slots.", av:"MC" },
+      { id:"0991", title:"Designing Accessible Data Tables at Scale", speaker:"Jordan Lee", pr:"they/them", track:"Design Systems", tc:"trk-d", st:"m", sl:"Maybe", date:"Jul 28", fmt:"45 min", abs:"How to keep dense operational tables readable, keyboardable, and calm when every column feels mandatory.", note:"Hold for second-round comparison against two other Design Systems talks.", av:"JL" },
+      { id:"0877", title:"From CFP Chaos to Scheduled Program", speaker:"Priya Nair", pr:"she/her", track:"Program Ops", tc:"trk-o", st:"a", sl:"Approve", date:"Jul 19", fmt:"30 min", abs:"A field guide for event teams turning hundreds of abstracts into a publishable agenda without losing the plot.", note:"Accepted — strong fit for opening Program Ops slot.", av:"PN" },
+      { id:"1108", title:"When Airtable Is Not Your Database", speaker:"Sam Okonkwo", pr:"he/him", track:"Platform", tc:"trk-p", st:"u", sl:"Unreviewed", date:"Aug 4", fmt:"30 min", abs:"Sync patterns, rate limits, and source-of-truth boundaries for conference tools that must still work offline of Airtable.", note:"Pairs or collides with SUB-1042 on Platform capacity.", av:"SO" },
+      { id:"0744", title:"Speaker Onboarding That Doesn't Chase Anyone", speaker:"Elena Rossi", pr:"she/her", track:"Community", tc:"trk-c", st:"d", sl:"Deny", date:"Jul 12", fmt:"30 min", abs:"Task design, reminders, and portal UX that get bios and headshots in without the weekly email guilt trip.", note:"Too similar to internal ops talk already accepted.", av:"ER" },
+      { id:"1120", title:"Conflict-Free Agenda Building", speaker:"Alex Kim", pr:"he/him", track:"Program Ops", tc:"trk-o", st:"u", sl:"Unreviewed", date:"Aug 6", fmt:"45 min", abs:"Room, speaker, and track collision detection that organizers can trust at 11pm the night before publish.", note:"Practical demo requested if approved.", av:"AK" },
+    ];
+
+    const ic = {
+      grid: `<svg class="ico" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>`,
+      file: `<svg class="ico" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`,
+      users: `<svg class="ico" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+      cal: `<svg class="ico" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="1"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`,
+      mail: `<svg class="ico" viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="m22 6-10 7L2 6"/></svg>`,
+      gear: `<svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>`,
+      search: `<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>`,
+      check: `<svg class="ico" viewBox="0 0 24 24" style="width:14px;height:14px"><path d="M20 6 9 17l-5-5"/></svg>`,
+    };
+
+    const flag = (st, sl, box=false) =>
+      `<span class="flag ${box?"flag-box":""} flag-${st}">${sl}</span>`;
+
+    const rows = (sel=0) => SUBS.map((s,i) => `
+      <tr class="${i===sel?"sel":""}" data-id="${s.id}" tabindex="0">
+        <td><span class="av">${s.av}</span></td>
+        <td><div class="talk">${s.title}</div><div class="sub">${s.speaker} · ${s.pr}</div></td>
+        <td><span class="trk ${s.tc}">${s.track}</span></td>
+        <td>${flag(s.st, s.sl)}</td>
+        <td class="mu">${s.date}</td>
+      </tr>`).join("");
+
+    const insp = (s=SUBS[0]) => `
+      <aside class="insp" data-insp>
+        <div class="insp-h">
+          <div class="k">SUB-${s.id}</div>
+          <h3 data-t>${s.title}</h3>
+          <div class="who"><span class="av" data-av>${s.av}</span><span data-who>${s.speaker} · ${s.track} · ${s.fmt}</span></div>
+          <div data-fl>${flag(s.st, s.sl, true)}</div>
+        </div>
+        <div class="insp-b">
+          <div class="panel"><h4>Abstract</h4><p data-abs>${s.abs}</p></div>
+          <div class="panel"><h4>Note</h4><p data-note>${s.note}</p></div>
+          <div class="panel"><h4>Private note</h4><textarea data-ta placeholder="Add a committee note…"></textarea></div>
+        </div>
+        <div class="insp-f">
+          <button type="button" class="btn btn-ok btn-sm" data-dec="approve">Approve</button>
+          <button type="button" class="btn btn-mb btn-sm" data-dec="maybe">Maybe</button>
+          <button type="button" class="btn btn-no btn-sm" data-dec="deny">Deny</button>
+        </div>
+      </aside>`;
+
+    const tools = (extra="") => `
+      <div class="tools">
+        <label class="field" style="flex:1;max-width:300px">${ic.search}<input type="search" placeholder="Search title, speaker, or ID…" data-q /></label>
+        <div class="seg" data-seg>
+          <button type="button" aria-pressed="true">Unreviewed<span class="n">18</span></button>
+          <button type="button" aria-pressed="false">Approve<span class="n">12</span></button>
+          <button type="button" aria-pressed="false">Maybe<span class="n">9</span></button>
+          <button type="button" aria-pressed="false">Deny<span class="n">8</span></button>
+        </div>
+        ${extra}
+      </div>`;
+
+    const table = () => `
+      <div class="tw"><table class="g">
+        <thead><tr><th></th><th>Talk</th><th>Track</th><th>Status</th><th>Submitted</th></tr></thead>
+        <tbody data-rows>${rows()}</tbody>
+      </table></div>`;
+
+    const workMD = (split="split-md") => `
+      <div class="work">
+        ${tools(`<button type="button" class="btn btn-sm" data-act="track">Track ▾</button>`)}
+        <div class="split ${split}">${table()}${insp()}</div>
+      </div>`;
+
+    const navItems = (mode="full") => {
+      const items = [
+        ["overview","Overview", ic.grid],
+        ["subs","Submissions", ic.file, "47"],
+        ["speakers","Speakers", ic.users],
+        ["agenda","Agenda", ic.cal],
+        ["messages","Messages", ic.mail],
+        ["settings","Settings", ic.gear],
+      ];
+      return items.map(([id,label,icon,ct],i) => {
+        const on = id==="subs" ? "on" : "";
+        if (mode==="icon") return `<a href="#" class="${on}" data-nav title="${label}">${icon}</a>`;
+        if (mode==="desc") {
+          const descs = {
+            overview:"Event health",
+            subs:"Review & decide",
+            speakers:"Roster & tasks",
+            agenda:"Rooms & conflicts",
+            messages:"Outbox & mail",
+            settings:"Event config",
+          };
+          return `<a href="#" class="${on}" data-nav><span class="row">${icon}<span>${label}</span>${ct?`<span class="ct">${ct}</span>`:""}</span><span class="desc">${descs[id]}</span></a>`;
+        }
+        return `<a href="#" class="${on}" data-nav>${icon}<span>${label}</span>${ct?`<span class="ct">${ct}</span>`:""}</a>`;
+      }).join("");
+    };
+
+    const DIRS = [
+      {
+        id:"o1", name:"Harbor Master Desk",
+        blurb:"Full indigo sidebar + wordmark + event foot. Master-detail list with slim inspector. Baseline ChartStead ops shell.",
+        html: () => `<div class="app shell-a">
+          <aside class="sb">
+            <div class="brand"><img src="${MD}" width="32" height="32" alt="ChartStead" /><div><div class="nm">ChartStead</div><div class="ds">Conference programming</div></div></div>
+            <nav class="nav">${navItems()}</nav>
+            <button type="button" class="foot" data-act="event"><div class="l">Event</div><div class="e">Pacific Open Data Summit 2026</div></button>
+          </aside>
+          <div class="main">
+            <header class="top">
+              <div><h1>Submissions</h1><div class="meta">47 total · 18 unreviewed</div></div>
+              <div class="sp"></div>
+              <button type="button" class="btn btn-g btn-sm" data-act="export">Export</button>
+              <button type="button" class="btn btn-p btn-sm" data-act="cfp">Open CFP form</button>
+            </header>
+            ${workMD("split-md")}
+          </div>
+        </div>`
+      },
+      {
+        id:"o2", name:"Compass Icon Mast",
+        blurb:"Collapsed compass rail. Brand returns in the top bar. Same master-detail work surface — shell carries identity.",
+        html: () => `<div class="app shell-b">
+          <aside class="sb">
+            <button type="button" class="brand" data-act="home" aria-label="ChartStead home"><img src="${MD}" width="36" height="36" alt="ChartStead" /></button>
+            <nav class="nav">${navItems("icon")}</nav>
+          </aside>
+          <div class="main">
+            <header class="top">
+              <div class="word">ChartStead</div>
+              <div><h1>Submissions</h1><div class="meta">Pacific Open Data Summit 2026</div></div>
+              <div class="sp"></div>
+              <button type="button" class="btn btn-sm" data-act="event">Switch event ▾</button>
+              <button type="button" class="btn btn-p btn-sm" data-act="cfp">Open CFP form</button>
+            </header>
+            ${workMD("split-md")}
+          </div>
+        </div>`
+      },
+      {
+        id:"o3", name:"Daylight Bulkhead",
+        blurb:"Light structural sidebar on pale gray page. Same nav jobs, quieter presence — still indigo marks for active state.",
+        html: () => `<div class="app shell-c">
+          <aside class="sb">
+            <div class="brand"><img src="${ML}" width="30" height="30" alt="ChartStead" /><div><div class="nm">ChartStead</div><div class="ds">Conference programming</div></div></div>
+            <nav class="nav">${navItems()}</nav>
+            <button type="button" class="foot" data-act="event"><div class="l">Event</div><div class="e">Pacific Open Data Summit 2026</div></button>
+          </aside>
+          <div class="main">
+            <header class="top">
+              <div><h1>Submissions</h1><div class="meta">47 total · 18 unreviewed</div></div>
+              <div class="sp"></div>
+              <button type="button" class="btn btn-sm" data-act="export">Export</button>
+              <button type="button" class="btn btn-p btn-sm" data-act="cfp">Open CFP form</button>
+            </header>
+            ${workMD("split-md")}
+          </div>
+        </div>`
+      },
+      {
+        id:"o4", name:"Twin Keel Nav",
+        blurb:"Dual keel: dark icon keel + light label keel. Section titles live in the second column; work area stays wide.",
+        html: () => `<div class="app shell-d">
+          <aside class="sb-ico">
+            <div class="brand"><img src="${MD}" width="34" height="34" alt="ChartStead" /></div>
+            <a href="#" class="on" data-nav title="Submissions">${ic.file}</a>
+            <a href="#" data-nav title="Overview">${ic.grid}</a>
+            <a href="#" data-nav title="Speakers">${ic.users}</a>
+            <a href="#" data-nav title="Agenda">${ic.cal}</a>
+            <a href="#" data-nav title="Messages">${ic.mail}</a>
+            <a href="#" data-nav title="Settings">${ic.gear}</a>
+          </aside>
+          <aside class="sb-lab">
+            <div class="sec">Program</div>
+            <a href="#" class="on" data-nav>Submissions <span class="ct">47</span></a>
+            <a href="#" data-nav>Review queue</a>
+            <a href="#" data-nav>Forms</a>
+            <div class="sec">People</div>
+            <a href="#" data-nav>Speakers</a>
+            <a href="#" data-nav>Reviewers</a>
+            <div class="sec">Schedule</div>
+            <a href="#" data-nav>Agenda</a>
+            <a href="#" data-nav>Rooms</a>
+          </aside>
+          <div class="main">
+            <header class="top">
+              <div><h1>Submissions</h1><div class="meta">Program · decide talks</div></div>
+              <div class="sp"></div>
+              <button type="button" class="btn btn-p btn-sm" data-act="cfp">Open CFP form</button>
+            </header>
+            ${workMD("split-md-slim")}
+          </div>
+        </div>`
+      },
+      {
+        id:"o5", name:"Waterline Bridge",
+        blurb:"No left sidebar. Primary nav rides the indigo waterline mast; page title sits in a thin subtop. Full width for the grid.",
+        html: () => `<div class="app shell-e">
+          <header class="mast">
+            <div class="brand"><img src="${MD}" width="28" height="28" alt="" /><span class="nm">ChartStead</span></div>
+            <nav>
+              <a href="#" data-nav>Overview</a>
+              <a href="#" class="on" data-nav>Submissions <span class="ct">47</span></a>
+              <a href="#" data-nav>Speakers</a>
+              <a href="#" data-nav>Agenda</a>
+              <a href="#" data-nav>Messages</a>
+              <a href="#" data-nav>Settings</a>
+            </nav>
+            <div class="util">
+              <button type="button" class="btn btn-sm" style="--bgc:rgba(255,255,255,.08);--fg:#fff;--bd:rgba(255,255,255,.18);--bgh:rgba(255,255,255,.14);--bdh:rgba(255,255,255,.3)" data-act="event">PODS 2026 ▾</button>
+            </div>
+          </header>
+          <div class="main">
+            <div class="subtop">
+              <div><h1>Submissions</h1><div class="meta">18 unreviewed · track routing on</div></div>
+              <div class="sp"></div>
+              <button type="button" class="btn btn-sm" data-act="export">Export</button>
+              <button type="button" class="btn btn-p btn-sm" data-act="cfp">Open CFP form</button>
+            </div>
+            ${workMD("split-md-wide")}
+          </div>
+        </div>`
+      },
+      {
+        id:"o6", name:"Command Bar Helm",
+        blurb:"Dark command mast with global search + event switcher. Secondary nav is a quiet light column under the helm.",
+        html: () => `<div class="app shell-f">
+          <header class="mast">
+            <div class="brand"><img src="${MD}" width="28" height="28" alt="" /><span class="nm">ChartStead</span></div>
+            <button type="button" class="ev-sel" data-act="event">Pacific Open Data Summit 2026 ▾</button>
+            <div class="sp"></div>
+            <label class="field">${ic.search}<input type="search" placeholder="Search ChartStead…" data-q-global /></label>
+            <button type="button" class="btn btn-sm" style="--bgc:rgba(255,255,255,.1);--fg:#fff;--bd:rgba(255,255,255,.2);--bgh:rgba(255,255,255,.16);--bdh:rgba(255,255,255,.35)" data-act="cfp">Open CFP</button>
+          </header>
+          <div class="body">
+            <aside class="sb">
+              <div class="sec">Workspace</div>
+              <a href="#" data-nav>${ic.grid} Overview</a>
+              <a href="#" class="on" data-nav>${ic.file} Submissions <span class="ct">47</span></a>
+              <a href="#" data-nav>${ic.users} Speakers</a>
+              <div class="sec">Program</div>
+              <a href="#" data-nav>${ic.cal} Agenda</a>
+              <a href="#" data-nav>${ic.mail} Messages</a>
+              <a href="#" data-nav>${ic.gear} Settings</a>
+            </aside>
+            <div class="main">
+              <header class="top">
+                <div><h1>Submissions</h1><div class="meta">Decide talks · 18 unreviewed</div></div>
+                <div class="sp"></div>
+                <button type="button" class="btn btn-sm" data-act="export">Export</button>
+              </header>
+              ${workMD("split-md")}
+            </div>
+          </div>
+        </div>`
+      },
+      {
+        id:"o7", name:"Event Porthole",
+        blurb:"Sidebar leads with the event, not the product chrome. Product mark is secondary; event switcher is the porthole.",
+        html: () => `<div class="app shell-g">
+          <aside class="sb">
+            <div class="ev-cover">
+              <div class="brand"><img src="${MD}" width="22" height="22" alt="" /><span>ChartStead</span></div>
+              <div class="en">Pacific Open Data Summit 2026</div>
+              <div class="ed">Sep 14–16 · Seattle · 4 tracks</div>
+              <button type="button" data-act="event">Switch event ▾</button>
+            </div>
+            <nav class="nav">${navItems()}</nav>
+            <div class="sb-user"><span class="av">TW</span> Taylor Wright</div>
+          </aside>
+          <div class="main">
+            <header class="top">
+              <div><h1>Submissions</h1><div class="meta">47 total · 18 unreviewed</div></div>
+              <div class="sp"></div>
+              <button type="button" class="btn btn-sm" data-act="export">Export</button>
+              <button type="button" class="btn btn-p btn-sm" data-act="cfp">Open CFP form</button>
+            </header>
+            ${workMD("split-md")}
+          </div>
+        </div>`
+      },
+      {
+        id:"o8", name:"Ops Manifest Rail",
+        blurb:"Wide indigo rail with grouped jobs and one-line descriptions. Nav teaches the product; list stays the work.",
+        html: () => `<div class="app shell-h">
+          <aside class="sb">
+            <div class="brand"><img src="${MD}" width="32" height="32" alt="" /><div><div class="nm">ChartStead</div><div class="ds">Conference programming</div></div></div>
+            <div class="grp-l">Operate</div>
+            <nav class="nav" style="display:contents">${navItems("desc")}</nav>
+          </aside>
+          <div class="main">
+            <header class="top">
+              <div><h1>Submissions</h1><div class="meta">Review & decide · PODS 2026</div></div>
+              <div class="sp"></div>
+              <button type="button" class="btn btn-p btn-sm" data-act="cfp">Open CFP form</button>
+            </header>
+            <div class="ptabs" data-ptabs>
+              <button type="button" aria-selected="true">All submissions</button>
+              <button type="button" aria-selected="false">My tracks</button>
+              <button type="button" aria-selected="false">Needs decision</button>
+            </div>
+            ${workMD("split-md-slim")}
+          </div>
+        </div>`
+      },
+      {
+        id:"o9", name:"Utility Gangway",
+        blurb:"Thin utility gangway on top (product + account). Indigo side nav below. Breadcrumbs replace the loud page title.",
+        html: () => `<div class="app shell-i">
+          <div class="util">
+            <div class="brand"><img src="${ML}" width="20" height="20" alt="" />ChartStead</div>
+            <button type="button" data-act="event">Pacific Open Data Summit 2026 ▾</button>
+            <div class="sp"></div>
+            <button type="button" data-act="help">Help</button>
+            <button type="button" data-act="account">Taylor Wright ▾</button>
+          </div>
+          <div class="body">
+            <aside class="sb">
+              <nav class="nav">${navItems()}</nav>
+              <button type="button" class="foot" data-act="event">PODS 2026 · live</button>
+            </aside>
+            <div class="main">
+              <header class="top">
+                <div class="crumbs">
+                  <button type="button" data-act="home">Program</button>
+                  <span>/</span>
+                  <b>Submissions</b>
+                  <span class="mu" style="margin-left:8px">· 18 unreviewed</span>
+                </div>
+                <div class="sp"></div>
+                <button type="button" class="btn btn-sm" data-act="export">Export</button>
+                <button type="button" class="btn btn-p btn-sm" data-act="cfp">Open CFP form</button>
+              </header>
+              ${workMD("split-md")}
+            </div>
+          </div>
+        </div>`
+      },
+      {
+        id:"o10", name:"Inset Chart Desk",
+        blurb:"App sits as an inset desk on a muted deck. Sidebar and work surface share one framed plate — portable product feel.",
+        html: () => `<div class="app shell-j">
+          <div class="desk">
+            <aside class="sb">
+              <div class="brand"><img src="${MD}" width="30" height="30" alt="" /><div><div class="nm">ChartStead</div><div class="ds">Conference programming</div></div></div>
+              <nav class="nav">${navItems()}</nav>
+              <button type="button" class="foot" data-act="event">Pacific Open Data Summit 2026</button>
+            </aside>
+            <div class="main">
+              <header class="top">
+                <div><h1>Submissions</h1><div class="meta">47 total · 18 unreviewed</div></div>
+                <div class="sp"></div>
+                <button type="button" class="btn btn-sm" data-act="export">Export</button>
+                <button type="button" class="btn btn-p btn-sm" data-act="cfp">Open CFP form</button>
+              </header>
+              ${workMD("split-md")}
+            </div>
+          </div>
+        </div>`
+      },
+    ];
+
+    const stage = document.getElementById("stage");
+    stage.innerHTML = DIRS.map((d,i) => `
+      <section class="opt" id="${d.id}">
+        <div class="opt-m">
+          <h2><em>${String(i+1).padStart(2,"0")}</em>${d.name}</h2>
+          <p>${d.blurb}</p>
+        </div>
+        <div class="frame" data-frame>${d.html()}</div>
+      </section>`).join("");
+
+    const toastEl = document.getElementById("toast");
+    let tt;
+    const toast = (m) => {
+      toastEl.textContent = m;
+      toastEl.classList.add("show");
+      clearTimeout(tt);
+      tt = setTimeout(() => toastEl.classList.remove("show"), 1600);
+    };
+
+    const find = id => SUBS.find(s => s.id === id) || SUBS[0];
+
+    const fill = (root, s) => {
+      root.querySelectorAll("[data-t]").forEach(el => el.textContent = s.title);
+      root.querySelectorAll("[data-abs]").forEach(el => el.textContent = s.abs);
+      root.querySelectorAll("[data-note]").forEach(el => el.textContent = s.note);
+      root.querySelectorAll("[data-who]").forEach(el => el.textContent = `${s.speaker} · ${s.track} · ${s.fmt}`);
+      root.querySelectorAll("[data-av]").forEach(el => el.textContent = s.av);
+      root.querySelectorAll("[data-fl]").forEach(el => { el.innerHTML = flag(s.st, s.sl, true); });
+      const k = root.querySelector(".insp-h .k");
+      if (k) k.textContent = `SUB-${s.id}`;
+    };
+
+    document.querySelectorAll("[data-frame]").forEach(frame => {
+      frame.querySelectorAll("[data-nav]").forEach(a => {
+        a.addEventListener("click", e => {
+          e.preventDefault();
+          const nav = a.closest("nav, .sb, .sb-lab, .sb-ico, .mast");
+          if (!nav) return;
+          // scope activation to sibling group
+          const scope = a.parentElement;
+          scope.querySelectorAll("[data-nav]").forEach(x => x.classList.remove("on"));
+          a.classList.add("on");
+          // dual keel sync icons roughly
+          toast(`Nav · ${a.getAttribute("title") || a.textContent.replace(/\d+/g,"").trim().slice(0,28)}`);
+        });
+      });
+
+      frame.querySelectorAll("[data-q]").forEach(input => {
+        input.addEventListener("input", () => {
+          const q = input.value.trim().toLowerCase();
+          frame.querySelectorAll("tbody tr[data-id]").forEach(tr => {
+            const s = find(tr.dataset.id);
+            const hay = `${s.title} ${s.speaker} ${s.id} ${s.track}`.toLowerCase();
+            tr.style.display = !q || hay.includes(q) ? "" : "none";
+          });
+        });
+      });
+
+      frame.querySelectorAll("[data-q-global]").forEach(input => {
+        input.addEventListener("keydown", e => {
+          if (e.key === "Enter") toast(`Search ChartStead · “${input.value || "…"}”`);
+        });
+      });
+
+      frame.querySelectorAll("[data-seg]").forEach(seg => {
+        seg.querySelectorAll("button").forEach(btn => {
+          btn.addEventListener("click", () => {
+            seg.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed","false"));
+            btn.setAttribute("aria-pressed","true");
+            toast(`Filter · ${btn.textContent.replace(/\s+/g," ").trim()}`);
+          });
+        });
+      });
+
+      frame.querySelectorAll("[data-ptabs]").forEach(tabs => {
+        tabs.querySelectorAll("button").forEach(btn => {
+          btn.addEventListener("click", () => {
+            tabs.querySelectorAll("button").forEach(b => b.setAttribute("aria-selected","false"));
+            btn.setAttribute("aria-selected","true");
+            toast(`Tab · ${btn.textContent}`);
+          });
+        });
+      });
+
+      frame.querySelectorAll("tbody tr[data-id]").forEach(tr => {
+        tr.addEventListener("click", () => {
+          frame.querySelectorAll("tbody tr").forEach(r => r.classList.remove("sel"));
+          tr.classList.add("sel");
+          fill(frame, find(tr.dataset.id));
+        });
+        tr.addEventListener("keydown", e => {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tr.click(); }
+        });
+      });
+
+      frame.querySelectorAll("[data-dec]").forEach(btn => {
+        btn.addEventListener("click", e => {
+          e.stopPropagation();
+          btn.classList.remove("flash"); void btn.offsetWidth; btn.classList.add("flash");
+          const map = { approve:"Approved", maybe:"Marked maybe", deny:"Denied" };
+          toast(`${map[btn.dataset.dec]} · PODS 2026`);
+        });
+      });
+
+      frame.querySelectorAll("[data-act]").forEach(btn => {
+        btn.addEventListener("click", e => {
+          e.stopPropagation();
+          const map = {
+            export:"Export started", cfp:"Opening CFP form…", event:"Event switcher",
+            home:"Home", help:"Help center", account:"Account menu", track:"Track filter",
+          };
+          toast(map[btn.dataset.act] || "Done");
+        });
+      });
+    });
+  </script>
+</body>
+</html>
