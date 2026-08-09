@@ -1,21 +1,30 @@
 import { Hono } from "hono";
 
-import {
-  createAuth,
-  resolveProductionPrincipal,
-  type Principal,
-} from "./auth";
+import type { EventRecord, OrganizerPrincipal } from "../shared/events";
+import { createAuth, resolveProductionPrincipal } from "./auth";
+import { seedEvents } from "./seed-events";
 import type { AppBindings } from "./types";
-import { seedEventId } from "./event-store";
-
 
 type PrincipalResolver = (
   request: Request,
   env: AppBindings,
-) => Promise<Principal | null>;
+) => Promise<OrganizerPrincipal | null>;
 
 interface AppOptions {
   resolvePrincipal?: PrincipalResolver;
+}
+
+async function loadEvent(
+  env: AppBindings,
+  seed: EventRecord,
+): Promise<EventRecord> {
+  const store = env.EVENT_STORE.getByName(seed.id);
+  await store.initializeEvent(seed);
+  const event = await store.getEvent();
+  if (!event) {
+    throw new Error(`Event ${seed.id} was not initialized.`);
+  }
+  return event;
 }
 
 export function createApp(options: AppOptions = {}) {
@@ -33,18 +42,37 @@ export function createApp(options: AppOptions = {}) {
         503,
       );
     }
-
     return auth.handler(c.req.raw);
   });
 
-  app.get("/api/events/current", async (c) => {
+  app.get("/api/events", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
     if (!principal) {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
-    const event = await c.env.EVENT_STORE.getByName(seedEventId).getEvent();
-    return c.json({ event, principal });
+    const visibleSeeds = seedEvents.filter((event) =>
+      principal.eventIds.includes(event.id),
+    );
+    const events = await Promise.all(
+      visibleSeeds.map((event) => loadEvent(c.env, event)),
+    );
+    return c.json({ events, principal });
+  });
+
+  app.get("/api/events/:eventId", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!principal || !principal.eventIds.includes(eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const seed = seedEvents.find((event) => event.id === eventId);
+    if (!seed) {
+      return c.json({ error: "Event not found" }, 404);
+    }
+
+    return c.json({ event: await loadEvent(c.env, seed), principal });
   });
 
   return app;

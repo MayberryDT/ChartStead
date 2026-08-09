@@ -18,7 +18,7 @@ npx wrangler d1 migrations apply chartstead-auth --local
 npm run dev
 ```
 
-Production auth requires a Better Auth secret and Google OAuth client. Register callbacks for `http://localhost:5173/api/auth/callback/google` and `https://chartstead.mayberrydt.workers.dev/api/auth/callback/google`. Add the authenticated user's Better Auth ID to `event_memberships` before granting organizer access.
+Production auth requires a Better Auth secret, Google OAuth client, and Resend credentials for the magic-link fallback. Register callbacks for `http://localhost:5173/api/auth/callback/google` and `https://chartstead.mayberrydt.workers.dev/api/auth/callback/google`. Add the authenticated user's Better Auth ID to `event_memberships` before granting organizer access.
 
 The production entrypoint has no demo bypass. To run the isolated demo entrypoint over local disposable bindings:
 
