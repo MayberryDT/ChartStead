@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".smolforge/hooks/upload-transcript.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
