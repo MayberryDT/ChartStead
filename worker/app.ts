@@ -150,6 +150,7 @@ export function createApp(options: AppOptions = {}) {
     return c.json({ proposals });
   });
 
+  // Permanent speaker-facing detail: always public-safe fields (never committee data).
   app.get("/api/events/:eventId/proposals/:proposalId", async (c) => {
     const eventId = c.req.param("eventId");
     const proposalId = c.req.param("proposalId");
@@ -165,12 +166,30 @@ export function createApp(options: AppOptions = {}) {
       return c.json({ error: "Proposal not found" }, 404);
     }
 
+    return c.json({ proposal: toPublicProposal(proposal) });
+  });
+
+  app.get("/api/events/:eventId/organizer/proposals/:proposalId", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
-    if (principal && principal.eventIds.includes(eventId)) {
-      return c.json({ proposal });
+    const eventId = c.req.param("eventId");
+    const proposalId = c.req.param("proposalId");
+    if (!principal || !principal.eventIds.includes(eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
     }
 
-    return c.json({ proposal: toPublicProposal(proposal) });
+    const seed = findSeed(eventId);
+    if (!seed) {
+      return c.json({ error: "Event not found" }, 404);
+    }
+
+    await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const proposal = await store.getProposal(proposalId);
+    if (!proposal) {
+      return c.json({ error: "Proposal not found" }, 404);
+    }
+
+    return c.json({ proposal });
   });
 
   return app;

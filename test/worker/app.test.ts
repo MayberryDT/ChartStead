@@ -187,6 +187,20 @@ describe("ChartStead Worker", () => {
     expect(publicBody.proposal).not.toHaveProperty("committeeNote");
     expect(publicBody.proposal).not.toHaveProperty("speakerEmail");
 
+    const organizerDetail = await demoApp.request(
+      `https://chartstead.test/api/events/${eventId}/organizer/proposals/${created.proposal.id}`,
+      undefined,
+      env,
+    );
+    expect(organizerDetail.status).toBe(200);
+    await expect(organizerDetail.json()).resolves.toMatchObject({
+      proposal: {
+        id: created.proposal.id,
+        speakerEmail: payload.speakerEmail,
+        committeeNote: "",
+      },
+    });
+
     const unauthorizedList = await SELF.fetch(
       `https://chartstead.test/api/events/${eventId}/proposals`,
     );
