@@ -1,67 +1,24 @@
-import { Button } from "@base-ui/react/button";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { FormEvent, useState } from "react";
+import { useEffect, useState } from "react";
+import { Model, type CompletingEvent } from "survey-core";
+import "survey-core/survey-core.css";
+import { Survey } from "survey-react-ui";
 
 import markOnLightUrl from "../design/assets/brand/chartstead-mark-on-light.png";
-import type { ProposalInput, ProposalValidationError } from "../shared/events";
+import type {
+  ProposalInput,
+  ProposalValidationError,
+  PublishedCfpForm,
+} from "../shared/events";
 import { ApiError, fetchCfp, submitProposal } from "./api";
-
-const emptyValues: ProposalInput = {
-  title: "",
-  abstract: "",
-  trackId: "",
-  speakerName: "",
-  speakerEmail: "",
-  biography: "",
-  supportingLink: "",
-};
 
 export function CfpPage() {
   const { eventId } = useParams({ from: "/e/$eventId/cfp" });
-  const navigate = useNavigate();
   const cfp = useQuery({
     queryKey: ["cfp", eventId],
     queryFn: () => fetchCfp(eventId),
   });
-  const [values, setValues] = useState<ProposalInput>(emptyValues);
-  const [errors, setErrors] = useState<Partial<Record<keyof ProposalInput, string>>>(
-    {},
-  );
-
-  const mutation = useMutation({
-    mutationFn: () => submitProposal(eventId, values),
-    onSuccess: (proposal) => {
-      void navigate({
-        to: "/e/$eventId/proposals/$proposalId",
-        params: { eventId, proposalId: proposal.id },
-      });
-    },
-    onError: (error) => {
-      if (error instanceof ApiError && error.status === 400) {
-        const body = error.body as ProposalValidationError;
-        setValues(body.values);
-        setErrors(body.errors);
-        return;
-      }
-      setErrors({
-        title:
-          error instanceof Error
-            ? error.message
-            : "Unable to submit this proposal.",
-      });
-    },
-  });
-
-  function update<K extends keyof ProposalInput>(key: K, value: ProposalInput[K]) {
-    setValues((current) => ({ ...current, [key]: value }));
-  }
-
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setErrors({});
-    mutation.mutate();
-  }
 
   if (cfp.isPending) {
     return (
@@ -77,6 +34,13 @@ export function CfpPage() {
         <section className="error-panel" role="alert">
           <h1>Call for proposals unavailable</h1>
           <p>{cfp.error.message}</p>
+          <button
+            className="primary-action"
+            type="button"
+            onClick={() => void cfp.refetch()}
+          >
+            Try again
+          </button>
         </section>
       </main>
     );
@@ -93,91 +57,12 @@ export function CfpPage() {
           proposal ID and confirmation page after submit.
         </p>
 
-        <form className="cfp-form" onSubmit={onSubmit} noValidate>
-          <Field
-            id="title"
-            label="Talk title"
-            error={errors.title}
-            value={values.title}
-            onChange={(value) => update("title", value)}
-            required
-          />
-          <Field
-            id="abstract"
-            label="Abstract"
-            error={errors.abstract}
-            value={values.abstract}
-            onChange={(value) => update("abstract", value)}
-            multiline
-            required
-          />
-          <div className="cfp-field">
-            <label htmlFor="trackId">Track</label>
-            <select
-              id="trackId"
-              name="trackId"
-              value={values.trackId}
-              aria-invalid={Boolean(errors.trackId)}
-              onChange={(change) => update("trackId", change.target.value)}
-              required
-            >
-              <option value="">Select a track</option>
-              {cfp.data.form.tracks.map((track) => (
-                <option key={track.id} value={track.id}>
-                  {track.name}
-                </option>
-              ))}
-            </select>
-            {errors.trackId ? (
-              <p className="field-error" role="alert">
-                {errors.trackId}
-              </p>
-            ) : null}
-          </div>
-          <Field
-            id="speakerName"
-            label="Speaker name"
-            error={errors.speakerName}
-            value={values.speakerName}
-            onChange={(value) => update("speakerName", value)}
-            required
-          />
-          <Field
-            id="speakerEmail"
-            label="Speaker email"
-            type="email"
-            error={errors.speakerEmail}
-            value={values.speakerEmail}
-            onChange={(value) => update("speakerEmail", value)}
-            required
-          />
-          <Field
-            id="biography"
-            label="Biography"
-            error={errors.biography}
-            value={values.biography}
-            onChange={(value) => update("biography", value)}
-            multiline
-            required
-          />
-          <Field
-            id="supportingLink"
-            label="Supporting link"
-            type="url"
-            error={errors.supportingLink}
-            value={values.supportingLink}
-            onChange={(value) => update("supportingLink", value)}
-            placeholder="https://"
-          />
-          <Button
-            className="primary-action"
-            type="submit"
-            disabled={mutation.isPending}
-            focusableWhenDisabled
-          >
-            {mutation.isPending ? "Submitting…" : "Submit proposal"}
-          </Button>
-        </form>
+        <PublishedCfpRuntime
+          key={`${eventId}:${cfp.data.form.id}:${cfp.data.form.definitionVersion}`}
+          eventId={eventId}
+          form={cfp.data.form}
+        />
+
         <p className="cfp-foot">
           Organizers open submissions from the event desk.{" "}
           <Link to="/">Return to ChartStead</Link>
@@ -187,57 +72,81 @@ export function CfpPage() {
   );
 }
 
-function Field({
-  id,
-  label,
-  value,
-  onChange,
-  error,
-  multiline = false,
-  type = "text",
-  required = false,
-  placeholder,
+function PublishedCfpRuntime({
+  eventId,
+  form,
 }: {
-  id: keyof ProposalInput;
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  error?: string;
-  multiline?: boolean;
-  type?: string;
-  required?: boolean;
-  placeholder?: string;
+  eventId: string;
+  form: PublishedCfpForm;
 }) {
+  const navigate = useNavigate();
+  const [survey] = useState(() => new Model(form.definition));
+
+  useEffect(() => {
+    let createdProposalId: string | null = null;
+
+    const handleCompleting = async (
+      sender: Model,
+      options: CompletingEvent,
+    ) => {
+      try {
+        const proposal = await submitProposal(
+          eventId,
+          sender.data as ProposalInput,
+          form,
+        );
+        createdProposalId = proposal.id;
+      } catch (error) {
+        options.allow = false;
+        if (error instanceof ApiError && error.status === 400) {
+          const validation = error.body as ProposalValidationError;
+          sender.data = validation.values;
+          for (const question of sender.getAllQuestions()) {
+            question.clearErrors();
+          }
+          let firstInvalidQuestion: string | null = null;
+          for (const [name, message] of Object.entries(validation.errors)) {
+            if (!message) continue;
+            const question = sender.getQuestionByName(name);
+            if (!question) continue;
+            question.addError(message);
+            firstInvalidQuestion ??= name;
+          }
+          if (firstInvalidQuestion) {
+            sender.focusQuestion(firstInvalidQuestion);
+          }
+          return;
+        }
+        options.message =
+          error instanceof Error
+            ? error.message
+            : "Unable to submit this proposal. Try again.";
+      }
+    };
+
+    const handleComplete = () => {
+      if (!createdProposalId) return;
+      void navigate({
+        to: "/e/$eventId/proposals/$proposalId",
+        params: { eventId, proposalId: createdProposalId },
+      });
+    };
+
+    survey.onCompleting.add(handleCompleting);
+    survey.onComplete.add(handleComplete);
+    return () => {
+      survey.onCompleting.remove(handleCompleting);
+      survey.onComplete.remove(handleComplete);
+    };
+  }, [eventId, form, navigate, survey]);
+
   return (
-    <div className="cfp-field">
-      <label htmlFor={id}>{label}</label>
-      {multiline ? (
-        <textarea
-          id={id}
-          name={id}
-          value={value}
-          required={required}
-          aria-invalid={Boolean(error)}
-          onChange={(change) => onChange(change.target.value)}
-          rows={5}
-        />
-      ) : (
-        <input
-          id={id}
-          name={id}
-          type={type}
-          value={value}
-          required={required}
-          placeholder={placeholder}
-          aria-invalid={Boolean(error)}
-          onChange={(change) => onChange(change.target.value)}
-        />
-      )}
-      {error ? (
-        <p className="field-error" role="alert">
-          {error}
-        </p>
-      ) : null}
+    <div
+      className="cfp-survey"
+      data-form-id={form.id}
+      data-definition-version={form.definitionVersion}
+    >
+      <Survey model={survey} />
     </div>
   );
 }

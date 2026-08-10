@@ -18,7 +18,9 @@ test("public CFP submit reaches organizer submissions and survives reload", asyn
   await page
     .getByLabel("Abstract")
     .fill("An acceptance-test abstract about open harbor charts.");
-  await page.getByLabel("Track").selectOption("platform");
+  await page.getByLabel("Track").focus();
+  await page.getByLabel("Track").press("ArrowDown");
+  await page.getByLabel("Track").press("Enter");
   await page.getByLabel("Speaker name").fill(speaker);
   await page.getByLabel("Speaker email").fill(`${suffix}@example.com`);
   await page.getByLabel("Biography").fill("Speaker biography for acceptance.");
@@ -35,6 +37,9 @@ test("public CFP submit reaches organizer submissions and survives reload", asyn
   await expect(page.getByText(title)).toBeVisible();
   expect(page.url()).toContain(`/e/${eventId}/proposals/${proposalId}`);
 
+  await page.reload();
+  await expect(page.locator(".confirm-meta code")).toHaveText(proposalId);
+
   await page.goto(`/e/${eventId}/submissions`);
   await expect(page.getByRole("heading", { name: "Submissions" })).toBeVisible();
   await page.getByLabel("Search title, speaker, or ID").fill(proposalId);
@@ -42,8 +47,28 @@ test("public CFP submit reaches organizer submissions and survives reload", asyn
   await expect(page.locator(".inspector-kicker")).toHaveText(proposalId);
   await expect(page.getByText(speaker).first()).toBeVisible();
 
+  await page.getByLabel("Search title, speaker, or ID").fill(title);
+  await expect(page.getByRole("heading", { name: title })).toBeVisible();
+
+  await page.getByLabel("Search title, speaker, or ID").fill(speaker);
+  await expect(page.getByRole("heading", { name: title })).toBeVisible();
+
   await page.reload();
   await page.getByLabel("Search title, speaker, or ID").fill(proposalId);
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
   await expect(page.locator(".inspector-kicker")).toHaveText(proposalId);
+});
+
+test("submissions event switch updates the permanent route", async ({ page }) => {
+  await page.goto(`/e/${eventId}/submissions`);
+
+  await page
+    .getByRole("combobox", { name: "Event" })
+    .selectOption("ai-engineer-worlds-fair-2026");
+  await expect(page).toHaveURL(/\/e\/ai-engineer-worlds-fair-2026\/submissions$/);
+
+  await page.reload();
+  await expect(
+    page.getByRole("combobox", { name: "Event" }),
+  ).toHaveValue("ai-engineer-worlds-fair-2026");
 });

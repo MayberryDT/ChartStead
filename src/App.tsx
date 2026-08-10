@@ -288,6 +288,12 @@ function EventDesk({
     localStorage.setItem("chartstead:event", eventId);
     setSelectedEventId(eventId);
     setSelectedProposalId(null);
+    if (activeNav === "Submissions") {
+      void navigate({
+        to: "/e/$eventId/submissions",
+        params: { eventId },
+      });
+    }
   }
 
   function selectNav(item: NavItem) {
@@ -326,7 +332,7 @@ function EventDesk({
           <img src={markOnDarkUrl} width="32" height="32" alt="" />
           <span className="brand-text">
             <span className="brand-name">ChartStead</span>
-            <span className="brand-desc">Conference programming</span>
+            <span className="brand-desc">Conference Programming</span>
           </span>
         </a>
         <nav className="nav" aria-label="Organizer">
@@ -487,4 +493,3 @@ export function SubmissionsPage() {
     />
   );
 }
-

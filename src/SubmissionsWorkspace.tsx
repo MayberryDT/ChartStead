@@ -101,6 +101,18 @@ export function SubmissionsWorkspace({
         <div className="table-wrap">
           {query.isPending ? (
             <p className="empty-state">Loading submissions…</p>
+          ) : query.isError ? (
+            <div className="submission-error" role="alert">
+              <strong>Unable to load submissions.</strong>
+              <span>{query.error.message}</span>
+              <button
+                className="btn btn-sm"
+                type="button"
+                onClick={() => void query.refetch()}
+              >
+                Try again
+              </button>
+            </div>
           ) : proposals.length === 0 ? (
             <p className="empty-state">
               No proposals match this search. Public CFP submissions appear here
@@ -131,9 +143,48 @@ export function SubmissionsWorkspace({
                       </span>
                     </td>
                     <td>
-                      <div className="talk">{proposal.title}</div>
+                      <div className="talk">
+                        <a
+                          href={`/e/${event.id}/submissions/${proposal.id}`}
+                          onClick={(click) => {
+                            click.stopPropagation();
+                            if (
+                              click.button !== 0 ||
+                              click.altKey ||
+                              click.ctrlKey ||
+                              click.metaKey ||
+                              click.shiftKey
+                            ) {
+                              return;
+                            }
+                            click.preventDefault();
+                            onSelectProposal?.(proposal.id);
+                          }}
+                        >
+                          {proposal.title}
+                        </a>
+                      </div>
                       <div className="talk-sub">
-                        {proposal.speakerName} · {proposal.id}
+                        {proposal.speakerName} ·{" "}
+                        <a
+                          href={`/e/${event.id}/submissions/${proposal.id}`}
+                          onClick={(click) => {
+                            click.stopPropagation();
+                            if (
+                              click.button !== 0 ||
+                              click.altKey ||
+                              click.ctrlKey ||
+                              click.metaKey ||
+                              click.shiftKey
+                            ) {
+                              return;
+                            }
+                            click.preventDefault();
+                            onSelectProposal?.(proposal.id);
+                          }}
+                        >
+                          {proposal.id}
+                        </a>
                       </div>
                     </td>
                     <td>

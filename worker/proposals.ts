@@ -8,18 +8,6 @@ import type {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export function emptyProposalInput(): ProposalInput {
-  return {
-    title: "",
-    abstract: "",
-    trackId: "",
-    speakerName: "",
-    speakerEmail: "",
-    biography: "",
-    supportingLink: "",
-  };
-}
-
 export function normalizeProposalInput(body: unknown): ProposalInput {
   const source =
     body && typeof body === "object" ? (body as Record<string, unknown>) : {};
@@ -52,16 +40,32 @@ export function validateProposalInput(
   const track = event.tracks.find((candidate) => candidate.id === input.trackId);
 
   if (!title) errors.title = "Enter a talk title.";
+  else if (title.length > 160) errors.title = "Use 160 characters or fewer.";
   if (!abstract) errors.abstract = "Enter an abstract.";
+  else if (abstract.length > 5_000) {
+    errors.abstract = "Use 5000 characters or fewer.";
+  }
   if (!speakerName) errors.speakerName = "Enter the speaker name.";
+  else if (speakerName.length > 120) {
+    errors.speakerName = "Use 120 characters or fewer.";
+  }
   if (!speakerEmail) {
     errors.speakerEmail = "Enter an email address.";
   } else if (!EMAIL_RE.test(speakerEmail)) {
     errors.speakerEmail = "Enter a valid email address.";
+  } else if (speakerEmail.length > 320) {
+    errors.speakerEmail = "Use 320 characters or fewer.";
   }
   if (!biography) errors.biography = "Enter a short biography.";
+  else if (biography.length > 2_000) {
+    errors.biography = "Use 2000 characters or fewer.";
+  }
   if (!track) errors.trackId = "Choose a track.";
   if (supportingLink) {
+    if (supportingLink.length > 2_048) {
+      errors.supportingLink = "Use 2048 characters or fewer.";
+      return { errors, values: input };
+    }
     try {
       const url = new URL(supportingLink);
       if (url.protocol !== "http:" && url.protocol !== "https:") {
@@ -92,13 +96,9 @@ export function toPublicProposal(proposal: OrganizerProposal): PublicProposal {
     id: proposal.id,
     eventId: proposal.eventId,
     title: proposal.title,
-    abstract: proposal.abstract,
     trackId: proposal.trackId,
     trackName: proposal.trackName,
     speakerName: proposal.speakerName,
-    biography: proposal.biography,
-    supportingLink: proposal.supportingLink,
-    status: proposal.status,
     submittedAt: proposal.submittedAt,
   };
 }

@@ -51,11 +51,16 @@ export async function fetchCfp(eventId: string): Promise<CfpFormResponse> {
 export async function submitProposal(
   eventId: string,
   input: ProposalInput,
+  form: Pick<CfpFormResponse["form"], "id" | "definitionVersion">,
 ): Promise<PublicProposal> {
   const response = await fetch(`/api/events/${eventId}/proposals`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(input),
+    body: JSON.stringify({
+      ...input,
+      formId: form.id,
+      formDefinitionVersion: form.definitionVersion,
+    }),
   });
   const body = await readJson<
     { proposal: PublicProposal } | ProposalValidationError | { error: string }

@@ -28,7 +28,9 @@
     "better-auth": "1.6.26",
     "hono": "4.13.1",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "survey-core": "^2.5.38",
+    "survey-react-ui": "^2.5.38"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.51.1",

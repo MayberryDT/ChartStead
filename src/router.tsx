@@ -6,7 +6,6 @@ import {
 } from "@tanstack/react-router";
 
 import { App, SubmissionsPage } from "./App";
-import { CfpPage } from "./CfpPage";
 import { ProposalDetailPage } from "./ProposalDetailPage";
 
 const rootRoute = createRootRoute({
@@ -22,8 +21,7 @@ const indexRoute = createRoute({
 const cfpRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/e/$eventId/cfp",
-  component: CfpPage,
-});
+}).lazy(() => import("./cfp.lazy").then((module) => module.Route));
 
 const proposalDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
