@@ -54,6 +54,10 @@ export function createAuth(env: AppBindings) {
     trustedOrigins: [env.BETTER_AUTH_URL],
     socialProviders: google,
     account: { encryptOAuthTokens: true },
+    session: {
+      expiresIn: 60 * 60 * 24 * 30,
+      updateAge: 60 * 60 * 24,
+    },
     plugins: [
       magicLink({
         storeToken: "hashed",

@@ -19,7 +19,7 @@ async function loadEvent(
   seed: EventRecord,
 ): Promise<EventRecord> {
   const store = env.EVENT_STORE.getByName(seed.id);
-  await store.initializeEvent(seed);
+  await store.seedIfEmpty(seed);
   const event = await store.getEvent();
   if (!event) {
     throw new Error(`Event ${seed.id} was not initialized.`);

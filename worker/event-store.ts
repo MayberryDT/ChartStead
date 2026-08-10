@@ -49,19 +49,13 @@ export class EventStore extends DurableObject<AppBindings> {
     });
   }
 
-  initializeEvent(event: EventRecord): void {
+  /** Insert seed once. Never overwrite persisted operational rows. */
+  seedIfEmpty(event: EventRecord): void {
     this.ctx.storage.sql.exec(
       `INSERT INTO events
         (id, name, starts_on, ends_on, submission_count, unreviewed_count, tracks_json, rooms_json)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         name = excluded.name,
-         starts_on = excluded.starts_on,
-         ends_on = excluded.ends_on,
-         submission_count = excluded.submission_count,
-         unreviewed_count = excluded.unreviewed_count,
-         tracks_json = excluded.tracks_json,
-         rooms_json = excluded.rooms_json`,
+       ON CONFLICT(id) DO NOTHING`,
       event.id,
       event.name,
       event.startsOn,
@@ -70,6 +64,17 @@ export class EventStore extends DurableObject<AppBindings> {
       event.unreviewedCount,
       JSON.stringify(event.tracks),
       JSON.stringify(event.rooms),
+    );
+  }
+
+  /** Test/support seam: mutate operational counters without touching seed identity. */
+  patchCounts(submissionCount: number, unreviewedCount: number): void {
+    this.ctx.storage.sql.exec(
+      `UPDATE events
+       SET submission_count = ?, unreviewed_count = ?
+       WHERE id = (SELECT id FROM events LIMIT 1)`,
+      submissionCount,
+      unreviewedCount,
     );
   }
 

@@ -61,32 +61,52 @@ describe("ChartStead Worker", () => {
     });
   });
 
-  it("persists seeded event operations across Durable Object eviction", async () => {
-    const store = env.EVENT_STORE.getByName("pacific-open-data-summit-2026");
+  it("persists operational event data across Durable Object eviction without reseeding", async () => {
+    const eventId = "pacific-open-data-summit-2026";
+    const store = env.EVENT_STORE.getByName(eventId);
 
-    const listResponse = await demoApp.request(
+    const seedResponse = await demoApp.request(
       "https://chartstead.test/api/events",
       undefined,
       env,
     );
-    expect(listResponse.status).toBe(200);
+    expect(seedResponse.status).toBe(200);
 
-    const first = await store.getEvent();
+    await store.patchCounts(99, 7);
+    const mutated = await store.getEvent();
+    expect(mutated).toMatchObject({
+      id: eventId,
+      submissionCount: 99,
+      unreviewedCount: 7,
+    });
+
     await evictDurableObject(store);
-    const reloadedStore = env.EVENT_STORE.getByName("pacific-open-data-summit-2026");
-    const second = await reloadedStore.getEvent();
 
-    expect(first).toEqual(second);
-    expect(first).toMatchObject({
-      id: "pacific-open-data-summit-2026",
-      name: "Pacific Open Data Summit 2026",
-      submissionCount: 47,
-      tracks: [
+    const reloadedStore = env.EVENT_STORE.getByName(eventId);
+    const afterEviction = await reloadedStore.getEvent();
+    expect(afterEviction).toMatchObject({
+      id: eventId,
+      submissionCount: 99,
+      unreviewedCount: 7,
+    });
+    expect(afterEviction?.tracks).toEqual(
+      expect.arrayContaining([
         expect.objectContaining({ name: "Platform", proposalCount: 14 }),
-        expect.objectContaining({ name: "Program Ops", proposalCount: 12 }),
-        expect.objectContaining({ name: "Design Systems", proposalCount: 11 }),
-        expect.objectContaining({ name: "Community", proposalCount: 10 }),
-      ],
+      ]),
+    );
+
+    const listAfterSeedCall = await demoApp.request(
+      "https://chartstead.test/api/events",
+      undefined,
+      env,
+    );
+    const body = await listAfterSeedCall.json<{
+      events: Array<{ id: string; submissionCount: number; unreviewedCount: number }>;
+    }>();
+    const pacific = body.events.find((event) => event.id === eventId);
+    expect(pacific).toMatchObject({
+      submissionCount: 99,
+      unreviewedCount: 7,
     });
   });
 });

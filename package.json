@@ -18,6 +18,7 @@
     "typecheck": "tsc --noEmit && wrangler types --env-interface CloudflareBindings --check",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
     "deploy": "npm run build && wrangler deploy",
+    "deploy:demo": "CLOUDFLARE_ENV=demo npm run build && CLOUDFLARE_ENV=demo wrangler deploy",
     "deploy:dry": "npm run build && wrangler deploy --dry-run"
   },
   "dependencies": {
