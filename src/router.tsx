@@ -2,18 +2,54 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  Outlet,
 } from "@tanstack/react-router";
 
-import { App } from "./App";
+import { App, SubmissionsPage } from "./App";
+import { CfpPage } from "./CfpPage";
+import { ProposalDetailPage } from "./ProposalDetailPage";
 
-const rootRoute = createRootRoute();
+const rootRoute = createRootRoute({
+  component: () => <Outlet />,
+});
+
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   component: App,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute]);
+const cfpRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId/cfp",
+  component: CfpPage,
+});
+
+const proposalDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId/proposals/$proposalId",
+  component: ProposalDetailPage,
+});
+
+const submissionsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId/submissions",
+  component: SubmissionsPage,
+});
+
+const submissionDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId/submissions/$proposalId",
+  component: SubmissionsPage,
+});
+
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  cfpRoute,
+  proposalDetailRoute,
+  submissionsRoute,
+  submissionDetailRoute,
+]);
 
 export const router = createRouter({ routeTree });
 

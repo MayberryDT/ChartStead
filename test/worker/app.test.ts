@@ -109,4 +109,165 @@ describe("ChartStead Worker", () => {
       unreviewedCount: 7,
     });
   });
+
+  it("exposes a public CFP form without organizer authentication", async () => {
+    const response = await SELF.fetch(
+      "https://chartstead.test/api/events/pacific-open-data-summit-2026/cfp",
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      event: {
+        id: "pacific-open-data-summit-2026",
+        name: "Pacific Open Data Summit 2026",
+      },
+      form: {
+        status: "published",
+        tracks: expect.arrayContaining([
+          expect.objectContaining({ id: "platform", name: "Platform" }),
+        ]),
+      },
+    });
+  });
+
+  it("accepts a public proposal, assigns a stable id, and keeps committee fields private", async () => {
+    const eventId = "pacific-open-data-summit-2026";
+    const payload = {
+      title: "Open charts for harbor operations",
+      abstract: "A talk about making open data useful on the waterfront.",
+      trackId: "platform",
+      speakerName: "Ada Harbor",
+      speakerEmail: "ada@example.com",
+      biography: "Harbor systems engineer and open data advocate.",
+      supportingLink: "https://example.com/ada-harbor",
+    };
+
+    const submit = await SELF.fetch(
+      `https://chartstead.test/api/events/${eventId}/proposals`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
+    expect(submit.status).toBe(201);
+    const created = await submit.json<{
+      proposal: {
+        id: string;
+        title: string;
+        speakerName: string;
+        trackId: string;
+        committeeNote?: string;
+        privateNote?: string;
+        speakerEmail?: string;
+      };
+    }>();
+    expect(created.proposal.id).toMatch(/^SUB-[A-Z0-9]+$/);
+    expect(created.proposal).toMatchObject({
+      title: payload.title,
+      speakerName: payload.speakerName,
+      trackId: "platform",
+    });
+    expect(created.proposal).not.toHaveProperty("committeeNote");
+    expect(created.proposal).not.toHaveProperty("privateNote");
+    expect(created.proposal).not.toHaveProperty("speakerEmail");
+
+    const publicDetail = await SELF.fetch(
+      `https://chartstead.test/api/events/${eventId}/proposals/${created.proposal.id}`,
+    );
+    expect(publicDetail.status).toBe(200);
+    const publicBody = await publicDetail.json<{
+      proposal: Record<string, unknown>;
+    }>();
+    expect(publicBody.proposal).toMatchObject({
+      id: created.proposal.id,
+      title: payload.title,
+      speakerName: payload.speakerName,
+    });
+    expect(publicBody.proposal).not.toHaveProperty("committeeNote");
+    expect(publicBody.proposal).not.toHaveProperty("speakerEmail");
+
+    const unauthorizedList = await SELF.fetch(
+      `https://chartstead.test/api/events/${eventId}/proposals`,
+    );
+    expect(unauthorizedList.status).toBe(401);
+
+    const list = await demoApp.request(
+      `https://chartstead.test/api/events/${eventId}/proposals?q=${created.proposal.id}`,
+      undefined,
+      env,
+    );
+    expect(list.status).toBe(200);
+    const listed = await list.json<{
+      proposals: Array<Record<string, unknown>>;
+    }>();
+    expect(listed.proposals).toEqual([
+      expect.objectContaining({
+        id: created.proposal.id,
+        title: payload.title,
+        speakerName: payload.speakerName,
+        speakerEmail: payload.speakerEmail,
+        biography: payload.biography,
+        supportingLink: payload.supportingLink,
+        status: "unreviewed",
+        committeeNote: "",
+      }),
+    ]);
+
+    await evictDurableObject(env.EVENT_STORE.getByName(eventId));
+
+    const afterReload = await demoApp.request(
+      `https://chartstead.test/api/events/${eventId}/proposals?q=Ada%20Harbor`,
+      undefined,
+      env,
+    );
+    const reloaded = await afterReload.json<{
+      proposals: Array<{ id: string; title: string }>;
+    }>();
+    expect(reloaded.proposals).toEqual([
+      expect.objectContaining({
+        id: created.proposal.id,
+        title: payload.title,
+      }),
+    ]);
+  });
+
+  it("returns field errors and preserves values for invalid public submissions", async () => {
+    const response = await SELF.fetch(
+      "https://chartstead.test/api/events/pacific-open-data-summit-2026/proposals",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: "",
+          abstract: "Kept abstract",
+          trackId: "not-a-track",
+          speakerName: "Kept speaker",
+          speakerEmail: "not-an-email",
+          biography: "",
+          supportingLink: "ftp://bad.example",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      values: {
+        title: "",
+        abstract: "Kept abstract",
+        trackId: "not-a-track",
+        speakerName: "Kept speaker",
+        speakerEmail: "not-an-email",
+        biography: "",
+        supportingLink: "ftp://bad.example",
+      },
+      errors: {
+        title: expect.any(String),
+        trackId: expect.any(String),
+        speakerEmail: expect.any(String),
+        biography: expect.any(String),
+        supportingLink: expect.any(String),
+      },
+    });
+  });
 });

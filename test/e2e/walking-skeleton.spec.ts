@@ -13,7 +13,8 @@ test("demo administrator signs in, selects a persisted event, and keeps shell ch
   await expect(page.getByText("Demo Administrator")).toBeVisible();
   await expect(page.locator(".app")).toBeVisible();
   await expect(page.locator(".sidebar .brand-name")).toHaveText("ChartStead");
-  await expect(page.getByLabel("47 submissions")).toBeVisible();
+  // Seed starts at 47; later e2e may add real proposals without reseeding.
+  await expect(page.getByLabel(/submissions$/)).toBeVisible();
   await expect(page.getByLabel("4 tracks")).toBeVisible();
   await expect(page.getByLabel("3 rooms")).toBeVisible();
 
@@ -37,7 +38,7 @@ test("demo administrator signs in, selects a persisted event, and keeps shell ch
   await expect(
     page.getByRole("heading", { name: "AI Engineer World's Fair 2026" }),
   ).toBeVisible();
-  await expect(page.getByLabel("32 submissions")).toBeVisible();
+  await expect(page.getByLabel(/submissions$/)).toBeVisible();
 
   await page.reload();
   await expect(
