@@ -491,6 +491,65 @@ export class EventStore extends DurableObject<AppBindings> {
               text: track.name,
             })),
           });
+
+    // Ticket 02 left flat SurveyJS JSON in some local DOs. Replace that legacy
+    // seed so public CFP always gets the Ticket 03 envelope (runtime.survey).
+    const existingVersion = this.ctx.storage.sql
+      .exec<{ definition_json: string }>(
+        `SELECT definition_json FROM cfp_form_versions
+         WHERE id = ? AND definition_version = ?
+         LIMIT 1`,
+        form.id,
+        form.definitionVersion,
+      )
+      .toArray()[0];
+    if (existingVersion) {
+      let legacy = false;
+      try {
+        const parsed = JSON.parse(existingVersion.definition_json) as {
+          schemaVersion?: unknown;
+          runtime?: { survey?: unknown };
+        };
+        legacy =
+          parsed.schemaVersion !== 1 ||
+          !parsed.runtime ||
+          typeof parsed.runtime !== "object" ||
+          !parsed.runtime.survey;
+      } catch {
+        legacy = true;
+      }
+      if (legacy && form.definition.schemaVersion === 1) {
+        this.ctx.storage.sql.exec(
+          `UPDATE cfp_form_versions
+           SET definition_json = ?, name = ?, status = ?, published_at = ?
+           WHERE id = ? AND definition_version = ?`,
+          JSON.stringify(form.definition),
+          formName,
+          form.status,
+          form.publishedAt,
+          form.id,
+          form.definitionVersion,
+        );
+        this.ctx.storage.sql.exec(
+          `UPDATE cfp_forms
+           SET name = ?,
+               lifecycle_status = 'published',
+               draft_json = ?,
+               draft_updated_at = ?,
+               published_version = ?,
+               published_at = ?
+           WHERE id = ?`,
+          formName,
+          JSON.stringify(draft),
+          now,
+          form.definitionVersion,
+          form.publishedAt,
+          form.id,
+        );
+        return;
+      }
+    }
+
     this.ctx.storage.sql.exec(
       `INSERT INTO cfp_forms
         (id, name, lifecycle_status, draft_json, draft_updated_at, published_version, published_at)

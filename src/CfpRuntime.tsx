@@ -83,8 +83,12 @@ export function CfpRuntime({
   onSubmit,
   onSubmitted,
 }: CfpRuntimeProps) {
+  const surveyJson = form.definition?.runtime?.survey;
   const [survey] = useState(() => {
-    const model = new Model(form.definition.runtime.survey);
+    if (!surveyJson) {
+      throw new Error("Published form is missing a SurveyJS runtime definition.");
+    }
+    const model = new Model(surveyJson);
     if (initialAnswers) {
       model.data = initialAnswers;
     }
