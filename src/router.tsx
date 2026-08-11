@@ -9,6 +9,7 @@ import { App, SubmissionsPage } from "./App";
 import { CfpBuilderPage, CfpFormsPage } from "./CfpBuilderPage";
 import { CourseCheckPage } from "./CourseCheckPage";
 import { ProposalDetailPage } from "./ProposalDetailPage";
+import { SpeakerPortalPage } from "./SpeakerPortalPage";
 import { SubmitterEditPage } from "./SubmitterEditPage";
 
 const rootRoute = createRootRoute({
@@ -39,6 +40,12 @@ const submitterEditRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/e/$eventId/edit/$token",
   component: SubmitterEditPage,
+});
+
+const speakerPortalRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId/portal/$token",
+  component: SpeakerPortalPage,
 });
 
 const formsRoute = createRoute({
@@ -87,6 +94,7 @@ const routeTree = rootRoute.addChildren([
   cfpRoute,
   proposalDetailRoute,
   submitterEditRoute,
+  speakerPortalRoute,
   formsRoute,
   formBuilderRoute,
   submissionsRoute,

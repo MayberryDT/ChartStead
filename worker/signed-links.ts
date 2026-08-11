@@ -34,21 +34,26 @@ export interface SignedEditTokenPayload {
   exp: number;
 }
 
-export async function signEditToken(
-  secret: string,
-  payload: SignedEditTokenPayload,
-): Promise<string> {
+export interface SignedPortalTokenPayload {
+  v: 1;
+  kind: "portal";
+  eventId: string;
+  speakerId: string;
+  tokenId: string;
+  exp: number;
+}
+
+async function signPayload(secret: string, payload: object): Promise<string> {
   const body = toBase64Url(encoder.encode(JSON.stringify(payload)));
   const key = await importKey(secret);
   const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(body));
   return `${body}.${toBase64Url(signature)}`;
 }
 
-export async function verifyEditToken(
+async function verifySignedBody(
   secret: string,
   token: string,
-  nowMs = Date.now(),
-): Promise<SignedEditTokenPayload | null> {
+): Promise<unknown | null> {
   const parts = token.split(".");
   if (parts.length !== 2) return null;
   const [body, signature] = parts;
@@ -68,24 +73,66 @@ export async function verifyEditToken(
       encoder.encode(body),
     );
     if (!valid) return null;
-
-    const payload = JSON.parse(
-      new TextDecoder().decode(fromBase64Url(body)),
-    ) as SignedEditTokenPayload;
-    if (payload.v !== 1) return null;
-    if (
-      typeof payload.eventId !== "string" ||
-      typeof payload.proposalId !== "string" ||
-      typeof payload.tokenId !== "string" ||
-      typeof payload.exp !== "number"
-    ) {
-      return null;
-    }
-    if (payload.exp * 1000 <= nowMs) return null;
-    return payload;
+    return JSON.parse(new TextDecoder().decode(fromBase64Url(body)));
   } catch {
     return null;
   }
+}
+
+export async function signEditToken(
+  secret: string,
+  payload: SignedEditTokenPayload,
+): Promise<string> {
+  return signPayload(secret, payload);
+}
+
+export async function verifyEditToken(
+  secret: string,
+  token: string,
+  nowMs = Date.now(),
+): Promise<SignedEditTokenPayload | null> {
+  const parsed = await verifySignedBody(secret, token);
+  if (!parsed || typeof parsed !== "object") return null;
+  const payload = parsed as SignedEditTokenPayload;
+  if (payload.v !== 1) return null;
+  if (
+    typeof payload.eventId !== "string" ||
+    typeof payload.proposalId !== "string" ||
+    typeof payload.tokenId !== "string" ||
+    typeof payload.exp !== "number"
+  ) {
+    return null;
+  }
+  if (payload.exp * 1000 <= nowMs) return null;
+  return payload;
+}
+
+export async function signPortalToken(
+  secret: string,
+  payload: SignedPortalTokenPayload,
+): Promise<string> {
+  return signPayload(secret, payload);
+}
+
+export async function verifyPortalToken(
+  secret: string,
+  token: string,
+  nowMs = Date.now(),
+): Promise<SignedPortalTokenPayload | null> {
+  const parsed = await verifySignedBody(secret, token);
+  if (!parsed || typeof parsed !== "object") return null;
+  const payload = parsed as SignedPortalTokenPayload;
+  if (payload.v !== 1 || payload.kind !== "portal") return null;
+  if (
+    typeof payload.eventId !== "string" ||
+    typeof payload.speakerId !== "string" ||
+    typeof payload.tokenId !== "string" ||
+    typeof payload.exp !== "number"
+  ) {
+    return null;
+  }
+  if (payload.exp * 1000 <= nowMs) return null;
+  return payload;
 }
 
 export function createTokenId(): string {

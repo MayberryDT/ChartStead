@@ -237,6 +237,51 @@ export interface SubmitterEditSession {
   };
 }
 
+/** Safe speaker-facing portal payload — never includes committee/Course Check evidence. */
+export interface SpeakerPortalSession {
+  eventId: string;
+  eventName: string;
+  expiresAt: string;
+  acceptanceState: ProgramOutcome | null;
+  profile: {
+    id: string;
+    name: string;
+    email: string;
+    biography: string;
+  };
+  participation: {
+    id: string;
+    speakerId: string;
+    role: "primary" | "co" | string;
+    titleAtEvent: string;
+    organizationAtEvent: string;
+  };
+  proposal: {
+    id: string;
+    title: string;
+    trackName: string;
+    programOutcome: ProgramOutcome | null;
+  } | null;
+  session: {
+    id: string;
+    title: string;
+    format: string;
+    trackId: string;
+    roomId: string | null;
+    startsAt: string | null;
+    endsAt: string | null;
+  } | null;
+  tasks: Array<{
+    id: string;
+    title: string;
+    kind: string;
+    status: string;
+    speakerId: string;
+    dueAt: string | null;
+  }>;
+  nextDeadline: string | null;
+}
+
 export interface AssetUploadStartRequest {
   formId: string;
   formDefinitionVersion: number;

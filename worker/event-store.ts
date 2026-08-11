@@ -26,6 +26,7 @@ import type {
   ProposalInput,
   ProposalStatus,
   PublishedCfpForm,
+  SpeakerPortalSession,
   SubmissionAnswers,
 } from "../shared/events";
 import type { AssetClaimInput } from "./cfp-submissions";
@@ -138,9 +139,28 @@ export interface AcceptanceCascadeSnapshot {
     email: string;
     intent: string;
   }>;
+  portalTokens: Array<{
+    tokenId: string;
+    speakerId: string;
+    expiresAt: string;
+    revokedAt: string | null;
+    signedToken: string | null;
+  }>;
   messagesQueued: number;
   calendarEffects: number;
   publicRevisions: number;
+}
+
+interface PortalTokenRow {
+  [key: string]: string | null;
+  token_id: string;
+  speaker_id: string;
+  proposal_id: string | null;
+  course_check_plan_id: string;
+  expires_at: string;
+  revoked_at: string | null;
+  signed_token: string | null;
+  created_at: string;
 }
 
 interface CfpFormRow {
@@ -601,6 +621,7 @@ export class EventStore extends DurableObject<AppBindings> {
           title TEXT NOT NULL,
           kind TEXT NOT NULL,
           status TEXT NOT NULL DEFAULT 'open',
+          due_at TEXT,
           created_at TEXT NOT NULL
         )
       `);
@@ -613,6 +634,19 @@ export class EventStore extends DurableObject<AppBindings> {
           intent TEXT NOT NULL,
           proposal_id TEXT,
           course_check_plan_id TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS portal_tokens (
+          token_id TEXT PRIMARY KEY,
+          speaker_id TEXT NOT NULL,
+          proposal_id TEXT,
+          course_check_plan_id TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          revoked_at TEXT,
+          signed_token TEXT,
           created_at TEXT NOT NULL
         )
       `);
@@ -704,6 +738,8 @@ export class EventStore extends DurableObject<AppBindings> {
       );
       this.ensureColumn("outbox_messages", "next_attempt_at", "TEXT");
       this.ensureColumn("proposals", "program_outcome", "TEXT NOT NULL DEFAULT ''");
+      this.ensureColumn("onboarding_tasks", "due_at", "TEXT");
+      this.ensureColumn("portal_tokens", "signed_token", "TEXT");
     });
   }
 
@@ -2047,6 +2083,357 @@ export class EventStore extends DurableObject<AppBindings> {
     );
   }
 
+  createPortalToken(input: {
+    tokenId: string;
+    speakerId: string;
+    proposalId: string | null;
+    courseCheckPlanId: string;
+    expiresAt: string;
+  }): void {
+    this.ctx.storage.sql.exec(
+      `INSERT INTO portal_tokens
+        (token_id, speaker_id, proposal_id, course_check_plan_id, expires_at, revoked_at, signed_token, created_at)
+       VALUES (?, ?, ?, ?, ?, NULL, NULL, ?)`,
+      input.tokenId,
+      input.speakerId,
+      input.proposalId,
+      input.courseCheckPlanId,
+      input.expiresAt,
+      new Date().toISOString(),
+    );
+  }
+
+  getPortalToken(tokenId: string): {
+    tokenId: string;
+    speakerId: string;
+    proposalId: string | null;
+    courseCheckPlanId: string;
+    expiresAt: string;
+    revokedAt: string | null;
+    signedToken: string | null;
+  } | null {
+    const row = this.ctx.storage.sql
+      .exec<PortalTokenRow>(
+        `SELECT token_id, speaker_id, proposal_id, course_check_plan_id, expires_at, revoked_at, signed_token, created_at
+         FROM portal_tokens
+         WHERE token_id = ?`,
+        tokenId,
+      )
+      .toArray()[0];
+    if (!row) return null;
+    return {
+      tokenId: row.token_id,
+      speakerId: row.speaker_id,
+      proposalId: row.proposal_id,
+      courseCheckPlanId: row.course_check_plan_id,
+      expiresAt: row.expires_at,
+      revokedAt: row.revoked_at,
+      signedToken: row.signed_token,
+    };
+  }
+
+  listPortalTokensForPlan(planId: string): Array<{
+    tokenId: string;
+    speakerId: string;
+    expiresAt: string;
+    revokedAt: string | null;
+    signedToken: string | null;
+  }> {
+    return this.ctx.storage.sql
+      .exec<PortalTokenRow>(
+        `SELECT token_id, speaker_id, proposal_id, course_check_plan_id, expires_at, revoked_at, signed_token, created_at
+         FROM portal_tokens
+         WHERE course_check_plan_id = ?`,
+        planId,
+      )
+      .toArray()
+      .map((row) => ({
+        tokenId: row.token_id,
+        speakerId: row.speaker_id,
+        expiresAt: row.expires_at,
+        revokedAt: row.revoked_at,
+        signedToken: row.signed_token,
+      }));
+  }
+
+  setPortalTokenSignature(input: {
+    tokenId: string;
+    signedToken: string;
+    expiresAt: string;
+  }): void {
+    this.ctx.storage.sql.exec(
+      `UPDATE portal_tokens
+       SET signed_token = ?, expires_at = ?
+       WHERE token_id = ? AND revoked_at IS NULL`,
+      input.signedToken,
+      input.expiresAt,
+      input.tokenId,
+    );
+  }
+
+  revokePortalToken(tokenId: string): void {
+    this.ctx.storage.sql.exec(
+      `UPDATE portal_tokens
+       SET revoked_at = ?
+       WHERE token_id = ? AND revoked_at IS NULL`,
+      new Date().toISOString(),
+      tokenId,
+    );
+  }
+
+  getSpeakerPortalSession(input: {
+    speakerId: string;
+    expiresAt: string;
+  }): SpeakerPortalSession | null {
+    const event = this.getEvent();
+    if (!event) return null;
+
+    const speaker = this.ctx.storage.sql
+      .exec<SpeakerRow>(
+        `SELECT id, name, email, biography, created_at FROM speakers WHERE id = ?`,
+        input.speakerId,
+      )
+      .toArray()[0];
+    if (!speaker) return null;
+
+    const participation = this.ctx.storage.sql
+      .exec<{
+        id: string;
+        speaker_id: string;
+        proposal_id: string | null;
+        title_snapshot: string;
+        organization_snapshot: string;
+        role: string;
+        course_check_plan_id: string;
+      }>(
+        `SELECT id, speaker_id, proposal_id, title_snapshot, organization_snapshot, role, course_check_plan_id
+         FROM event_participations
+         WHERE speaker_id = ?
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        input.speakerId,
+      )
+      .toArray()[0];
+    if (!participation) return null;
+
+    let proposal: SpeakerPortalSession["proposal"] = null;
+    let acceptanceState: ProgramOutcome | null = null;
+    if (participation.proposal_id) {
+      const proposalRow = this.ctx.storage.sql
+        .exec<{
+          id: string;
+          title: string;
+          track_name: string;
+          program_outcome: string;
+        }>(
+          `SELECT id, title, track_name, program_outcome FROM proposals WHERE id = ?`,
+          participation.proposal_id,
+        )
+        .toArray()[0];
+      if (!proposalRow) return null;
+      const outcome =
+        proposalRow.program_outcome === "accepted" ||
+        proposalRow.program_outcome === "declined"
+          ? proposalRow.program_outcome
+          : null;
+      acceptanceState = outcome;
+      proposal = {
+        id: proposalRow.id,
+        title: proposalRow.title,
+        trackName: proposalRow.track_name,
+        programOutcome: outcome,
+      };
+      if (outcome !== "accepted") return null;
+    } else {
+      acceptanceState = "accepted";
+    }
+
+    const sessionRow = this.ctx.storage.sql
+      .exec<{
+        id: string;
+        title: string;
+        format: string;
+        track_id: string;
+        room_id: string | null;
+        starts_at: string | null;
+        ends_at: string | null;
+      }>(
+        participation.proposal_id
+          ? `SELECT id, title, format, track_id, room_id, starts_at, ends_at
+             FROM sessions WHERE proposal_id = ? LIMIT 1`
+          : `SELECT id, title, format, track_id, room_id, starts_at, ends_at
+             FROM sessions WHERE course_check_plan_id = ? LIMIT 1`,
+        participation.proposal_id ?? participation.course_check_plan_id,
+      )
+      .toArray()[0];
+
+    const tasks = this.ctx.storage.sql
+      .exec<{
+        id: string;
+        title: string;
+        kind: string;
+        status: string;
+        speaker_id: string;
+        due_at: string | null;
+      }>(
+        `SELECT id, title, kind, status, speaker_id, due_at
+         FROM onboarding_tasks
+         WHERE speaker_id = ?
+         ORDER BY due_at IS NULL, due_at ASC, created_at ASC`,
+        input.speakerId,
+      )
+      .toArray()
+      .map((row) => ({
+        id: row.id,
+        title: row.title,
+        kind: row.kind,
+        status: row.status,
+        speakerId: row.speaker_id,
+        dueAt: row.due_at,
+      }));
+
+    const openDeadlines = tasks
+      .filter((task) => task.status === "open" && task.dueAt)
+      .map((task) => task.dueAt as string)
+      .sort();
+
+    return {
+      eventId: event.id,
+      eventName: event.name,
+      expiresAt: input.expiresAt,
+      acceptanceState,
+      profile: {
+        id: speaker.id,
+        name: speaker.name,
+        email: speaker.email,
+        biography: speaker.biography,
+      },
+      participation: {
+        id: participation.id,
+        speakerId: participation.speaker_id,
+        role: participation.role,
+        titleAtEvent: participation.title_snapshot,
+        organizationAtEvent: participation.organization_snapshot,
+      },
+      proposal,
+      session: sessionRow
+        ? {
+            id: sessionRow.id,
+            title: sessionRow.title,
+            format: sessionRow.format,
+            trackId: sessionRow.track_id,
+            roomId: sessionRow.room_id,
+            startsAt: sessionRow.starts_at,
+            endsAt: sessionRow.ends_at,
+          }
+        : null,
+      tasks,
+      nextDeadline: openDeadlines[0] ?? null,
+    };
+  }
+
+  updateSessionForTest(
+    sessionId: string,
+    patch: {
+      title?: string;
+      roomId?: string | null;
+      startsAt?: string | null;
+      endsAt?: string | null;
+    },
+  ): void {
+    const current = this.ctx.storage.sql
+      .exec<{
+        title: string;
+        room_id: string | null;
+        starts_at: string | null;
+        ends_at: string | null;
+      }>(
+        `SELECT title, room_id, starts_at, ends_at FROM sessions WHERE id = ?`,
+        sessionId,
+      )
+      .toArray()[0];
+    if (!current) throw new Error(`Session ${sessionId} not found`);
+    this.ctx.storage.sql.exec(
+      `UPDATE sessions
+       SET title = ?, room_id = ?, starts_at = ?, ends_at = ?
+       WHERE id = ?`,
+      patch.title ?? current.title,
+      patch.roomId === undefined ? current.room_id : patch.roomId,
+      patch.startsAt === undefined ? current.starts_at : patch.startsAt,
+      patch.endsAt === undefined ? current.ends_at : patch.endsAt,
+      sessionId,
+    );
+  }
+
+  updateSpeakerProfileForTest(
+    speakerId: string,
+    patch: { biography?: string; name?: string },
+  ): void {
+    const current = this.ctx.storage.sql
+      .exec<SpeakerRow>(
+        `SELECT id, name, email, biography, created_at FROM speakers WHERE id = ?`,
+        speakerId,
+      )
+      .toArray()[0];
+    if (!current) throw new Error(`Speaker ${speakerId} not found`);
+    this.ctx.storage.sql.exec(
+      `UPDATE speakers SET name = ?, biography = ? WHERE id = ?`,
+      patch.name ?? current.name,
+      patch.biography ?? current.biography,
+      speakerId,
+    );
+  }
+
+  updateParticipationSnapshotForTest(
+    participationId: string,
+    patch: { titleAtEvent?: string; organizationAtEvent?: string },
+  ): void {
+    const current = this.ctx.storage.sql
+      .exec<{ title_snapshot: string; organization_snapshot: string }>(
+        `SELECT title_snapshot, organization_snapshot FROM event_participations WHERE id = ?`,
+        participationId,
+      )
+      .toArray()[0];
+    if (!current) throw new Error(`Participation ${participationId} not found`);
+    this.ctx.storage.sql.exec(
+      `UPDATE event_participations
+       SET title_snapshot = ?, organization_snapshot = ?
+       WHERE id = ?`,
+      patch.titleAtEvent ?? current.title_snapshot,
+      patch.organizationAtEvent ?? current.organization_snapshot,
+      participationId,
+    );
+  }
+
+  /** Removes cascade records and revokes portal tokens for a proposal (compensation stub). */
+  compensateAcceptanceForTest(proposalId: string): void {
+    const now = new Date().toISOString();
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        `UPDATE portal_tokens SET revoked_at = ? WHERE proposal_id = ? AND revoked_at IS NULL`,
+        now,
+        proposalId,
+      );
+      this.ctx.storage.sql.exec(
+        `DELETE FROM onboarding_tasks WHERE proposal_id = ?`,
+        proposalId,
+      );
+      this.ctx.storage.sql.exec(`DELETE FROM sessions WHERE proposal_id = ?`, proposalId);
+      this.ctx.storage.sql.exec(
+        `DELETE FROM event_participations WHERE proposal_id = ?`,
+        proposalId,
+      );
+      this.ctx.storage.sql.exec(
+        `DELETE FROM portal_access_intents WHERE proposal_id = ?`,
+        proposalId,
+      );
+      this.ctx.storage.sql.exec(
+        `UPDATE proposals SET program_outcome = '' WHERE id = ?`,
+        proposalId,
+      );
+    });
+  }
+
   createAsset(input: {
     assetId: string;
     objectKey: string;
@@ -2813,14 +3200,23 @@ export class EventStore extends DurableObject<AppBindings> {
       );
     }
 
-    for (const task of body.tasks) {
+    const event = this.getEvent();
+    const deadlineBase = event
+      ? Date.parse(`${event.startsOn}T00:00:00.000Z`)
+      : Date.parse(now);
+    const safeBase = Number.isFinite(deadlineBase) ? deadlineBase : Date.parse(now);
+
+    body.tasks.forEach((task, taskIndex) => {
       const speakerId = speakerIdByPlanned.get(task.speakerPlannedId);
       if (!speakerId) throw new Error("Task is missing its speaker mapping.");
+      const dueAt = new Date(
+        safeBase - (body.tasks.length - taskIndex) * 24 * 60 * 60 * 1000,
+      ).toISOString();
       this.ctx.storage.sql.exec(
         `INSERT INTO onboarding_tasks
           (id, speaker_id, session_id, proposal_id, course_check_plan_id, title, kind,
-           status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)`,
+           status, due_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`,
         task.plannedId,
         speakerId,
         session?.plannedId ?? null,
@@ -2828,13 +3224,15 @@ export class EventStore extends DurableObject<AppBindings> {
         plan.id,
         task.title,
         task.kind,
+        dueAt,
         now,
       );
-    }
+    });
 
     for (const access of body.portalAccess) {
       const speakerId = speakerIdByPlanned.get(access.speakerPlannedId);
       if (!speakerId) throw new Error("Portal access is missing its speaker mapping.");
+      const proposalId = body.actionType === "decision" ? body.proposalId : null;
       this.ctx.storage.sql.exec(
         `INSERT INTO portal_access_intents
           (id, speaker_id, email, intent, proposal_id, course_check_plan_id, created_at)
@@ -2843,10 +3241,27 @@ export class EventStore extends DurableObject<AppBindings> {
         speakerId,
         access.email,
         access.intent,
-        body.actionType === "decision" ? body.proposalId : null,
+        proposalId,
         plan.id,
         now,
       );
+      if (access.intent === "grant") {
+        const tokenId = crypto.randomUUID().replaceAll("-", "");
+        const expiresAt = new Date(
+          Date.parse(now) + 1000 * 60 * 60 * 24 * 90,
+        ).toISOString();
+        this.ctx.storage.sql.exec(
+          `INSERT INTO portal_tokens
+            (token_id, speaker_id, proposal_id, course_check_plan_id, expires_at, revoked_at, signed_token, created_at)
+           VALUES (?, ?, ?, ?, ?, NULL, NULL, ?)`,
+          tokenId,
+          speakerId,
+          proposalId,
+          plan.id,
+          expiresAt,
+          now,
+        );
+      }
     }
   }
 
@@ -2964,6 +3379,24 @@ export class EventStore extends DurableObject<AppBindings> {
         intent: row.intent,
       }));
 
+    const portalTokens = this.ctx.storage.sql
+      .exec<PortalTokenRow>(
+        proposalId
+          ? `SELECT token_id, speaker_id, proposal_id, course_check_plan_id, expires_at, revoked_at, signed_token, created_at
+             FROM portal_tokens WHERE proposal_id = ?`
+          : `SELECT token_id, speaker_id, proposal_id, course_check_plan_id, expires_at, revoked_at, signed_token, created_at
+             FROM portal_tokens WHERE course_check_plan_id = ?`,
+        proposalId ?? planId,
+      )
+      .toArray()
+      .map((row) => ({
+        tokenId: row.token_id,
+        speakerId: row.speaker_id,
+        expiresAt: row.expires_at,
+        revokedAt: row.revoked_at,
+        signedToken: row.signed_token,
+      }));
+
     return {
       speakers,
       participations: participations.map((row) => ({
@@ -2977,6 +3410,7 @@ export class EventStore extends DurableObject<AppBindings> {
       sessions,
       tasks,
       portalAccessIntents,
+      portalTokens,
       messagesQueued: 0,
       calendarEffects: 0,
       publicRevisions: 0,

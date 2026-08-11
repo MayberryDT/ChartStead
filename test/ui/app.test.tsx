@@ -18,6 +18,7 @@ import { App, SubmissionsPage } from "../../src/App";
 import { CfpBuilderPage, CfpFormsPage } from "../../src/CfpBuilderPage";
 import { CfpPage } from "../../src/CfpPage";
 import { ProposalDetailPage } from "../../src/ProposalDetailPage";
+import { SpeakerPortalPage } from "../../src/SpeakerPortalPage";
 import { SubmitterEditPage } from "../../src/SubmitterEditPage";
 
 function renderAt(path: string) {
@@ -44,6 +45,11 @@ function renderAt(path: string) {
     getParentRoute: () => rootRoute,
     path: "/e/$eventId/edit/$token",
     component: SubmitterEditPage,
+  });
+  const portalRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/e/$eventId/portal/$token",
+    component: SpeakerPortalPage,
   });
   const formsRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -73,6 +79,7 @@ function renderAt(path: string) {
       cfpRoute,
       proposalRoute,
       editRoute,
+      portalRoute,
       formsRoute,
       formBuilderRoute,
       submissionsRoute,
@@ -1890,5 +1897,75 @@ describe("guided CFP builder", () => {
     expect(screen.getByLabelText("Welcome title")).toHaveValue(
       "Submit a proposal dirty",
     );
+  });
+
+  it("renders a signed speaker portal with profile, event snapshot, and tasks", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/events/pacific-open-data-summit-2026/portal?")) {
+          return new Response(
+            JSON.stringify({
+              eventId: "pacific-open-data-summit-2026",
+              eventName: "Pacific Open Data Summit 2026",
+              expiresAt: "2026-12-01T00:00:00.000Z",
+              acceptanceState: "accepted",
+              profile: {
+                id: "spk_1",
+                name: "Portal Speaker",
+                email: "portal@example.test",
+                biography: "Living biography",
+              },
+              participation: {
+                id: "prt_1",
+                speakerId: "spk_1",
+                role: "primary",
+                titleAtEvent: "Director at Event Time",
+                organizationAtEvent: "Historic Org",
+              },
+              proposal: {
+                id: "SUB-PODS0099",
+                title: "Portal talk",
+                trackName: "Platform",
+                programOutcome: "accepted",
+              },
+              session: {
+                id: "ses_1",
+                title: "Portal talk",
+                format: "talk",
+                trackId: "platform",
+                roomId: null,
+                startsAt: null,
+                endsAt: null,
+              },
+              tasks: [
+                {
+                  id: "tsk_1",
+                  title: "Upload headshot",
+                  kind: "headshot",
+                  status: "open",
+                  speakerId: "spk_1",
+                  dueAt: "2026-09-01T00:00:00.000Z",
+                },
+              ],
+              nextDeadline: "2026-09-01T00:00:00.000Z",
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+      }),
+    );
+
+    renderAt("/e/pacific-open-data-summit-2026/portal/signed-token");
+
+    expect(await screen.findByRole("heading", { name: "Pacific Open Data Summit 2026" })).toBeVisible();
+    expect(screen.getByText("Living biography")).toBeVisible();
+    expect(screen.getByText("Director at Event Time")).toBeVisible();
+    expect(screen.getByText("Historic Org")).toBeVisible();
+    expect(screen.getByText("Upload headshot")).toBeVisible();
+    expect(screen.getByText(/SUB-PODS0099/)).toBeVisible();
+    expect(screen.queryByText(/committee|private note|digest/i)).not.toBeInTheDocument();
   });
 });

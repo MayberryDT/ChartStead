@@ -16,6 +16,7 @@ import type {
   ProposalValidationError,
   PublicProposal,
   ReviewerAssignment,
+  SpeakerPortalSession,
   SubmissionAnswers,
   SubmitterEditSession,
   UploadedAssetAnswer,
@@ -538,6 +539,24 @@ export async function fetchSubmitterEditSession(
   if (!response.ok || !("proposal" in body)) {
     throw new ApiError(
       "error" in body ? body.error : "This edit link is invalid or has expired.",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function fetchSpeakerPortalSession(
+  eventId: string,
+  token: string,
+): Promise<SpeakerPortalSession> {
+  const response = await fetch(
+    `/api/events/${eventId}/portal?token=${encodeURIComponent(token)}`,
+  );
+  const body = await readJson<SpeakerPortalSession | { error: string }>(response);
+  if (!response.ok || !("profile" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "This portal link is invalid or has expired.",
       response.status,
       body,
     );

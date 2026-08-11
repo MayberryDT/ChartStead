@@ -41,17 +41,24 @@ import { createSeedProposals } from "./seed-proposals";
 import {
   createTokenId,
   signEditToken,
+  signPortalToken,
   verifyEditToken,
+  verifyPortalToken,
   type SignedEditTokenPayload,
+  type SignedPortalTokenPayload,
 } from "./signed-links";
 import type { AppBindings } from "./types";
 
 const MAX_PROPOSAL_BODY_BYTES = 64 * 1_024;
 const EDIT_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
+const PORTAL_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 90;
 const DEFAULT_FILE_MAX_BYTES = 5 * 1024 * 1024;
 const MAX_UPLOAD_FILE_NAME_LENGTH = 120;
 const INVALID_EDIT_LINK_ERROR = {
   error: "This edit link is invalid or has expired.",
+} as const;
+const INVALID_PORTAL_LINK_ERROR = {
+  error: "This portal link is invalid or has expired.",
 } as const;
 
 function deriveEventTrackChoices(
@@ -139,6 +146,17 @@ type EditTokenLookup = {
   getEditToken: (tokenId: string) => Promise<EditTokenRow | null>;
 };
 
+type PortalTokenRow = {
+  tokenId: string;
+  speakerId: string;
+  expiresAt: string;
+  revokedAt: string | null;
+};
+
+type PortalTokenLookup = {
+  getPortalToken: (tokenId: string) => Promise<PortalTokenRow | null>;
+};
+
 async function authorizeSubmitterEdit(input: {
   secret: string | null;
   token: string;
@@ -164,6 +182,32 @@ async function authorizeSubmitterEdit(input: {
     !tokenRow ||
     tokenRow.revokedAt ||
     tokenRow.proposalId !== payload.proposalId ||
+    Date.parse(tokenRow.expiresAt) <= nowMs
+  ) {
+    return null;
+  }
+
+  return { payload, tokenRow };
+}
+
+async function authorizeSpeakerPortal(input: {
+  secret: string | null;
+  token: string;
+  eventId: string;
+  store: PortalTokenLookup;
+  nowMs?: number;
+}): Promise<{ payload: SignedPortalTokenPayload; tokenRow: PortalTokenRow } | null> {
+  const nowMs = input.nowMs ?? Date.now();
+  if (!input.secret || !input.token) return null;
+
+  const payload = await verifyPortalToken(input.secret, input.token, nowMs);
+  if (!payload || payload.eventId !== input.eventId) return null;
+
+  const tokenRow = await input.store.getPortalToken(payload.tokenId);
+  if (
+    !tokenRow ||
+    tokenRow.revokedAt ||
+    tokenRow.speakerId !== payload.speakerId ||
     Date.parse(tokenRow.expiresAt) <= nowMs
   ) {
     return null;
@@ -1495,6 +1539,34 @@ export function createApp(options: AppOptions = {}) {
     },
   );
 
+  app.get("/api/events/:eventId/portal", async (c) => {
+    const eventId = c.req.param("eventId");
+    const token = c.req.query("token") ?? "";
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const authorized = await authorizeSpeakerPortal({
+      secret: signingSecret(c.env, options.signingSecret),
+      token,
+      eventId,
+      store,
+    });
+    if (!authorized) {
+      return c.json(INVALID_PORTAL_LINK_ERROR, 401);
+    }
+
+    const session = await store.getSpeakerPortalSession({
+      speakerId: authorized.payload.speakerId,
+      expiresAt: authorized.tokenRow.expiresAt,
+    });
+    if (!session) {
+      return c.json(INVALID_PORTAL_LINK_ERROR, 401);
+    }
+    return c.json(session);
+  });
+
   app.get("/api/events/:eventId/submitter/edit", async (c) => {
     const eventId = c.req.param("eventId");
     const token = c.req.query("token") ?? "";
@@ -1878,6 +1950,30 @@ export function createApp(options: AppOptions = {}) {
         result.status,
       );
     }
+
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const secret = signingSecret(c.env, options.signingSecret);
+    if (secret) {
+      const grants = await store.listPortalTokensForPlan(planId);
+      const exp = Math.floor(Date.now() / 1000) + PORTAL_TOKEN_TTL_SECONDS;
+      for (const grant of grants) {
+        if (grant.signedToken || grant.revokedAt) continue;
+        const token = await signPortalToken(secret, {
+          v: 1,
+          kind: "portal",
+          eventId,
+          speakerId: grant.speakerId,
+          tokenId: grant.tokenId,
+          exp,
+        });
+        await store.setPortalTokenSignature({
+          tokenId: grant.tokenId,
+          signedToken: token,
+          expiresAt: new Date(exp * 1000).toISOString(),
+        });
+      }
+    }
+
     return c.json(result.plan);
   });
 
