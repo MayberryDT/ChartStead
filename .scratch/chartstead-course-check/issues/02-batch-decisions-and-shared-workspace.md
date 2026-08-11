@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — Single Decision Course Check tracer.
 
-**Status:** in-review
+**Status:** done
 
 - [x] An administrator can create one Decision Course Check from selected proposals with accepted or declined final outcomes.
 - [x] The workspace presents irreversible effects, people, public consequences, operational warnings, integration effects, and internal details in the locked evidence order.
