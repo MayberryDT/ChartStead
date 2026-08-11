@@ -4,6 +4,11 @@ Keep this file **minimal**. It only points agents at the right sources. Do not d
 
 **Living file:** when you add a significant new area (app code, design surface, context pack, research conclusion, or build decision), add **one short pointer** below. Prefer links over restating content. If a pointer goes stale, fix or remove it.
 
+## Hard rules
+
+- **Never start, resume, or “helpfully continue” a competition ticket unless Tyler explicitly names that ticket in this conversation.** Course Check, research, and docs sessions stay in their lane. Do not open ticket worktrees or edit ticket implementation “while you’re here.”
+- Do not invent recovery handoffs, quarantine status, or blocked gates that Tyler did not ask for.
+
 ## Start here
 
 1. [context/README.md](context/README.md) — how project context is organized
@@ -37,8 +42,8 @@ Use the single-context domain-doc layout. See [docs/agents/domain.md](docs/agent
 - Hono Worker, Better Auth boundary, and Durable Object event store: [`worker/`](worker/)
 - Cloudflare bindings and environments: [`wrangler.jsonc`](wrangler.jsonc)
 - Implementation work: [`.scratch/chartstead-competition-build/`](.scratch/chartstead-competition-build/)
-- Ticket 03 start or resume: [read the recovery handoff first](.scratch/chartstead-competition-build/TICKET-03-RECOVERY.md)
 - Course Check specification and implementation work: [`.scratch/chartstead-course-check/`](.scratch/chartstead-course-check/)
+- Ticket 03 implementation branch/worktree (when Tyler asks): `.worktrees/ticket-03-guided-cfp` on `ticket-03-guided-cfp`
 
 ## Private / bulk source material
 
