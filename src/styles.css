@@ -2174,6 +2174,101 @@ table.grid tbody tr[aria-selected="true"] td:first-child {
   padding-top: 8px;
 }
 
+.course-check-evidence-list {
+  display: grid;
+  gap: 8px;
+}
+
+.course-check-evidence {
+  border: 1px solid var(--outline);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+  padding: 0 12px;
+}
+
+.course-check-evidence[data-expanded="risk"] {
+  border-color: var(--outline-strong);
+}
+
+.course-check-evidence summary {
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: baseline;
+  padding: 12px 0;
+}
+
+.course-check-evidence-summary {
+  color: var(--on-surface-variant);
+  font-size: 13px;
+}
+
+.course-check-evidence-body {
+  padding: 0 0 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.course-check-batch-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.course-check-batch-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.course-check-batch-items li[data-status="deferred"] {
+  opacity: 0.72;
+}
+
+.course-check-defer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+  width: 100%;
+}
+
+.course-check-defer label {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 240px;
+  font-size: 13px;
+}
+
+.course-check-defer input {
+  width: 100%;
+}
+
+.course-check-mutations {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--on-surface-variant);
+}
+
+.batch-decision-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--outline);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+  margin-bottom: 12px;
+}
+
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;

@@ -2309,6 +2309,7 @@ export function createApp(options: AppOptions = {}) {
     const body = (await c.req.json().catch(() => null)) as {
       proposalId?: unknown;
       outcome?: unknown;
+      items?: unknown;
       idempotencyKey?: unknown;
     } | null;
     const headerKey = c.req.header("idempotency-key");
@@ -2316,24 +2317,154 @@ export function createApp(options: AppOptions = {}) {
       (typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim()) ||
       (typeof headerKey === "string" && headerKey.trim()) ||
       "";
-    if (!body || typeof body.proposalId !== "string" || !body.proposalId.trim()) {
-      return c.json({ error: "proposalId is required" }, 400);
-    }
-    if (body.outcome !== "accepted" && body.outcome !== "declined") {
-      return c.json({ error: "outcome must be accepted or declined" }, 400);
+    const items: Array<{ proposalId: string; outcome: "accepted" | "declined" }> = [];
+    if (Array.isArray(body?.items)) {
+      for (const raw of body.items) {
+        const row = raw as { proposalId?: unknown; outcome?: unknown };
+        if (typeof row.proposalId !== "string" || !row.proposalId.trim()) {
+          return c.json({ error: "Each item requires proposalId" }, 400);
+        }
+        if (row.outcome !== "accepted" && row.outcome !== "declined") {
+          return c.json({ error: "Each item outcome must be accepted or declined" }, 400);
+        }
+        items.push({ proposalId: row.proposalId.trim(), outcome: row.outcome });
+      }
+    } else if (typeof body?.proposalId === "string" && body.proposalId.trim()) {
+      if (body.outcome !== "accepted" && body.outcome !== "declined") {
+        return c.json({ error: "outcome must be accepted or declined" }, 400);
+      }
+      items.push({ proposalId: body.proposalId.trim(), outcome: body.outcome });
+    } else {
+      return c.json({ error: "proposalId or items[] is required" }, 400);
     }
     if (!idempotencyKey) {
       return c.json({ error: "idempotencyKey is required" }, 400);
     }
     const store = c.env.EVENT_STORE.getByName(eventId);
-    const proposal = await store.getProposal(body.proposalId);
-    if (!proposal) return c.json({ error: "Proposal not found" }, 404);
-    const result = (await store.createDecisionCourseCheck({
-      proposalId: body.proposalId,
-      outcome: body.outcome,
+    for (const item of items) {
+      const proposal = await store.getProposal(item.proposalId);
+      if (!proposal) return c.json({ error: `Proposal ${item.proposalId} not found` }, 404);
+    }
+    try {
+      const result = (await store.createDecisionCourseCheck({
+        items,
+        idempotencyKey,
+        actor: { id: principal.id, displayName: principal.displayName },
+      })) as {
+        plan: import("../shared/course-check").CourseCheckPlan;
+        created: boolean;
+        linkedPlans?: import("../shared/course-check").CourseCheckPlan[];
+      };
+      if (result.linkedPlans && result.linkedPlans.length > 0) {
+        return c.json(
+          { ...result.plan, linkedPlans: result.linkedPlans },
+          result.created ? 201 : 200,
+        );
+      }
+      return c.json(result.plan, result.created ? 201 : 200);
+    } catch (error) {
+      return c.json(
+        {
+          error: error instanceof Error ? error.message : "Unable to create Decision Course Check",
+        },
+        400,
+      );
+    }
+  });
+
+  app.get("/api/events/:eventId/course-checks", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const plans = await c.env.EVENT_STORE.getByName(eventId).listCourseCheckPlans();
+    return c.json({ plans });
+  });
+
+  app.post("/api/events/:eventId/course-checks/:planId/defer", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    const planId = c.req.param("planId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json(
+        {
+          error: "Administrator access is required to defer Course Check items.",
+          code: "missing_authority",
+          recoveryGuidance:
+            "Ask an event administrator to continue this Course Check.",
+        },
+        403,
+      );
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const body = (await c.req.json().catch(() => null)) as {
+      planVersion?: unknown;
+      digest?: unknown;
+      itemIds?: unknown;
+      reason?: unknown;
+      idempotencyKey?: unknown;
+    } | null;
+    const headerKey = c.req.header("idempotency-key");
+    const idempotencyKey =
+      (typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim()) ||
+      (typeof headerKey === "string" && headerKey.trim()) ||
+      "";
+    if (
+      !body ||
+      !Number.isInteger(body.planVersion) ||
+      typeof body.digest !== "string" ||
+      !Array.isArray(body.itemIds) ||
+      typeof body.reason !== "string" ||
+      !idempotencyKey
+    ) {
+      return c.json(
+        {
+          error:
+            "planVersion, digest, itemIds, reason, and idempotencyKey are required to defer items.",
+        },
+        400,
+      );
+    }
+    const itemIds = body.itemIds.filter((id): id is string => typeof id === "string");
+    const result = (await c.env.EVENT_STORE.getByName(eventId).deferCourseCheckItems({
+      planId,
+      planVersion: body.planVersion as number,
+      digest: body.digest,
+      itemIds,
+      reason: body.reason,
       idempotencyKey,
       actor: { id: principal.id, displayName: principal.displayName },
-    })) as { plan: import("../shared/course-check").CourseCheckPlan; created: boolean };
+    })) as
+      | { ok: true; plan: import("../shared/course-check").CourseCheckPlan; created: boolean }
+      | {
+          ok: false;
+          status: 400 | 409;
+          code: string;
+          error: string;
+          recoveryGuidance: string;
+        };
+    if (!result.ok) {
+      return c.json(
+        {
+          error: result.error,
+          code: result.code,
+          recoveryGuidance: result.recoveryGuidance,
+        },
+        result.status,
+      );
+    }
     return c.json(result.plan, result.created ? 201 : 200);
   });
 
@@ -2460,6 +2591,7 @@ export function createApp(options: AppOptions = {}) {
       digest?: unknown;
       stageId?: unknown;
       idempotencyKey?: unknown;
+      softWarningOverrides?: unknown;
     } | null;
     const headerKey = c.req.header("idempotency-key");
     const idempotencyKey =
@@ -2481,6 +2613,18 @@ export function createApp(options: AppOptions = {}) {
         400,
       );
     }
+    const softWarningOverrides = Array.isArray(body.softWarningOverrides)
+      ? body.softWarningOverrides
+          .map((row) => {
+            const item = row as { findingId?: unknown; reason?: unknown };
+            if (typeof item.findingId !== "string") return null;
+            return {
+              findingId: item.findingId,
+              reason: typeof item.reason === "string" ? item.reason : null,
+            };
+          })
+          .filter((row): row is { findingId: string; reason: string | null } => Boolean(row))
+      : undefined;
     const result = (await c.env.EVENT_STORE.getByName(eventId).applyCourseCheck({
       planId,
       planVersion: body.planVersion as number,
@@ -2488,6 +2632,7 @@ export function createApp(options: AppOptions = {}) {
       stageId: body.stageId,
       idempotencyKey,
       actor: { id: principal.id, displayName: principal.displayName },
+      softWarningOverrides,
     })) as
       | { ok: true; plan: import("../shared/course-check").CourseCheckPlan; created: boolean }
       | {

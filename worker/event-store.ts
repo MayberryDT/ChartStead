@@ -11,8 +11,15 @@ import type {
   CourseCheckPlan,
   CourseCheckPlanBody,
   CourseCheckPlanState,
+  CourseCheckPlanVersion,
   CourseCheckReceipt,
+  DecisionPlanBody,
+  PlanMutationRecord,
   ProgramOutcome,
+} from "../shared/course-check";
+import {
+  DEFAULT_AGE_WARNING_HOURS,
+  DEFAULT_DECISION_BATCH_LIMIT,
 } from "../shared/course-check";
 import type {
   AgendaWorkspaceResponse,
@@ -54,12 +61,18 @@ import {
 } from "../shared/schedule-conflicts";
 import type { AssetClaimInput } from "./cfp-submissions";
 import {
+  decisionBodyDigestPayload,
+  deferDecisionItems,
   hasBlockerFindings,
+  markDecisionItemsApplied,
+  planDecisionBatch,
   planDecisionCascade,
   planGuaranteedSpeaker,
+  splitSelectionsIfNeeded,
   type ExistingSpeaker,
 } from "./course-check/decision-planner";
 import { digestPayload } from "./course-check/digest";
+import { computeAgeWarning } from "./course-check/evidence";
 import { createStableProposalId } from "./proposals";
 import type { AppBindings } from "./types";
 
@@ -526,6 +539,77 @@ function mapProposal(row: ProposalRow, eventId: string): OrganizerProposal {
   };
 }
 
+function normalizeCourseCheckBody(body: CourseCheckPlanBody): CourseCheckPlanBody {
+  if (body.actionType === "guaranteed_speaker") {
+    return {
+      ...body,
+      evidenceSections: body.evidenceSections ?? [],
+      softWarningOverrides: body.softWarningOverrides ?? [],
+      ageWarningHours: body.ageWarningHours ?? DEFAULT_AGE_WARNING_HOURS,
+      ageWarning: body.ageWarning ?? null,
+    };
+  }
+  const decision = body as DecisionPlanBody;
+  if (decision.items && decision.items.length > 0) {
+    return {
+      ...decision,
+      followUpQueue: decision.followUpQueue ?? [],
+      evidenceSections: decision.evidenceSections ?? [],
+      softWarningOverrides: decision.softWarningOverrides ?? [],
+      aggregateProgress: decision.aggregateProgress ?? {
+        total: decision.items.length,
+        active: decision.items.filter((item) => item.status === "active").length,
+        deferred: decision.items.filter((item) => item.status === "deferred").length,
+        applied: decision.items.filter((item) => item.status === "applied").length,
+      },
+      linkedPlanIds: decision.linkedPlanIds ?? [],
+      parentPlanId: decision.parentPlanId ?? null,
+      batchGroupId: decision.batchGroupId ?? null,
+      splitExplanation: decision.splitExplanation ?? null,
+      ageWarningHours: decision.ageWarningHours ?? DEFAULT_AGE_WARNING_HOURS,
+      ageWarning: decision.ageWarning ?? null,
+    };
+  }
+  // Legacy single-decision bodies without items.
+  return {
+    ...decision,
+    items: [
+      {
+        itemId: `item_legacy_${decision.proposalId}`,
+        proposalId: decision.proposalId,
+        outcome: decision.outcome,
+        proposalRevision: decision.proposalRevision,
+        status: "active",
+        deferredAt: null,
+        deferredBy: null,
+        deferralReason: null,
+        speakers: decision.speakers,
+        participations: decision.participations,
+        session: decision.session,
+        tasks: decision.tasks,
+        portalAccess: decision.portalAccess,
+        deltas: decision.deltas,
+        findings: decision.findings,
+      },
+    ],
+    followUpQueue: [],
+    evidenceSections: decision.evidenceSections ?? [],
+    softWarningOverrides: decision.softWarningOverrides ?? [],
+    aggregateProgress: {
+      total: 1,
+      active: 1,
+      deferred: 0,
+      applied: 0,
+    },
+    linkedPlanIds: [],
+    parentPlanId: null,
+    batchGroupId: null,
+    splitExplanation: null,
+    ageWarningHours: DEFAULT_AGE_WARNING_HOURS,
+    ageWarning: null,
+  };
+}
+
 function mapCourseCheckPlan(row: CourseCheckPlanRow, eventId: string): CourseCheckPlan {
   let receipt: CourseCheckReceipt | null = null;
   let approval: CourseCheckPlan["approval"] = null;
@@ -549,7 +633,7 @@ function mapCourseCheckPlan(row: CourseCheckPlanRow, eventId: string): CourseChe
       id: row.created_by_id,
       displayName: row.created_by_name,
     },
-    body: JSON.parse(row.body_json) as CourseCheckPlanBody,
+    body: normalizeCourseCheckBody(JSON.parse(row.body_json) as CourseCheckPlanBody),
     approval,
     receipt,
   };
@@ -892,7 +976,62 @@ export class EventStore extends DurableObject<AppBindings> {
         )
       `);
 
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS course_check_plan_versions (
+          plan_id TEXT NOT NULL,
+          version INTEGER NOT NULL,
+          digest TEXT NOT NULL,
+          state TEXT NOT NULL,
+          body_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          created_by_id TEXT NOT NULL,
+          created_by_name TEXT NOT NULL,
+          mutation_kind TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          PRIMARY KEY (plan_id, version)
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS course_check_mutations (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT NOT NULL,
+          from_version INTEGER NOT NULL,
+          to_version INTEGER NOT NULL,
+          kind TEXT NOT NULL,
+          actor_id TEXT NOT NULL,
+          actor_name TEXT NOT NULL,
+          at TEXT NOT NULL,
+          summary TEXT NOT NULL
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS course_check_follow_ups (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT NOT NULL,
+          proposal_id TEXT NOT NULL,
+          outcome TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          source_version INTEGER NOT NULL,
+          deferred_at TEXT NOT NULL,
+          deferred_by_id TEXT NOT NULL,
+          deferred_by_name TEXT NOT NULL,
+          status TEXT NOT NULL
+        )
+      `);
+
       this.ensureColumn("events", "submission_count", "INTEGER NOT NULL DEFAULT 0");
+      this.ensureColumn(
+        "events",
+        "course_check_age_warning_hours",
+        `INTEGER NOT NULL DEFAULT ${DEFAULT_AGE_WARNING_HOURS}`,
+      );
+      this.ensureColumn(
+        "events",
+        "course_check_batch_limit",
+        `INTEGER NOT NULL DEFAULT ${DEFAULT_DECISION_BATCH_LIMIT}`,
+      );
       this.ensureColumn("events", "unreviewed_count", "INTEGER NOT NULL DEFAULT 0");
       this.ensureColumn(
         "events",
@@ -4600,11 +4739,218 @@ export class EventStore extends DurableObject<AppBindings> {
     };
   }
 
+  private courseCheckSettings(): {
+    ageWarningHours: number;
+    batchLimit: number;
+  } {
+    const row = this.ctx.storage.sql
+      .exec<{
+        course_check_age_warning_hours: number | null;
+        course_check_batch_limit: number | null;
+      }>(
+        `SELECT course_check_age_warning_hours, course_check_batch_limit FROM events LIMIT 1`,
+      )
+      .toArray()[0];
+    return {
+      ageWarningHours: Number(
+        row?.course_check_age_warning_hours ?? DEFAULT_AGE_WARNING_HOURS,
+      ),
+      batchLimit: Number(row?.course_check_batch_limit ?? DEFAULT_DECISION_BATCH_LIMIT),
+    };
+  }
+
+  private listPlanVersions(planId: string): CourseCheckPlanVersion[] {
+    return this.ctx.storage.sql
+      .exec<{
+        plan_id: string;
+        version: number;
+        digest: string;
+        state: string;
+        body_json: string;
+        created_at: string;
+        created_by_id: string;
+        created_by_name: string;
+        mutation_kind: string;
+        summary: string;
+      }>(
+        `SELECT plan_id, version, digest, state, body_json, created_at,
+                created_by_id, created_by_name, mutation_kind, summary
+         FROM course_check_plan_versions
+         WHERE plan_id = ?
+         ORDER BY version DESC`,
+        planId,
+      )
+      .toArray()
+      .map((row) => ({
+        planId: row.plan_id,
+        version: Number(row.version),
+        digest: row.digest,
+        state: row.state as CourseCheckPlanState,
+        body: normalizeCourseCheckBody(JSON.parse(row.body_json) as CourseCheckPlanBody),
+        createdAt: row.created_at,
+        createdBy: { id: row.created_by_id, displayName: row.created_by_name },
+        mutationKind: row.mutation_kind as PlanMutationRecord["kind"],
+        summary: row.summary,
+      }));
+  }
+
+  private listPlanMutations(planId: string): PlanMutationRecord[] {
+    return this.ctx.storage.sql
+      .exec<{
+        id: string;
+        plan_id: string;
+        from_version: number;
+        to_version: number;
+        kind: string;
+        actor_id: string;
+        actor_name: string;
+        at: string;
+        summary: string;
+      }>(
+        `SELECT id, plan_id, from_version, to_version, kind, actor_id, actor_name, at, summary
+         FROM course_check_mutations
+         WHERE plan_id = ?
+         ORDER BY to_version DESC, at DESC`,
+        planId,
+      )
+      .toArray()
+      .map((row) => ({
+        id: row.id,
+        planId: row.plan_id,
+        fromVersion: Number(row.from_version),
+        toVersion: Number(row.to_version),
+        kind: row.kind as PlanMutationRecord["kind"],
+        actor: { id: row.actor_id, displayName: row.actor_name },
+        at: row.at,
+        summary: row.summary,
+      }));
+  }
+
+  private recordPlanVersion(input: {
+    planId: string;
+    version: number;
+    digest: string;
+    state: CourseCheckPlanState;
+    body: CourseCheckPlanBody;
+    actor: CourseCheckActor;
+    at: string;
+    mutationKind: PlanMutationRecord["kind"];
+    summary: string;
+    fromVersion: number;
+  }): void {
+    this.ctx.storage.sql.exec(
+      `INSERT INTO course_check_plan_versions
+        (plan_id, version, digest, state, body_json, created_at, created_by_id,
+         created_by_name, mutation_kind, summary)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(plan_id, version) DO UPDATE SET
+         digest = excluded.digest,
+         state = excluded.state,
+         body_json = excluded.body_json,
+         mutation_kind = excluded.mutation_kind,
+         summary = excluded.summary`,
+      input.planId,
+      input.version,
+      input.digest,
+      input.state,
+      JSON.stringify(input.body),
+      input.at,
+      input.actor.id,
+      input.actor.displayName,
+      input.mutationKind,
+      input.summary,
+    );
+    this.ctx.storage.sql.exec(
+      `INSERT INTO course_check_mutations
+        (id, plan_id, from_version, to_version, kind, actor_id, actor_name, at, summary)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      crypto.randomUUID(),
+      input.planId,
+      input.fromVersion,
+      input.version,
+      input.mutationKind,
+      input.actor.id,
+      input.actor.displayName,
+      input.at,
+      input.summary,
+    );
+  }
+
+  private enrichPlan(plan: CourseCheckPlan): CourseCheckPlan {
+    const body = plan.body;
+    const ageWarning = computeAgeWarning({
+      createdAt: plan.createdAt,
+      ageWarningHours: body.ageWarningHours ?? DEFAULT_AGE_WARNING_HOURS,
+      stages: body.stages,
+    });
+    let nextBody = body;
+    if (ageWarning) {
+      nextBody = { ...body, ageWarning };
+    }
+
+    // Stage-scoped freshness: mark dependent stages out of date when relevant inputs change.
+    let state = plan.state;
+    if (
+      plan.state !== "Complete" &&
+      plan.state !== "Superseded" &&
+      nextBody.actionType === "decision"
+    ) {
+      const changed = this.detectDecisionStaleInputs(nextBody);
+      if (changed.length > 0) {
+        state = "Out of date";
+        nextBody = {
+          ...nextBody,
+          stages: nextBody.stages.map((stage) =>
+            stage.id === "apply-decision"
+              ? { ...stage, status: "out_of_date" as const }
+              : stage,
+          ),
+          findings: [
+            ...nextBody.findings.filter((f) => f.code !== "relevant_input_changed"),
+            {
+              id: "relevant-input-changed",
+              severity: "blocker",
+              code: "relevant_input_changed",
+              message: `Relevant inputs changed: ${changed.join(", ")}.`,
+              recoveryGuidance:
+                "Create a new Decision Course Check from the current proposal revisions, or defer the changed items.",
+            },
+          ],
+        };
+      }
+    }
+
+    return {
+      ...plan,
+      state,
+      body: nextBody,
+      versions: this.listPlanVersions(plan.id).filter((v) => v.version !== plan.version),
+      mutations: this.listPlanMutations(plan.id),
+    };
+  }
+
+  private detectDecisionStaleInputs(body: DecisionPlanBody): string[] {
+    const changed: string[] = [];
+    for (const item of body.items) {
+      if (item.status !== "active") continue;
+      const proposal = this.getProposal(item.proposalId);
+      if (!proposal) {
+        changed.push(`${item.proposalId}:missing`);
+        continue;
+      }
+      if (proposal.reviewVersion !== item.proposalRevision) {
+        changed.push(`${item.proposalId}:reviewVersion`);
+      }
+    }
+    return changed;
+  }
+
   getCourseCheckPlan(planId: string): CourseCheckPlan | null {
     const eventId = this.eventIdOrThrow();
     const row = this.loadCourseCheckPlanRow(planId);
     if (!row) return null;
-    return this.attachReceipt(mapCourseCheckPlan(row, eventId), row.receipt_id);
+    const plan = this.attachReceipt(mapCourseCheckPlan(row, eventId), row.receipt_id);
+    return this.enrichPlan(plan);
   }
 
   listCourseCheckPlans(): CourseCheckPlan[] {
@@ -4617,7 +4963,9 @@ export class EventStore extends DurableObject<AppBindings> {
          ORDER BY created_at DESC, id DESC`,
       )
       .toArray()
-      .map((row) => this.attachReceipt(mapCourseCheckPlan(row, eventId), row.receipt_id));
+      .map((row) =>
+        this.enrichPlan(this.attachReceipt(mapCourseCheckPlan(row, eventId), row.receipt_id)),
+      );
   }
 
   private readIdempotency(
@@ -4667,11 +5015,14 @@ export class EventStore extends DurableObject<AppBindings> {
   }
 
   async createDecisionCourseCheck(input: {
-    proposalId: string;
-    outcome: ProgramOutcome;
+    proposalId?: string;
+    outcome?: ProgramOutcome;
+    items?: Array<{ proposalId: string; outcome: ProgramOutcome }>;
     idempotencyKey: string;
     actor: CourseCheckActor;
-  }): Promise<{ plan: CourseCheckPlan; created: boolean }> {
+  }): Promise<
+    | { plan: CourseCheckPlan; created: boolean; linkedPlans?: CourseCheckPlan[] }
+  > {
     const existing = this.readIdempotency("create-decision", input.idempotencyKey);
     if (existing) {
       const plan = this.getCourseCheckPlan(existing.planId);
@@ -4679,57 +5030,290 @@ export class EventStore extends DurableObject<AppBindings> {
       return { plan, created: false };
     }
 
-    const proposal = this.getProposal(input.proposalId);
-    if (!proposal) throw new Error(`Proposal ${input.proposalId} not found.`);
+    const selections =
+      input.items && input.items.length > 0
+        ? input.items
+        : input.proposalId && input.outcome
+          ? [{ proposalId: input.proposalId, outcome: input.outcome }]
+          : [];
+    if (selections.length === 0) {
+      throw new Error("At least one proposal decision is required.");
+    }
 
-    const planId = crypto.randomUUID();
-    const body = planDecisionCascade({
-      proposal,
-      outcome: input.outcome,
-      existingSpeakersByEmail: this.listExistingSpeakersByEmail(),
-      planId,
+    const resolved = selections.map((selection) => {
+      const proposal = this.getProposal(selection.proposalId);
+      if (!proposal) throw new Error(`Proposal ${selection.proposalId} not found.`);
+      return { proposal, outcome: selection.outcome };
     });
-    const digest = await digestPayload({
-      actionType: body.actionType,
-      proposalId: body.proposalId,
-      outcome: body.outcome,
-      proposalRevision: body.proposalRevision,
-      speakers: body.speakers,
-      participations: body.participations,
-      session: body.session,
-      tasks: body.tasks,
-      portalAccess: body.portalAccess,
-      deltas: body.deltas,
-      findings: body.findings,
-      stages: body.stages,
-    });
+
+    const settings = this.courseCheckSettings();
+    const chunks = splitSelectionsIfNeeded(resolved, settings.batchLimit);
+    const batchGroupId = crypto.randomUUID();
     const now = new Date().toISOString();
-    const state: CourseCheckPlanState = hasBlockerFindings(body.findings)
-      ? "Needs attention"
-      : "Ready";
-    this.ctx.storage.sql.exec(
-      `INSERT INTO course_check_plans
-        (id, action_type, state, version, digest, body_json, created_at, updated_at,
-         created_by_id, created_by_name, approval_json, receipt_id)
-       VALUES (?, 'decision', ?, 1, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
-      planId,
-      state,
-      digest,
-      JSON.stringify(body),
-      now,
-      now,
-      input.actor.id,
-      input.actor.displayName,
-    );
-    const plan = this.getCourseCheckPlan(planId);
-    if (!plan) throw new Error("Decision Course Check was not persisted.");
+    const speakersByEmail = this.listExistingSpeakersByEmail();
+    const createdPlans: CourseCheckPlan[] = [];
+
+    for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+      const chunk = chunks[chunkIndex]!;
+      const planId = crypto.randomUUID();
+      const splitExplanation =
+        chunks.length > 1
+          ? `Batch exceeded the safe limit of ${settings.batchLimit} decisions. Split into ${chunks.length} linked exact plans (part ${chunkIndex + 1} of ${chunks.length}).`
+          : null;
+      const body = planDecisionBatch({
+        planId,
+        batchGroupId,
+        selections: chunk,
+        existingSpeakersByEmail: speakersByEmail,
+        ageWarningHours: settings.ageWarningHours,
+        parentPlanId: null,
+        linkedPlanIds: [],
+        splitExplanation,
+      });
+      const digest = await digestPayload(decisionBodyDigestPayload(body));
+      const state: CourseCheckPlanState = hasBlockerFindings(body.findings)
+        ? "Needs attention"
+        : "Ready";
+      this.ctx.storage.sql.exec(
+        `INSERT INTO course_check_plans
+          (id, action_type, state, version, digest, body_json, created_at, updated_at,
+           created_by_id, created_by_name, approval_json, receipt_id)
+         VALUES (?, 'decision', ?, 1, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+        planId,
+        state,
+        digest,
+        JSON.stringify(body),
+        now,
+        now,
+        input.actor.id,
+        input.actor.displayName,
+      );
+      this.recordPlanVersion({
+        planId,
+        version: 1,
+        digest,
+        state,
+        body,
+        actor: input.actor,
+        at: now,
+        mutationKind: chunks.length > 1 ? "split" : "create",
+        summary:
+          chunks.length > 1
+            ? `Created linked batch plan part ${chunkIndex + 1}/${chunks.length} with ${chunk.length} decision(s).`
+            : `Created Decision Course Check with ${chunk.length} decision(s).`,
+        fromVersion: 0,
+      });
+      const plan = this.getCourseCheckPlan(planId);
+      if (!plan) throw new Error("Decision Course Check was not persisted.");
+      createdPlans.push(plan);
+    }
+
+    // Wire linkedPlanIds across the split set.
+    if (createdPlans.length > 1) {
+      const allIds = createdPlans.map((plan) => plan.id);
+      for (const plan of createdPlans) {
+        if (plan.body.actionType !== "decision") continue;
+        const nextBody: DecisionPlanBody = {
+          ...plan.body,
+          linkedPlanIds: allIds.filter((id) => id !== plan.id),
+        };
+        const digest = await digestPayload(decisionBodyDigestPayload(nextBody));
+        this.ctx.storage.sql.exec(
+          `UPDATE course_check_plans SET body_json = ?, digest = ?, updated_at = ? WHERE id = ?`,
+          JSON.stringify(nextBody),
+          digest,
+          now,
+          plan.id,
+        );
+      }
+    }
+
+    const primary = this.getCourseCheckPlan(createdPlans[0]!.id);
+    if (!primary) throw new Error("Primary Decision Course Check is missing.");
+    const linkedPlans = createdPlans
+      .slice(1)
+      .map((plan) => this.getCourseCheckPlan(plan.id))
+      .filter((plan): plan is CourseCheckPlan => Boolean(plan));
     this.writeIdempotency({
       command: "create-decision",
       key: input.idempotencyKey,
-      planId,
-      response: plan,
+      planId: primary.id,
+      response: primary,
     });
-    return { plan, created: true };
+    return {
+      plan: primary,
+      created: true,
+      linkedPlans: linkedPlans.length > 0 ? linkedPlans : undefined,
+    };
+  }
+
+  async deferCourseCheckItems(input: {
+    planId: string;
+    planVersion: number;
+    digest: string;
+    itemIds: string[];
+    reason: string;
+    idempotencyKey: string;
+    actor: CourseCheckActor;
+  }): Promise<
+    | { ok: true; plan: CourseCheckPlan; created: boolean }
+    | {
+        ok: false;
+        status: 400 | 409;
+        code: string;
+        error: string;
+        recoveryGuidance: string;
+      }
+  > {
+    const existing = this.readIdempotency("defer", input.idempotencyKey);
+    if (existing) {
+      const plan = this.getCourseCheckPlan(existing.planId);
+      if (!plan) throw new Error("Idempotent defer plan is missing.");
+      return { ok: true, plan, created: false };
+    }
+
+    const row = this.loadCourseCheckPlanRow(input.planId);
+    if (!row) {
+      return {
+        ok: false,
+        status: 400,
+        code: "plan_not_found",
+        error: "Course Check plan not found.",
+        recoveryGuidance: "Create a new Course Check from the current records.",
+      };
+    }
+    const plan = mapCourseCheckPlan(row, this.eventIdOrThrow());
+    if (plan.receipt || plan.state === "Complete") {
+      return {
+        ok: false,
+        status: 409,
+        code: "plan_already_applied",
+        error: "This Course Check was already applied.",
+        recoveryGuidance: "Open the follow-up queue or create a new Course Check.",
+      };
+    }
+    if (plan.version !== input.planVersion || plan.digest !== input.digest) {
+      return {
+        ok: false,
+        status: 409,
+        code: "plan_version_mismatch",
+        error: "This Course Check changed since you loaded it.",
+        recoveryGuidance: "Reload the Course Check and review the latest plan version.",
+      };
+    }
+    if (plan.body.actionType !== "decision") {
+      return {
+        ok: false,
+        status: 400,
+        code: "unsupported_action",
+        error: "Only Decision Course Checks support deferral.",
+        recoveryGuidance: "Use a Decision Course Check batch to defer items.",
+      };
+    }
+    if (!input.itemIds.length || !input.reason.trim()) {
+      return {
+        ok: false,
+        status: 400,
+        code: "invalid_deferral",
+        error: "Deferral requires itemIds and a reason.",
+        recoveryGuidance: "Select blocked items and provide a short deferral reason.",
+      };
+    }
+    const known = new Set(plan.body.items.map((item) => item.itemId));
+    if (input.itemIds.some((id) => !known.has(id))) {
+      return {
+        ok: false,
+        status: 400,
+        code: "unknown_item",
+        error: "One or more deferred items are not in this plan.",
+        recoveryGuidance: "Reload the Course Check and defer from the current items.",
+      };
+    }
+
+    const now = new Date().toISOString();
+    const nextBody = deferDecisionItems({
+      body: plan.body,
+      itemIds: input.itemIds,
+      reason: input.reason.trim(),
+      actor: input.actor,
+      at: now,
+      planId: plan.id,
+      planVersion: plan.version,
+    });
+    const nextVersion = plan.version + 1;
+    const digest = await digestPayload(decisionBodyDigestPayload(nextBody));
+    const state: CourseCheckPlanState = hasBlockerFindings(nextBody.findings)
+      ? "Needs attention"
+      : nextBody.aggregateProgress.active === 0
+        ? "Needs review"
+        : "Ready";
+
+    // Preserve prior version immutably; never overwrite reviewed evidence.
+    this.recordPlanVersion({
+      planId: plan.id,
+      version: plan.version,
+      digest: plan.digest,
+      state: plan.state,
+      body: plan.body,
+      actor: plan.createdBy,
+      at: plan.updatedAt,
+      mutationKind: "create",
+      summary: `Historical snapshot of version ${plan.version}.`,
+      fromVersion: Math.max(0, plan.version - 1),
+    });
+
+    this.ctx.storage.sql.exec(
+      `UPDATE course_check_plans
+       SET version = ?, digest = ?, body_json = ?, state = ?, updated_at = ?, approval_json = NULL
+       WHERE id = ?`,
+      nextVersion,
+      digest,
+      JSON.stringify(nextBody),
+      state,
+      now,
+      plan.id,
+    );
+    this.recordPlanVersion({
+      planId: plan.id,
+      version: nextVersion,
+      digest,
+      state,
+      body: nextBody,
+      actor: input.actor,
+      at: now,
+      mutationKind: "defer",
+      summary: `Deferred ${input.itemIds.length} item(s): ${input.reason.trim()}`,
+      fromVersion: plan.version,
+    });
+
+    for (const item of nextBody.followUpQueue) {
+      this.ctx.storage.sql.exec(
+        `INSERT OR REPLACE INTO course_check_follow_ups
+          (id, plan_id, proposal_id, outcome, reason, source_version, deferred_at,
+           deferred_by_id, deferred_by_name, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        item.id,
+        plan.id,
+        item.proposalId,
+        item.outcome,
+        item.reason,
+        item.sourceVersion,
+        item.deferredAt,
+        item.deferredBy.id,
+        item.deferredBy.displayName,
+        item.status,
+      );
+    }
+
+    const updated = this.getCourseCheckPlan(plan.id);
+    if (!updated) throw new Error("Deferred Course Check is missing.");
+    this.writeIdempotency({
+      command: "defer",
+      key: input.idempotencyKey,
+      planId: plan.id,
+      response: updated,
+    });
+    return { ok: true, plan: updated, created: true };
   }
 
   async createGuaranteedSpeakerCourseCheck(input: {
@@ -4800,6 +5384,7 @@ export class EventStore extends DurableObject<AppBindings> {
     stageId: string;
     idempotencyKey: string;
     actor: CourseCheckActor;
+    softWarningOverrides?: Array<{ findingId: string; reason?: string | null }>;
   }): Promise<
     | { ok: true; plan: CourseCheckPlan; created: boolean }
     | {
@@ -4856,26 +5441,43 @@ export class EventStore extends DurableObject<AppBindings> {
     }
 
     if (plan.body.actionType === "decision") {
-      const proposal = this.getProposal(plan.body.proposalId);
-      if (!proposal) {
-        return {
-          ok: false,
-          status: 409,
-          code: "relevant_input_changed",
-          error: "The proposal for this plan no longer exists.",
-          recoveryGuidance: "Create a new Decision Course Check from current proposals.",
-          changedInputs: ["proposal"],
-        };
-      }
-      if (proposal.reviewVersion !== plan.body.proposalRevision) {
+      const changed = this.detectDecisionStaleInputs(plan.body);
+      if (changed.length > 0) {
         return {
           ok: false,
           status: 409,
           code: "relevant_input_changed",
           error: "Relevant proposal inputs changed after this plan was created.",
           recoveryGuidance:
-            "Create a new Decision Course Check from the current proposal revision.",
-          changedInputs: ["proposal.reviewVersion"],
+            "Create a new Decision Course Check from the current proposal revisions.",
+          changedInputs: changed,
+        };
+      }
+      if (plan.body.aggregateProgress.active === 0) {
+        return {
+          ok: false,
+          status: 409,
+          code: "empty_apply_scope",
+          error: "No active decisions remain in this plan.",
+          recoveryGuidance: "Resolve follow-up queue items or create a new Course Check.",
+        };
+      }
+    }
+
+    // Soft-warning overrides: internal apply is reason-free; material external requires reason.
+    const overrides = input.softWarningOverrides ?? [];
+    for (const override of overrides) {
+      const finding = plan.body.findings.find((row) => row.id === override.findingId);
+      if (!finding || finding.severity !== "warning") continue;
+      if (finding.materialExternal && !override.reason?.trim()) {
+        return {
+          ok: false,
+          status: 400,
+          code: "override_reason_required",
+          error: `A short reason is required to override material warning "${finding.message}".`,
+          recoveryGuidance:
+            "Provide a reason when overriding material external-boundary warnings.",
+          findings: plan.body.findings,
         };
       }
     }
@@ -4889,7 +5491,7 @@ export class EventStore extends DurableObject<AppBindings> {
         error: blocker?.message ?? "This Course Check has blocking findings.",
         recoveryGuidance:
           blocker?.recoveryGuidance ??
-          "Resolve the blocking findings, then create a new Course Check.",
+          "Resolve or defer the blocking findings, then apply the remaining exact scope.",
         findings: plan.body.findings,
       };
     }
@@ -4908,6 +5510,24 @@ export class EventStore extends DurableObject<AppBindings> {
     try {
       this.ctx.storage.transactionSync(() => {
         this.applyCascadeRecords(plan, now);
+        let nextBody = plan.body;
+        if (plan.body.actionType === "decision") {
+          nextBody = markDecisionItemsApplied(plan.body);
+          if (overrides.length > 0) {
+            nextBody = {
+              ...nextBody,
+              softWarningOverrides: [
+                ...nextBody.softWarningOverrides,
+                ...overrides.map((override) => ({
+                  findingId: override.findingId,
+                  reason: override.reason?.trim() || null,
+                  actor: input.actor,
+                  at: now,
+                })),
+              ],
+            };
+          }
+        }
         this.ctx.storage.sql.exec(
           `INSERT INTO course_check_receipts
             (id, plan_id, plan_version, digest, stage_id, applied_at, actor_id, actor_name)
@@ -4921,23 +5541,45 @@ export class EventStore extends DurableObject<AppBindings> {
           input.actor.id,
           input.actor.displayName,
         );
+        const finalState: CourseCheckPlanState =
+          plan.body.actionType === "decision" &&
+          (plan.body.aggregateProgress.deferred > 0 ||
+            nextBody.actionType === "decision" &&
+              nextBody.followUpQueue.some((item) => item.status === "open"))
+            ? "Partially complete"
+            : "Complete";
         this.ctx.storage.sql.exec(
           `UPDATE course_check_plans
-           SET state = 'Complete',
+           SET state = ?,
+               body_json = ?,
                updated_at = ?,
                approval_json = ?,
                receipt_id = ?
            WHERE id = ?`,
+          finalState,
+          JSON.stringify(nextBody),
           now,
           JSON.stringify(approval),
           receiptId,
           plan.id,
         );
+        this.recordPlanVersion({
+          planId: plan.id,
+          version: plan.version,
+          digest: plan.digest,
+          state: finalState,
+          body: nextBody,
+          actor: input.actor,
+          at: now,
+          mutationKind: "apply",
+          summary: `Applied ${input.stageId} for plan version ${plan.version}.`,
+          fromVersion: plan.version,
+        });
         const proposalId =
           plan.body.actionType === "decision" ? plan.body.proposalId : "";
         const outcomeLabel =
           plan.body.actionType === "decision"
-            ? plan.body.outcome
+            ? `${plan.body.aggregateProgress.active} decision(s)`
             : "guaranteed_speaker";
         this.ctx.storage.sql.exec(
           `INSERT INTO audit_events
@@ -4956,7 +5598,8 @@ export class EventStore extends DurableObject<AppBindings> {
           mapCourseCheckPlan(
             {
               ...row,
-              state: "Complete",
+              state: finalState,
+              body_json: JSON.stringify(nextBody),
               updated_at: now,
               approval_json: JSON.stringify(approval),
               receipt_id: receiptId,
@@ -4989,24 +5632,78 @@ export class EventStore extends DurableObject<AppBindings> {
 
     const applied = appliedPlan ?? this.getCourseCheckPlan(plan.id);
     if (!applied) throw new Error("Applied Course Check is missing.");
-    return { ok: true, plan: applied, created: true };
+    return { ok: true, plan: this.enrichPlan(applied), created: true };
   }
 
   private applyCascadeRecords(plan: CourseCheckPlan, now: string): void {
     const body = plan.body;
+    if (body.actionType === "decision" && body.items && body.items.length > 0) {
+      for (const item of body.items) {
+        if (item.status !== "active") continue;
+        this.applyDecisionItemCascade(plan.id, item, now);
+      }
+      return;
+    }
+
+    this.applySingleCascade({
+      planId: plan.id,
+      proposalId: body.actionType === "decision" ? body.proposalId : null,
+      proposalRevision:
+        body.actionType === "decision" ? body.proposalRevision : null,
+      outcome: body.actionType === "decision" ? body.outcome : null,
+      speakers: body.speakers,
+      participations: body.participations,
+      session: body.actionType === "decision" ? body.session : body.session,
+      tasks: body.tasks,
+      portalAccess: body.portalAccess,
+      now,
+    });
+  }
+
+  private applyDecisionItemCascade(
+    planId: string,
+    item: DecisionPlanBody["items"][number],
+    now: string,
+  ): void {
+    this.applySingleCascade({
+      planId,
+      proposalId: item.proposalId,
+      proposalRevision: item.proposalRevision,
+      outcome: item.outcome,
+      speakers: item.speakers,
+      participations: item.participations,
+      session: item.session,
+      tasks: item.tasks,
+      portalAccess: item.portalAccess,
+      now,
+    });
+  }
+
+  private applySingleCascade(input: {
+    planId: string;
+    proposalId: string | null;
+    proposalRevision: number | null;
+    outcome: ProgramOutcome | null;
+    speakers: CourseCheckPlanBody["speakers"];
+    participations: CourseCheckPlanBody["participations"];
+    session: CourseCheckPlanBody["session"] | null;
+    tasks: CourseCheckPlanBody["tasks"];
+    portalAccess: CourseCheckPlanBody["portalAccess"];
+    now: string;
+  }): void {
     const speakerIdByPlanned = new Map<string, string>();
 
-    if (body.actionType === "decision") {
+    if (input.proposalId && input.outcome && input.proposalRevision !== null) {
       const current = this.ctx.storage.sql
         .exec<{ review_version: number; program_outcome: string }>(
           `SELECT review_version, program_outcome FROM proposals WHERE id = ?`,
-          body.proposalId,
+          input.proposalId,
         )
         .toArray()[0];
       if (!current) {
-        throw new Error(`Proposal ${body.proposalId} disappeared during apply.`);
+        throw new Error(`Proposal ${input.proposalId} disappeared during apply.`);
       }
-      if (Number(current.review_version) !== body.proposalRevision) {
+      if (Number(current.review_version) !== input.proposalRevision) {
         throw new Error("Proposal revision changed during apply.");
       }
       if (current.program_outcome) {
@@ -5016,15 +5713,15 @@ export class EventStore extends DurableObject<AppBindings> {
       }
       this.ctx.storage.sql.exec(
         `UPDATE proposals SET program_outcome = ? WHERE id = ?`,
-        body.outcome,
-        body.proposalId,
+        input.outcome,
+        input.proposalId,
       );
-      if (body.outcome === "declined") {
+      if (input.outcome === "declined") {
         return;
       }
     }
 
-    for (const speaker of body.speakers) {
+    for (const speaker of input.speakers) {
       let speakerId = speaker.existingSpeakerId;
       if (speaker.match === "reuse" && speakerId) {
         const existing = this.ctx.storage.sql
@@ -5042,13 +5739,13 @@ export class EventStore extends DurableObject<AppBindings> {
           speaker.name,
           speaker.email,
           speaker.biography,
-          now,
+          input.now,
         );
       }
       speakerIdByPlanned.set(speaker.plannedId, speakerId!);
     }
 
-    for (const participation of body.participations) {
+    for (const participation of input.participations) {
       const speakerId = speakerIdByPlanned.get(participation.speakerPlannedId);
       if (!speakerId) {
         throw new Error("Participation is missing its speaker mapping.");
@@ -5060,16 +5757,16 @@ export class EventStore extends DurableObject<AppBindings> {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         participation.plannedId,
         speakerId,
-        body.actionType === "decision" ? body.proposalId : null,
-        plan.id,
+        input.proposalId,
+        input.planId,
         participation.titleSnapshot,
         participation.organizationSnapshot,
         participation.role,
-        now,
+        input.now,
       );
     }
 
-    const session = body.session;
+    const session = input.session;
     if (session) {
       this.ctx.storage.sql.exec(
         `INSERT INTO sessions
@@ -5078,15 +5775,15 @@ export class EventStore extends DurableObject<AppBindings> {
            calendar_sequence, calendar_invite_recorded)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`,
         session.plannedId,
-        body.actionType === "decision" ? body.proposalId : null,
-        plan.id,
+        input.proposalId,
+        input.planId,
         session.title,
         session.format,
         session.trackId,
         session.roomId,
         session.startsAt,
         session.endsAt,
-        now,
+        input.now,
         `cal_${session.plannedId}`,
       );
     }
@@ -5094,14 +5791,16 @@ export class EventStore extends DurableObject<AppBindings> {
     const event = this.getEvent();
     const deadlineBase = event
       ? Date.parse(`${event.startsOn}T00:00:00.000Z`)
-      : Date.parse(now);
-    const safeBase = Number.isFinite(deadlineBase) ? deadlineBase : Date.parse(now);
+      : Date.parse(input.now);
+    const safeBase = Number.isFinite(deadlineBase)
+      ? deadlineBase
+      : Date.parse(input.now);
 
-    body.tasks.forEach((task, taskIndex) => {
+    input.tasks.forEach((task, taskIndex) => {
       const speakerId = speakerIdByPlanned.get(task.speakerPlannedId);
       if (!speakerId) throw new Error("Task is missing its speaker mapping.");
       const dueAt = new Date(
-        safeBase - (body.tasks.length - taskIndex) * 24 * 60 * 60 * 1000,
+        safeBase - (input.tasks.length - taskIndex) * 24 * 60 * 60 * 1000,
       ).toISOString();
       const completionRequirement = defaultCompletionRequirement(task.kind);
       const instructions =
@@ -5121,21 +5820,20 @@ export class EventStore extends DurableObject<AppBindings> {
         task.plannedId,
         speakerId,
         session?.plannedId ?? null,
-        body.actionType === "decision" ? body.proposalId : null,
-        plan.id,
+        input.proposalId,
+        input.planId,
         task.title,
         task.kind,
         dueAt,
-        now,
+        input.now,
         instructions,
         completionRequirement,
       );
     });
 
-    for (const access of body.portalAccess) {
+    for (const access of input.portalAccess) {
       const speakerId = speakerIdByPlanned.get(access.speakerPlannedId);
       if (!speakerId) throw new Error("Portal access is missing its speaker mapping.");
-      const proposalId = body.actionType === "decision" ? body.proposalId : null;
       this.ctx.storage.sql.exec(
         `INSERT INTO portal_access_intents
           (id, speaker_id, email, intent, proposal_id, course_check_plan_id, created_at)
@@ -5144,14 +5842,14 @@ export class EventStore extends DurableObject<AppBindings> {
         speakerId,
         access.email,
         access.intent,
-        proposalId,
-        plan.id,
-        now,
+        input.proposalId,
+        input.planId,
+        input.now,
       );
       if (access.intent === "grant") {
         const tokenId = crypto.randomUUID().replaceAll("-", "");
         const expiresAt = new Date(
-          Date.parse(now) + 1000 * 60 * 60 * 24 * 90,
+          Date.parse(input.now) + 1000 * 60 * 60 * 24 * 90,
         ).toISOString();
         this.ctx.storage.sql.exec(
           `INSERT INTO portal_tokens
@@ -5159,10 +5857,10 @@ export class EventStore extends DurableObject<AppBindings> {
            VALUES (?, ?, ?, ?, ?, NULL, NULL, ?)`,
           tokenId,
           speakerId,
-          proposalId,
-          plan.id,
+          input.proposalId,
+          input.planId,
           expiresAt,
-          now,
+          input.now,
         );
       }
     }

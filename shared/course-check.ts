@@ -1,4 +1,4 @@
-/** Course Check v1 contract — decision cascade tracer. */
+/** Course Check v1 contract — decision cascade + batch workspace. */
 
 export type ProgramOutcome = "accepted" | "declined";
 
@@ -22,7 +22,18 @@ export type CourseCheckStageStatus =
   | "ready"
   | "blocked"
   | "approved"
-  | "complete";
+  | "complete"
+  | "out_of_date";
+
+export type CourseCheckEvidenceKind =
+  | "irreversible"
+  | "people"
+  | "public"
+  | "operational"
+  | "integration"
+  | "internal";
+
+export type DecisionItemStatus = "active" | "deferred" | "applied";
 
 export interface CourseCheckFinding {
   id: string;
@@ -31,6 +42,8 @@ export interface CourseCheckFinding {
   message: string;
   recoveryGuidance?: string;
   entityRef?: string;
+  /** Soft warnings may be overridden; material external ones require a reason. */
+  materialExternal?: boolean;
 }
 
 export interface CourseCheckDelta {
@@ -45,6 +58,7 @@ export interface CourseCheckDelta {
   summary: string;
   before?: Record<string, unknown> | null;
   after?: Record<string, unknown> | null;
+  proposalId?: string;
 }
 
 export interface CourseCheckStage {
@@ -52,6 +66,8 @@ export interface CourseCheckStage {
   label: string;
   status: CourseCheckStageStatus;
   verb: string;
+  /** External-bound stages age-warn; internal apply does not hard-block on age. */
+  external?: boolean;
 }
 
 export interface PlannedSpeaker {
@@ -95,11 +111,78 @@ export interface PlannedPortalAccess {
   intent: "grant";
 }
 
-export interface DecisionPlanBody {
-  actionType: "decision";
+export interface CourseCheckEvidenceSection {
+  kind: CourseCheckEvidenceKind;
+  title: string;
+  /** Clean low-risk sections default collapsed; risk expands. */
+  defaultExpanded: boolean;
+  summary: string;
+  findingIds: string[];
+  deltaIndexes: number[];
+}
+
+export interface SoftWarningOverride {
+  findingId: string;
+  reason: string | null;
+  actor: CourseCheckActor;
+  at: string;
+}
+
+export interface DecisionItem {
+  itemId: string;
   proposalId: string;
   outcome: ProgramOutcome;
   proposalRevision: number;
+  status: DecisionItemStatus;
+  deferredAt?: string | null;
+  deferredBy?: CourseCheckActor | null;
+  deferralReason?: string | null;
+  speakers: PlannedSpeaker[];
+  participations: PlannedParticipation[];
+  session: PlannedSession | null;
+  tasks: PlannedTask[];
+  portalAccess: PlannedPortalAccess[];
+  deltas: CourseCheckDelta[];
+  findings: CourseCheckFinding[];
+}
+
+export interface FollowUpQueueItem {
+  id: string;
+  proposalId: string;
+  outcome: ProgramOutcome;
+  reason: string;
+  sourcePlanId: string;
+  sourceVersion: number;
+  deferredAt: string;
+  deferredBy: CourseCheckActor;
+  status: "open" | "resolved";
+}
+
+export interface PlanMutationRecord {
+  id: string;
+  planId: string;
+  fromVersion: number;
+  toVersion: number;
+  kind: "create" | "defer" | "refresh" | "split" | "override" | "apply";
+  actor: CourseCheckActor;
+  at: string;
+  summary: string;
+}
+
+export interface AggregateProgress {
+  total: number;
+  active: number;
+  deferred: number;
+  applied: number;
+}
+
+export interface DecisionPlanBody {
+  actionType: "decision";
+  /** Primary/first active item — retained for single-proposal callers. */
+  proposalId: string;
+  outcome: ProgramOutcome;
+  proposalRevision: number;
+  /** Aggregated active-item cascade for apply. */
   speakers: PlannedSpeaker[];
   participations: PlannedParticipation[];
   session: PlannedSession | null;
@@ -108,6 +191,22 @@ export interface DecisionPlanBody {
   deltas: CourseCheckDelta[];
   findings: CourseCheckFinding[];
   stages: CourseCheckStage[];
+  /** Batch items (length >= 1). Single decisions are one-item batches. */
+  items: DecisionItem[];
+  followUpQueue: FollowUpQueueItem[];
+  evidenceSections: CourseCheckEvidenceSection[];
+  softWarningOverrides: SoftWarningOverride[];
+  aggregateProgress: AggregateProgress;
+  linkedPlanIds: string[];
+  parentPlanId: string | null;
+  batchGroupId: string | null;
+  splitExplanation: string | null;
+  ageWarningHours: number;
+  ageWarning?: {
+    active: boolean;
+    ageHours: number;
+    message: string;
+  } | null;
 }
 
 export interface GuaranteedSpeakerPlanBody {
@@ -124,6 +223,14 @@ export interface GuaranteedSpeakerPlanBody {
   relevantRevisions: {
     speakerEmails: string[];
   };
+  evidenceSections: CourseCheckEvidenceSection[];
+  softWarningOverrides: SoftWarningOverride[];
+  ageWarningHours: number;
+  ageWarning?: {
+    active: boolean;
+    ageHours: number;
+    message: string;
+  } | null;
 }
 
 export type CourseCheckPlanBody = DecisionPlanBody | GuaranteedSpeakerPlanBody;
@@ -151,6 +258,18 @@ export interface CourseCheckReceipt {
   actor: CourseCheckActor;
 }
 
+export interface CourseCheckPlanVersion {
+  planId: string;
+  version: number;
+  digest: string;
+  state: CourseCheckPlanState;
+  body: CourseCheckPlanBody;
+  createdAt: string;
+  createdBy: CourseCheckActor;
+  mutationKind: PlanMutationRecord["kind"];
+  summary: string;
+}
+
 export interface CourseCheckPlan {
   id: string;
   eventId: string;
@@ -164,11 +283,20 @@ export interface CourseCheckPlan {
   body: CourseCheckPlanBody;
   approval: CourseCheckApproval | null;
   receipt: CourseCheckReceipt | null;
+  /** Immutable prior versions (newest first, excludes current). */
+  versions?: CourseCheckPlanVersion[];
+  mutations?: PlanMutationRecord[];
 }
 
 export interface CreateDecisionCourseCheckRequest {
-  proposalId: string;
-  outcome: ProgramOutcome;
+  /** Single-proposal shorthand. */
+  proposalId?: string;
+  outcome?: ProgramOutcome;
+  /** Batch selections. */
+  items?: Array<{
+    proposalId: string;
+    outcome: ProgramOutcome;
+  }>;
   idempotencyKey: string;
 }
 
@@ -191,6 +319,18 @@ export interface ApplyCourseCheckRequest {
   digest: string;
   stageId: string;
   idempotencyKey: string;
+  softWarningOverrides?: Array<{
+    findingId: string;
+    reason?: string | null;
+  }>;
+}
+
+export interface DeferCourseCheckItemsRequest {
+  planVersion: number;
+  digest: string;
+  itemIds: string[];
+  reason: string;
+  idempotencyKey: string;
 }
 
 export interface CourseCheckErrorBody {
@@ -200,3 +340,27 @@ export interface CourseCheckErrorBody {
   findings?: CourseCheckFinding[];
   changedInputs?: string[];
 }
+
+/** Default safe transactional batch size before linked-plan split. */
+export const DEFAULT_DECISION_BATCH_LIMIT = 25;
+
+/** Default age warning for unchanged external stages (hours). */
+export const DEFAULT_AGE_WARNING_HOURS = 24;
+
+export const EVIDENCE_SECTION_ORDER: CourseCheckEvidenceKind[] = [
+  "irreversible",
+  "people",
+  "public",
+  "operational",
+  "integration",
+  "internal",
+];
+
+export const EVIDENCE_SECTION_TITLES: Record<CourseCheckEvidenceKind, string> = {
+  irreversible: "Irreversible effects",
+  people: "People affected",
+  public: "Public consequences",
+  operational: "Operational warnings",
+  integration: "Integration effects",
+  internal: "Internal record details",
+};
