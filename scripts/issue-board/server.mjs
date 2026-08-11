@@ -3,7 +3,7 @@
  * Local live board for ChartStead Markdown issues under .scratch/.
  * Re-reads files every request + browser polls /api/board.
  *
- *   node scripts/issue-board/server.mjs
+ *   npm run issues:board
  *   node scripts/issue-board/server.mjs --port 3939 --host 0.0.0.0
  */
 
@@ -47,12 +47,12 @@ const COLUMNS = [
   },
   {
     id: "open",
-    title: "Open / ready",
+    title: "Open",
     match: (s) => /^(open|ready|ready-for-agent|todo|backlog)$/i.test(s) || s === "",
   },
   {
     id: "blocked",
-    title: "Blocked / other",
+    title: "Other",
     match: () => true,
   },
 ];
@@ -99,7 +99,7 @@ function parseFrontMatterish(text) {
     checks,
     doneCount,
     checkTotal: checks.length,
-    comments: comments.slice(-3),
+    comments: comments.slice(-4),
   };
 }
 
@@ -165,172 +165,443 @@ const PAGE = `<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ChartStead issue board</title>
+  <title>ChartStead · Issues</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #0b1220;
-      --panel: #121a2b;
-      --panel-2: #182338;
-      --ink: #e8eef8;
-      --muted: #93a0b8;
-      --line: #243149;
-      --done: #1f6f4a;
-      --done-bg: #123528;
-      --open: #2f5d98;
-      --open-bg: #15263f;
-      --prog: #a dig;
-      --warn: #9a6b16;
-      --warn-bg: #3a2c12;
-      --accent: #22b573;
+      --primary: #081d3a;
+      --on-primary: #ffffff;
+      --secondary: #2f5d98;
+      --tertiary: #22b573;
+      --background: #ffffff;
+      --on-background: #081d3a;
+      --surface: #ffffff;
+      --surface-subtle: #f3f5f7;
+      --surface-muted: #e9edf2;
+      --on-surface: #081d3a;
+      --on-surface-variant: #526071;
+      --on-surface-muted: #5b6878;
+      --outline: #d7dee7;
+      --outline-strong: #aebac8;
+      --selection: #eaf2fb;
+      --info-container: #eaf2fb;
+      --on-info-container: #244e7d;
+      --success-container: #e9f8f1;
+      --on-success-container: #087a4d;
+      --warning-container: #fff4e5;
+      --on-warning-container: #8a4d09;
+      --error-container: #fdecea;
+      --on-error-container: #8a1c13;
+      --focus-ring: #2f5d98;
+      --r: 2px;
+      --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+      --dur: 140ms;
     }
     * { box-sizing: border-box; }
+    html, body { height: 100%; }
     body {
       margin: 0;
-      font: 14px/1.45 Inter, ui-sans-serif, system-ui, sans-serif;
-      background: radial-gradient(1200px 600px at 10% -10%, #173056 0%, transparent 55%), var(--bg);
-      color: var(--ink);
+      font-family: Inter, system-ui, -apple-system, sans-serif;
+      font-size: 13px;
+      line-height: 1.4;
+      color: var(--on-surface);
+      background: var(--surface-subtle);
+      font-feature-settings: "tnum" 1;
+      -webkit-font-smoothing: antialiased;
+    }
+    button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; padding: 0; text-align: left; }
+    :focus { outline: none; }
+    :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+    .app {
       min-height: 100vh;
-    }
-    header {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px 24px;
-      align-items: end;
-      justify-content: space-between;
-      padding: 20px 24px 12px;
-      border-bottom: 1px solid var(--line);
-      position: sticky;
-      top: 0;
-      background: color-mix(in srgb, var(--bg) 92%, transparent);
-      backdrop-filter: blur(8px);
-      z-index: 2;
-    }
-    h1 { margin: 0; font-size: 22px; letter-spacing: -0.02em; }
-    .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
-    .meta { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-    .pill {
-      border: 1px solid var(--line);
-      background: var(--panel);
-      border-radius: 999px;
-      padding: 4px 10px;
-      font-size: 12px;
-      color: var(--muted);
-    }
-    .pill strong { color: var(--ink); font-weight: 600; }
-    .live { color: var(--accent); }
-    main { padding: 16px 20px 40px; display: grid; gap: 28px; }
-    .track h2 {
-      margin: 0 0 12px;
-      font-size: 15px;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--muted);
-    }
-    .board {
       display: grid;
-      grid-template-columns: repeat(4, minmax(200px, 1fr));
+      grid-template-rows: auto 1fr;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 16px;
+      height: 48px;
+      background: var(--primary);
+      color: var(--on-primary);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      min-width: 0;
+    }
+    .brand strong {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .brand span {
+      font-size: 12px;
+      color: rgba(255,255,255,0.62);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .top-meta {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.04);
+    }
+    .stat {
+      display: grid;
+      justify-items: center;
+      gap: 0;
+      min-width: 52px;
+      padding: 4px 10px;
+      border-right: 1px solid rgba(255,255,255,0.12);
+    }
+    .stat:last-child { border-right: 0; }
+    .stat b {
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1.1;
+      font-variant-numeric: tabular-nums;
+    }
+    .stat em {
+      font-style: normal;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.55);
+    }
+    .live {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 10px;
+      font-size: 11px;
+      color: rgba(255,255,255,0.7);
+      border-left: 1px solid rgba(255,255,255,0.12);
+      white-space: nowrap;
+    }
+    .live i {
+      width: 6px;
+      height: 6px;
+      background: var(--tertiary);
+      display: inline-block;
+    }
+
+    .shell {
+      padding: 12px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
       gap: 12px;
       align-items: start;
+      max-width: 1440px;
+      margin: 0 auto;
+      width: 100%;
     }
-    @media (max-width: 1100px) {
-      .board { grid-template-columns: repeat(2, minmax(200px, 1fr)); }
+    @media (max-width: 960px) {
+      .shell { grid-template-columns: 1fr; }
     }
-    @media (max-width: 640px) {
-      .board { grid-template-columns: 1fr; }
+
+    .track {
+      background: var(--surface);
+      border: 1px solid var(--outline);
+      box-shadow: 0 1px 2px rgba(8, 29, 58, 0.04);
+      min-width: 0;
     }
-    .col {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      min-height: 120px;
-      overflow: hidden;
-    }
-    .col-head {
+    .track-head {
       display: flex;
-      justify-content: space-between;
       align-items: center;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--line);
-      background: var(--panel-2);
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--outline);
+      background: var(--surface);
+    }
+    .track-head h2 {
+      margin: 0;
       font-size: 12px;
       font-weight: 600;
       letter-spacing: 0.04em;
       text-transform: uppercase;
-      color: var(--muted);
+      color: var(--on-surface-variant);
     }
-    .col-head span {
-      background: #0d1524;
-      border-radius: 999px;
-      padding: 1px 8px;
-      color: var(--ink);
-    }
-    .cards { display: grid; gap: 8px; padding: 10px; }
-    .card {
-      background: #0e1626;
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 10px 11px;
-      display: grid;
-      gap: 6px;
-    }
-    .card.done { border-color: color-mix(in srgb, var(--done) 55%, var(--line)); }
-    .card.open { border-color: color-mix(in srgb, var(--open) 45%, var(--line)); }
-    .card.blocked { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); }
-    .id {
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 11px;
-      color: var(--muted);
-    }
-    .title { font-weight: 600; font-size: 13.5px; line-height: 1.3; }
-    .what { color: var(--muted); font-size: 12.5px; }
-    .status {
-      display: inline-flex;
-      width: fit-content;
-      border-radius: 999px;
-      padding: 2px 8px;
-      font-size: 11px;
+    .track-count {
+      font-size: 12px;
       font-weight: 600;
-      text-transform: lowercase;
+      color: var(--on-surface-muted);
+      font-variant-numeric: tabular-nums;
     }
-    .status.done { background: var(--done-bg); color: #8fe0b5; }
-    .status.open { background: var(--open-bg); color: #9ec0ef; }
-    .status.in-progress { background: #2a2140; color: #d4c2ff; }
-    .status.blocked { background: var(--warn-bg); color: #f0c674; }
-    .row {
+
+    .cols {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0;
+      border-top: 0;
+    }
+    .col {
+      min-width: 0;
+      border-right: 1px solid var(--outline);
+      background: var(--surface);
+    }
+    .col:last-child { border-right: 0; }
+    .col-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--outline);
+      background: var(--surface-subtle);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--on-surface-muted);
+    }
+    .col-head b {
+      font-weight: 600;
+      color: var(--on-surface);
+      font-variant-numeric: tabular-nums;
+    }
+    .list { display: flex; flex-direction: column; }
+    .empty {
+      padding: 10px 8px;
+      color: var(--on-surface-muted);
+      font-size: 12px;
+    }
+
+    .card {
+      border-bottom: 1px solid var(--outline);
+      background: var(--surface);
+    }
+    .card:last-child { border-bottom: 0; }
+    .card[data-col="done"] { box-shadow: inset 3px 0 0 var(--tertiary); }
+    .card[data-col="open"] { box-shadow: inset 3px 0 0 var(--secondary); }
+    .card[data-col="in-progress"] { box-shadow: inset 3px 0 0 #5c3f8c; }
+    .card[data-col="blocked"] { box-shadow: inset 3px 0 0 var(--warning-container); border-left: 0; }
+    .card[data-col="blocked"] { box-shadow: inset 3px 0 0 #c47a16; }
+
+    .summary {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 2px 8px;
+      padding: 7px 8px 7px 10px;
+      align-items: start;
+    }
+    .summary:hover { background: var(--selection); }
+    .card[open] > .summary,
+    .card.is-open > .summary {
+      background: var(--selection);
+      border-bottom: 1px solid var(--outline);
+    }
+    .id {
+      grid-column: 1;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 10px;
+      color: var(--on-surface-muted);
+      line-height: 1.2;
+    }
+    .chev {
+      grid-column: 2;
+      grid-row: 1 / span 2;
+      align-self: center;
+      width: 14px;
+      height: 14px;
+      color: var(--on-surface-muted);
+      transition: transform var(--dur) var(--ease);
+    }
+    .card.is-open .chev { transform: rotate(90deg); }
+    .title {
+      grid-column: 1;
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.25;
+      letter-spacing: -0.01em;
+      color: var(--on-surface);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .meta-line {
+      grid-column: 1 / -1;
       display: flex;
       flex-wrap: wrap;
-      gap: 6px 10px;
-      font-size: 11.5px;
-      color: var(--muted);
+      gap: 4px 8px;
+      align-items: center;
+      margin-top: 2px;
+      font-size: 11px;
+      color: var(--on-surface-muted);
     }
-    .path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; opacity: 0.8; word-break: break-all; }
-    .empty { color: var(--muted); font-size: 12px; padding: 8px 2px; }
-    footer { padding: 0 24px 28px; color: var(--muted); font-size: 12px; }
-    code { color: #c9d7ef; }
+    .flag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 1px 5px;
+      border: 1px solid var(--outline);
+      background: var(--surface-subtle);
+      color: var(--on-surface-variant);
+      font-size: 10px;
+      font-weight: 600;
+      line-height: 1.3;
+      text-transform: lowercase;
+      border-radius: var(--r);
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .flag::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      flex: 0 0 auto;
+      background: var(--outline-strong);
+    }
+    .flag.done {
+      background: var(--success-container);
+      color: var(--on-success-container);
+      border-color: #b7e5cf;
+    }
+    .flag.done::before { background: var(--tertiary); }
+    .flag.open {
+      background: var(--info-container);
+      color: var(--on-info-container);
+      border-color: #b7cce8;
+    }
+    .flag.open::before { background: var(--secondary); }
+    .flag.in-progress {
+      background: #f0ebfa;
+      color: #5c3f8c;
+      border-color: #d5c8ef;
+    }
+    .flag.in-progress::before { background: #5c3f8c; }
+    .flag.blocked {
+      background: var(--warning-container);
+      color: var(--on-warning-container);
+      border-color: #f0d4a8;
+    }
+    .flag.blocked::before { background: #c47a16; }
+
+    .detail {
+      display: none;
+      padding: 8px 10px 10px;
+      background: var(--surface-subtle);
+      border-top: 0;
+      gap: 8px;
+    }
+    .card.is-open .detail { display: grid; }
+    .detail p {
+      margin: 0;
+      font-size: 12px;
+      color: var(--on-surface-variant);
+      line-height: 1.45;
+    }
+    .detail h3 {
+      margin: 0;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--on-surface-muted);
+    }
+    .checks {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 3px;
+    }
+    .checks li {
+      display: grid;
+      grid-template-columns: 12px 1fr;
+      gap: 6px;
+      font-size: 11.5px;
+      color: var(--on-surface-variant);
+      line-height: 1.35;
+    }
+    .checks li i {
+      width: 10px;
+      height: 10px;
+      margin-top: 2px;
+      border: 1px solid var(--outline-strong);
+      background: var(--surface);
+      border-radius: var(--r);
+    }
+    .checks li.on i {
+      background: var(--tertiary);
+      border-color: var(--tertiary);
+    }
+    .checks li.on { color: var(--on-surface-muted); text-decoration: line-through; text-decoration-color: var(--outline-strong); }
+    .kv {
+      display: grid;
+      gap: 4px;
+      font-size: 11px;
+      color: var(--on-surface-muted);
+    }
+    .kv code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 10.5px;
+      color: var(--on-surface-variant);
+      word-break: break-all;
+    }
+    .notes {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 4px;
+    }
+    .notes li {
+      font-size: 11.5px;
+      color: var(--on-surface-variant);
+      padding: 6px 7px;
+      border: 1px solid var(--outline);
+      background: var(--surface);
+      border-radius: var(--r);
+    }
+
+    .foot {
+      grid-column: 1 / -1;
+      font-size: 11px;
+      color: var(--on-surface-muted);
+      padding: 0 2px;
+    }
+    .foot code { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; }
   </style>
 </head>
 <body>
-  <header>
-    <div>
-      <h1>ChartStead issue board</h1>
-      <div class="sub">Local Markdown tracker · auto-refreshes from <code>.scratch/</code></div>
-    </div>
-    <div class="meta">
-      <div class="pill"><span class="live">● live</span> · <span id="age">—</span></div>
-      <div class="pill">total <strong id="c-total">0</strong></div>
-      <div class="pill">done <strong id="c-done">0</strong></div>
-      <div class="pill">open <strong id="c-open">0</strong></div>
-      <div class="pill">other <strong id="c-blocked">0</strong></div>
-    </div>
-  </header>
-  <main id="root"><p class="empty">Loading…</p></main>
-  <footer>
-    Source of truth stays the Markdown files. This page only mirrors them.
-    Refresh is every 3s. Run: <code>npm run issues:board</code>
-  </footer>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <strong>ChartStead</strong>
+        <span>Issue board · .scratch Markdown</span>
+      </div>
+      <div class="top-meta" aria-label="Summary counts">
+        <div class="stat"><b id="c-total">0</b><em>total</em></div>
+        <div class="stat"><b id="c-done">0</b><em>done</em></div>
+        <div class="stat"><b id="c-open">0</b><em>open</em></div>
+        <div class="stat"><b id="c-other">0</b><em>other</em></div>
+        <div class="live"><i aria-hidden="true"></i><span id="age">connecting</span></div>
+      </div>
+    </header>
+    <main class="shell" id="root">
+      <p class="empty">Loading…</p>
+    </main>
+  </div>
   <script>
     const root = document.getElementById("root");
     let lastJson = "";
+    const openIds = new Set();
 
     function esc(s) {
       return String(s ?? "")
@@ -340,55 +611,107 @@ const PAGE = `<!doctype html>
         .replaceAll('"', "&quot;");
     }
 
+    function shortId(id) {
+      // 01-walking-skeleton-and-seeded-event → 01
+      const m = String(id).match(/^(\\d+[a-z]?)/i);
+      return m ? m[1] : id;
+    }
+
+    function shortTitle(title) {
+      return String(title).replace(/^\\d+[a-z]?\\s*[—–-]\\s*/i, "").trim();
+    }
+
     function render(board) {
       document.getElementById("c-total").textContent = board.counts.total;
       document.getElementById("c-done").textContent = board.counts.done;
       document.getElementById("c-open").textContent = board.counts.open + board.counts.inProgress;
-      document.getElementById("c-blocked").textContent = board.counts.blocked;
-      const gen = new Date(board.generatedAt);
-      document.getElementById("age").textContent = "updated " + gen.toLocaleTimeString();
+      document.getElementById("c-other").textContent = board.counts.blocked;
+      document.getElementById("age").textContent = new Date(board.generatedAt).toLocaleTimeString();
 
       root.innerHTML = board.tracks.map((track) => {
         const cols = board.columns.map((col) => {
           const cards = track.issues.filter((i) => i.column === col.id);
           return \`
             <section class="col" aria-label="\${esc(col.title)}">
-              <div class="col-head"><div>\${esc(col.title)}</div><span>\${cards.length}</span></div>
-              <div class="cards">
-                \${cards.length === 0 ? '<div class="empty">None</div>' : cards.map(cardHtml).join("")}
+              <div class="col-head"><span>\${esc(col.title)}</span><b>\${cards.length}</b></div>
+              <div class="list">
+                \${cards.length === 0 ? '<div class="empty">—</div>' : cards.map((issue) => cardHtml(issue, track.id)).join("")}
               </div>
             </section>\`;
         }).join("");
         return \`
           <section class="track">
-            <h2>\${esc(track.title)}</h2>
-            <div class="board">\${cols}</div>
+            <div class="track-head">
+              <h2>\${esc(track.title)}</h2>
+              <div class="track-count">\${track.issues.length}</div>
+            </div>
+            <div class="cols">\${cols}</div>
           </section>\`;
-      }).join("");
+      }).join("") + \`
+        <p class="foot">
+          Source of truth is the Markdown under <code>.scratch/</code>. Click a ticket to expand.
+          Auto-refresh 3s · <code>npm run issues:board</code>
+        </p>\`;
+
+      root.querySelectorAll("[data-issue]").forEach((el) => {
+        const key = el.getAttribute("data-issue");
+        if (openIds.has(key)) el.classList.add("is-open");
+        el.querySelector(".summary")?.addEventListener("click", () => {
+          const open = el.classList.toggle("is-open");
+          if (open) openIds.add(key);
+          else openIds.delete(key);
+        });
+      });
     }
 
-    function cardHtml(issue) {
+    function cardHtml(issue, trackId) {
+      const key = trackId + ":" + issue.id;
       const progress =
         issue.checkTotal > 0
-          ? \`\${issue.doneCount}/\${issue.checkTotal} checks\`
-          : "no checklist";
-      const blocked = issue.blockedBy
-        ? \`<div class="row">blocked by: \${esc(issue.blockedBy)}</div>\`
-        : "";
-      const comment =
+          ? issue.doneCount + "/" + issue.checkTotal
+          : "—";
+      const checks =
+        issue.checks && issue.checks.length
+          ? \`<div>
+              <h3>Checklist</h3>
+              <ul class="checks">
+                \${issue.checks
+                  .map(
+                    (c) =>
+                      \`<li class="\${c.done ? "on" : ""}"><i aria-hidden="true"></i><span>\${esc(c.text)}</span></li>\`,
+                  )
+                  .join("")}
+              </ul>
+            </div>\`
+          : "";
+      const notes =
         issue.comments && issue.comments.length
-          ? \`<div class="what">\${esc(issue.comments[issue.comments.length - 1])}</div>\`
+          ? \`<div>
+              <h3>Recent notes</h3>
+              <ul class="notes">\${issue.comments.map((c) => \`<li>\${esc(c)}</li>\`).join("")}</ul>
+            </div>\`
           : "";
       return \`
-        <article class="card \${esc(issue.column)}">
-          <div class="id">\${esc(issue.id)}</div>
-          <div class="title">\${esc(issue.title)}</div>
-          <div class="status \${esc(issue.column)}">\${esc(issue.status)}</div>
-          \${issue.what ? \`<div class="what">\${esc(issue.what)}</div>\` : ""}
-          <div class="row"><span>\${progress}</span><span>·</span><span>\${esc(new Date(issue.mtime).toLocaleString())}</span></div>
-          \${blocked}
-          \${comment}
-          <div class="path">\${esc(issue.path)}</div>
+        <article class="card" data-col="\${esc(issue.column)}" data-issue="\${esc(key)}">
+          <button type="button" class="summary" aria-expanded="false">
+            <div class="id">\${esc(shortId(issue.id))}</div>
+            <svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+            <div class="title">\${esc(shortTitle(issue.title))}</div>
+            <div class="meta-line">
+              <span class="flag \${esc(issue.column)}">\${esc(issue.status)}</span>
+              <span>\${esc(progress)}</span>
+            </div>
+          </button>
+          <div class="detail">
+            \${issue.what ? \`<p>\${esc(issue.what)}</p>\` : "<p>No summary.</p>"}
+            <div class="kv">
+              \${issue.blockedBy ? \`<div>Blocked by: \${esc(issue.blockedBy)}</div>\` : "<div>Blocked by: —</div>"}
+              <div>Updated: \${esc(new Date(issue.mtime).toLocaleString())}</div>
+              <div><code>\${esc(issue.path)}</code></div>
+            </div>
+            \${checks}
+            \${notes}
+          </div>
         </article>\`;
     }
 
@@ -402,9 +725,9 @@ const PAGE = `<!doctype html>
           render(board);
         } else {
           document.getElementById("age").textContent =
-            "updated " + new Date(board.generatedAt).toLocaleTimeString() + " · stable";
+            new Date(board.generatedAt).toLocaleTimeString();
         }
-      } catch (err) {
+      } catch {
         document.getElementById("age").textContent = "offline";
       }
     }
@@ -415,9 +738,6 @@ const PAGE = `<!doctype html>
 </body>
 </html>
 `;
-
-// Fix accidental space in CSS variable from draft
-const PAGE_FIXED = PAGE.replace("--prog: #a dig;", "--prog: #7c6af0;");
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
@@ -438,11 +758,11 @@ const server = createServer(async (req, res) => {
         "content-type": "text/html; charset=utf-8",
         "cache-control": "no-store",
       });
-      res.end(PAGE_FIXED);
+      res.end(PAGE);
       return;
     }
     res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
-    res.end("Not found. Try / or /api/board\n");
+    res.end("Not found. Try / or /api/board\\n");
   } catch (error) {
     res.writeHead(500, { "content-type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
@@ -450,10 +770,8 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  const tailscale = "http://100.105.117.93:" + PORT + "/";
   console.log(`ChartStead issue board`);
   console.log(`  local:     http://127.0.0.1:${PORT}/`);
-  console.log(`  tailscale: ${tailscale}`);
+  console.log(`  tailscale: http://100.105.117.93:${PORT}/`);
   console.log(`  api:       http://127.0.0.1:${PORT}/api/board`);
-  console.log(`  watching:  .scratch/*/issues/*.md (re-read each poll)`);
 });
