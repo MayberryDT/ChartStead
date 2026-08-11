@@ -1,21 +1,15 @@
 import { Button } from "@base-ui/react/button";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import { FormEvent, useState } from "react";
 
 import markOnDarkUrl from "../design/assets/brand/chartstead-mark-on-dark.png";
 import markOnLightUrl from "../design/assets/brand/chartstead-mark-on-light.png";
-import type { EventListResponse } from "../shared/events";
+import type { EventListResponse, EventRecord } from "../shared/events";
+import { ApiError, fetchEvents } from "./api";
 import { authClient } from "./auth-client";
+import { SubmissionsWorkspace } from "./SubmissionsWorkspace";
 import "./styles.css";
-
-class ApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
-    super(message);
-  }
-}
 
 const navItems = [
   "Overview",
@@ -26,17 +20,7 @@ const navItems = [
   "Settings",
 ] as const;
 
-async function fetchEvents(): Promise<EventListResponse> {
-  const response = await fetch("/api/events");
-  const body = (await response.json()) as EventListResponse | { error: string };
-  if (!response.ok || !("events" in body)) {
-    throw new ApiError(
-      "error" in body ? body.error : "Unable to load events",
-      response.status,
-    );
-  }
-  return body;
-}
+type NavItem = (typeof navItems)[number];
 
 function formatDateRange(startsOn: string, endsOn: string) {
   const format = new Intl.DateTimeFormat("en-US", {
@@ -50,8 +34,8 @@ function formatDateRange(startsOn: string, endsOn: string) {
   )}`;
 }
 
-function NavIcon({ item }: { item: (typeof navItems)[number] }) {
-  const paths: Record<(typeof navItems)[number], React.ReactNode> = {
+function NavIcon({ item }: { item: NavItem }) {
+  const paths: Record<NavItem, React.ReactNode> = {
     Overview: (
       <>
         <rect x="3" y="3" width="7" height="7" />
@@ -188,11 +172,105 @@ function SignIn() {
   );
 }
 
-function EventDesk({ data }: { data: EventListResponse }) {
-  const [selectedEventId, setSelectedEventId] = useState(
-    () => localStorage.getItem("chartstead:event"),
+function OverviewWorkspace({ event }: { event: EventRecord }) {
+  return (
+    <div className="workspace">
+      <section className="readiness" aria-labelledby="readiness-title">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Program readiness</p>
+            <h2 id="readiness-title">The working chart</h2>
+          </div>
+          <span className="status-indicator">Seeded demo</span>
+        </div>
+        <div className="metric-strip">
+          <div aria-label={`${event.submissionCount} submissions`}>
+            <strong>{event.submissionCount}</strong>
+            <span>submissions</span>
+          </div>
+          <div>
+            <strong>{event.unreviewedCount}</strong>
+            <span>unreviewed</span>
+          </div>
+          <div aria-label={`${event.tracks.length} tracks`}>
+            <strong>{event.tracks.length}</strong>
+            <span>tracks</span>
+          </div>
+          <div aria-label={`${event.rooms.length} rooms`}>
+            <strong>{event.rooms.length}</strong>
+            <span>rooms</span>
+          </div>
+        </div>
+      </section>
+
+      <div className="operations-grid">
+        <section className="operations-panel" aria-labelledby="tracks-title">
+          <div className="panel-heading">
+            <h2 id="tracks-title">Tracks</h2>
+            <span>{event.tracks.length} active</span>
+          </div>
+          <ul className="operation-list">
+            {event.tracks.map((track, index) => (
+              <li key={track.id}>
+                <span
+                  className={`track-line track-${index + 1}`}
+                  aria-hidden="true"
+                />
+                <strong>{track.name}</strong>
+                <span>{track.proposalCount} proposals</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+        <section className="operations-panel" aria-labelledby="rooms-title">
+          <div className="panel-heading">
+            <h2 id="rooms-title">Rooms</h2>
+            <span>{event.rooms.length} configured</span>
+          </div>
+          <ul className="operation-list">
+            {event.rooms.map((room, index) => (
+              <li key={room.id}>
+                <span className="room-index">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <strong>{room.name}</strong>
+                <span>{room.readiness === "ready" ? "Ready" : "Pending"}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </div>
+    </div>
   );
-  const [activeNav, setActiveNav] = useState<(typeof navItems)[number]>("Overview");
+}
+
+function EventDesk({
+  data,
+  initialNav = "Overview",
+  initialEventId = null,
+  initialProposalId = null,
+}: {
+  data: EventListResponse;
+  initialNav?: NavItem;
+  initialEventId?: string | null;
+  initialProposalId?: string | null;
+}) {
+  const navigate = useNavigate();
+  const [selectedEventId, setSelectedEventId] = useState(() => {
+    if (initialEventId && data.events.some((event) => event.id === initialEventId)) {
+      localStorage.setItem("chartstead:event", initialEventId);
+      return initialEventId;
+    }
+    const stored = localStorage.getItem("chartstead:event");
+    if (stored && data.events.some((event) => event.id === stored)) {
+      return stored;
+    }
+    return data.events[0]?.id ?? null;
+  });
+  const [activeNav, setActiveNav] = useState<NavItem>(initialNav);
+  const [selectedProposalId, setSelectedProposalId] = useState<string | null>(
+    initialProposalId,
+  );
   const event =
     data.events.find((candidate) => candidate.id === selectedEventId) ?? data.events[0];
 
@@ -209,25 +287,75 @@ function EventDesk({ data }: { data: EventListResponse }) {
   function selectEvent(eventId: string) {
     localStorage.setItem("chartstead:event", eventId);
     setSelectedEventId(eventId);
+    setSelectedProposalId(null);
+    if (activeNav === "Submissions") {
+      void navigate({
+        to: "/e/$eventId/submissions",
+        params: { eventId },
+      });
+    }
   }
+
+  function selectNav(item: NavItem) {
+    setActiveNav(item);
+    if (item === "Submissions") {
+      void navigate({
+        to: "/e/$eventId/submissions",
+        params: { eventId: event.id },
+      });
+      return;
+    }
+    if (item === "Overview") {
+      void navigate({ to: "/" });
+    }
+  }
+
+  function selectProposal(proposalId: string) {
+    setSelectedProposalId(proposalId);
+    void navigate({
+      to: "/e/$eventId/submissions/$proposalId",
+      params: { eventId: event.id, proposalId },
+    });
+  }
+
+  const cfpHref = `/e/${event.id}/cfp`;
+  const topbarTitle = activeNav === "Submissions" ? "Submissions" : event.name;
+  const topbarMeta =
+    activeNav === "Submissions"
+      ? `${event.submissionCount} total · ${event.unreviewedCount} unreviewed · track routing on`
+      : formatDateRange(event.startsOn, event.endsOn);
 
   return (
     <div className="app">
       <aside className="sidebar">
         <a className="brand" href="/" aria-label="ChartStead home">
           <img src={markOnDarkUrl} width="32" height="32" alt="" />
-            <span className="brand-text">
-              <span className="brand-name">ChartStead</span>
-              <span className="brand-desc">Conference Programming</span>
-            </span>
+          <span className="brand-text">
+            <span className="brand-name">ChartStead</span>
+            <span className="brand-desc">Conference Programming</span>
+          </span>
         </a>
         <nav className="nav" aria-label="Organizer">
           {navItems.map((item) => (
             <a
               key={item}
-              href={`#${item.toLowerCase()}`}
+              href={
+                item === "Submissions"
+                  ? `/e/${event.id}/submissions`
+                  : item === "Overview"
+                    ? "/"
+                    : `#${item.toLowerCase()}`
+              }
               aria-current={activeNav === item ? "page" : undefined}
-              onClick={() => setActiveNav(item)}
+              onClick={(click) => {
+                if (item === "Speakers" || item === "Agenda" || item === "Messages" || item === "Settings") {
+                  click.preventDefault();
+                  setActiveNav(item);
+                  return;
+                }
+                click.preventDefault();
+                selectNav(item);
+              }}
             >
               <NavIcon item={item} />
               <span>{item}</span>
@@ -257,11 +385,16 @@ function EventDesk({ data }: { data: EventListResponse }) {
       <main className="main">
         <header className="topbar">
           <div>
-            <h1>{event.name}</h1>
-            <p className="topbar-meta">{formatDateRange(event.startsOn, event.endsOn)}</p>
+            <h1>{topbarTitle}</h1>
+            <p className="topbar-meta">{topbarMeta}</p>
           </div>
           <div className="topbar-spacer" />
           <div className="topbar-actions">
+            {activeNav === "Submissions" ? (
+              <a className="btn btn-primary" href={cfpHref}>
+                Open CFP form
+              </a>
+            ) : null}
             <div className="operator">
               <span className="operator-avatar" aria-hidden="true">
                 {data.principal.displayName
@@ -278,80 +411,38 @@ function EventDesk({ data }: { data: EventListResponse }) {
           </div>
         </header>
 
-        <div className="workspace">
-          <section className="readiness" aria-labelledby="readiness-title">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">Program readiness</p>
-                <h2 id="readiness-title">The working chart</h2>
-              </div>
-              <span className="status-indicator">Seeded demo</span>
-            </div>
-            <div className="metric-strip">
-              <div aria-label={`${event.submissionCount} submissions`}>
-                <strong>{event.submissionCount}</strong>
-                <span>submissions</span>
-              </div>
-              <div>
-                <strong>{event.unreviewedCount}</strong>
-                <span>unreviewed</span>
-              </div>
-              <div aria-label={`${event.tracks.length} tracks`}>
-                <strong>{event.tracks.length}</strong>
-                <span>tracks</span>
-              </div>
-              <div aria-label={`${event.rooms.length} rooms`}>
-                <strong>{event.rooms.length}</strong>
-                <span>rooms</span>
-              </div>
-            </div>
-          </section>
-
-          <div className="operations-grid">
-            <section className="operations-panel" aria-labelledby="tracks-title">
+        {activeNav === "Submissions" ? (
+          <SubmissionsWorkspace
+            event={event}
+            selectedProposalId={selectedProposalId}
+            onSelectProposal={selectProposal}
+            cfpHref={cfpHref}
+          />
+        ) : activeNav === "Overview" ? (
+          <OverviewWorkspace event={event} />
+        ) : (
+          <div className="workspace">
+            <section className="operations-panel">
               <div className="panel-heading">
-                <h2 id="tracks-title">Tracks</h2>
-                <span>{event.tracks.length} active</span>
+                <h2>{activeNav}</h2>
               </div>
-              <ul className="operation-list">
-                {event.tracks.map((track, index) => (
-                  <li key={track.id}>
-                    <span
-                      className={`track-line track-${index + 1}`}
-                      aria-hidden="true"
-                    />
-                    <strong>{track.name}</strong>
-                    <span>{track.proposalCount} proposals</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-            <section className="operations-panel" aria-labelledby="rooms-title">
-              <div className="panel-heading">
-                <h2 id="rooms-title">Rooms</h2>
-                <span>{event.rooms.length} configured</span>
-              </div>
-              <ul className="operation-list">
-                {event.rooms.map((room, index) => (
-                  <li key={room.id}>
-                    <span className="room-index">
-                      {String(index + 1).padStart(2, "0")}
-                    </span>
-                    <strong>{room.name}</strong>
-                    <span>{room.readiness === "ready" ? "Ready" : "Pending"}</span>
-                  </li>
-                ))}
-              </ul>
+              <p className="empty-state padded">
+                {activeNav} is outside the ticket 02 slice.
+              </p>
             </section>
           </div>
-        </div>
+        )}
       </main>
     </div>
   );
 }
 
+function useOrganizerData() {
+  return useQuery({ queryKey: ["events"], queryFn: fetchEvents });
+}
+
 export function App() {
-  const query = useQuery({ queryKey: ["events"], queryFn: fetchEvents });
+  const query = useOrganizerData();
   if (query.isPending) return <LoadingShell />;
   if (query.error instanceof ApiError && query.error.status === 401) return <SignIn />;
   if (query.isError) {
@@ -369,4 +460,36 @@ export function App() {
     );
   }
   return <EventDesk data={query.data} />;
+}
+
+export function SubmissionsPage() {
+  const query = useOrganizerData();
+  const params = useParams({ strict: false }) as {
+    eventId?: string;
+    proposalId?: string;
+  };
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+
+  if (query.isPending) return <LoadingShell />;
+  if (query.error instanceof ApiError && query.error.status === 401) return <SignIn />;
+  if (query.isError) {
+    return (
+      <main className="sign-in-shell">
+        <section className="error-panel" role="alert">
+          <h1>ChartStead could not open submissions.</h1>
+          <p>{query.error.message}</p>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <EventDesk
+      data={query.data}
+      initialNav="Submissions"
+      initialEventId={params.eventId ?? null}
+      initialProposalId={params.proposalId ?? null}
+      key={`${pathname}:${params.eventId ?? ""}:${params.proposalId ?? ""}`}
+    />
+  );
 }
