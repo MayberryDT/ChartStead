@@ -2,6 +2,7 @@ import type {
   CourseCheckPlan,
   ProgramOutcome,
 } from "../shared/course-check";
+import type { AirtablePullResult, AirtableSyncState } from "../shared/airtable";
 import type {
   AgendaWorkspaceResponse,
   AssetUploadSession,
@@ -1037,4 +1038,85 @@ export async function updateSubmitterProposal(
     );
   }
   return body.proposal;
+}
+
+export async function fetchAirtableSync(
+  eventId: string,
+): Promise<{ sync: AirtableSyncState }> {
+  const response = await fetch(`/api/events/${eventId}/integrations/airtable`);
+  const body = await readJson<{ sync: AirtableSyncState } | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("sync" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to load Airtable sync status",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function connectAirtableSync(
+  eventId: string,
+  input: { baseId: string; accessToken: string },
+): Promise<{ pull: AirtablePullResult; sync: AirtableSyncState }> {
+  const response = await fetch(`/api/events/${eventId}/integrations/airtable`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<
+    | { pull: AirtablePullResult; sync: AirtableSyncState }
+    | { error: string }
+  >(response);
+  if (!response.ok || !("sync" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to connect Airtable",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function disconnectAirtableSync(
+  eventId: string,
+): Promise<{ sync: AirtableSyncState }> {
+  const response = await fetch(`/api/events/${eventId}/integrations/airtable`, {
+    method: "DELETE",
+  });
+  const body = await readJson<{ sync: AirtableSyncState } | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("sync" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to disconnect Airtable",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function pullAirtableSync(eventId: string): Promise<{
+  pull: AirtablePullResult;
+  sync: AirtableSyncState;
+}> {
+  const response = await fetch(
+    `/api/events/${eventId}/integrations/airtable/pull`,
+    { method: "POST" },
+  );
+  const body = await readJson<
+    | { pull: AirtablePullResult; sync: AirtableSyncState }
+    | { error: string }
+  >(response);
+  if (!response.ok || !("sync" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to pull Airtable changes",
+      response.status,
+      body,
+    );
+  }
+  return body;
 }

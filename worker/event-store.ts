@@ -22,6 +22,12 @@ import {
   DEFAULT_DECISION_BATCH_LIMIT,
 } from "../shared/course-check";
 import type {
+  AirtablePullChange,
+  AirtableSyncState,
+} from "../shared/airtable";
+import { AIRTABLE_HEALTH_GUIDANCE } from "../shared/airtable";
+import { applyPullWinsToLocalRecord } from "../shared/airtable-field-map";
+import type {
   AgendaWorkspaceResponse,
   CalendarIntentRecord,
   CoSpeakerInput,
@@ -1164,6 +1170,30 @@ export class EventStore extends DurableObject<AppBindings> {
       this.ctx.storage.sql.exec(`
         CREATE INDEX IF NOT EXISTS public_program_revisions_current_idx
         ON public_program_revisions (is_current, version DESC)
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS airtable_sync_state (
+          id TEXT PRIMARY KEY NOT NULL DEFAULT 'default',
+          health TEXT NOT NULL,
+          configured INTEGER NOT NULL DEFAULT 0,
+          last_pull_at TEXT,
+          last_success_at TEXT,
+          last_error TEXT,
+          guidance TEXT,
+          pending_change_count INTEGER NOT NULL DEFAULT 0,
+          base_id TEXT,
+          access_token TEXT
+        )
+      `);
+      this.ensureColumn("airtable_sync_state", "access_token", "TEXT");
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS airtable_record_links (
+          chartstead_kind TEXT NOT NULL,
+          chartstead_id TEXT NOT NULL,
+          airtable_record_id TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (chartstead_kind, chartstead_id)
+        )
       `);
     });
   }
@@ -6016,6 +6046,460 @@ export class EventStore extends DurableObject<AppBindings> {
       calendarEffects: 0,
       publicRevisions: 0,
     };
+  }
+
+  getAirtableSyncState(): AirtableSyncState {
+    const row = this.ctx.storage.sql
+      .exec<{
+        health: string;
+        configured: number;
+        last_pull_at: string | null;
+        last_success_at: string | null;
+        last_error: string | null;
+        guidance: string | null;
+        pending_change_count: number;
+        base_id: string | null;
+        access_token: string | null;
+      }>(
+        `SELECT health, configured, last_pull_at, last_success_at, last_error,
+                guidance, pending_change_count, base_id, access_token
+         FROM airtable_sync_state
+         WHERE id = 'default'
+         LIMIT 1`,
+      )
+      .toArray()[0];
+
+    if (!row) {
+      return {
+        health: "unconfigured",
+        configured: false,
+        hasAccessToken: false,
+        lastPullAt: null,
+        lastSuccessAt: null,
+        lastError: null,
+        guidance: AIRTABLE_HEALTH_GUIDANCE.unconfigured,
+        pendingChangeCount: 0,
+        baseId: null,
+      };
+    }
+
+    const health = (
+      ["unconfigured", "healthy", "pending", "delayed", "failed"] as const
+    ).includes(row.health as AirtableSyncState["health"])
+      ? (row.health as AirtableSyncState["health"])
+      : "failed";
+    const hasAccessToken = Boolean(row.access_token?.trim());
+    const configured =
+      row.configured === 1 || (hasAccessToken && Boolean(row.base_id?.trim()));
+
+    return {
+      health: configured ? health : "unconfigured",
+      configured,
+      hasAccessToken,
+      lastPullAt: row.last_pull_at,
+      lastSuccessAt: row.last_success_at,
+      lastError: row.last_error,
+      guidance:
+        row.guidance ??
+        AIRTABLE_HEALTH_GUIDANCE[configured ? health : "unconfigured"],
+      pendingChangeCount: row.pending_change_count ?? 0,
+      baseId: row.base_id,
+    };
+  }
+
+  /** Internal only — never send accessToken to HTTP clients. */
+  getAirtableCredentials(): { accessToken: string; baseId: string } | null {
+    const row = this.ctx.storage.sql
+      .exec<{ access_token: string | null; base_id: string | null }>(
+        `SELECT access_token, base_id FROM airtable_sync_state WHERE id = 'default' LIMIT 1`,
+      )
+      .toArray()[0];
+    const accessToken = row?.access_token?.trim() ?? "";
+    const baseId = row?.base_id?.trim() ?? "";
+    if (!accessToken || !baseId) return null;
+    return { accessToken, baseId };
+  }
+
+  saveAirtableConnection(input: {
+    baseId: string;
+    accessToken: string;
+  }): AirtableSyncState {
+    const baseId = input.baseId.trim();
+    const incomingToken = input.accessToken.trim();
+    if (!baseId) throw new Error("Base id is required.");
+    if (!/^app[a-zA-Z0-9]+$/.test(baseId)) {
+      throw new Error("Base id should look like appXXXXXXXXXXXXXX.");
+    }
+
+    const existing = this.getAirtableCredentials();
+    const accessToken = incomingToken || existing?.accessToken || "";
+    if (!accessToken) throw new Error("Access token is required.");
+
+    const previous = this.getAirtableSyncState();
+    this.ctx.storage.sql.exec(
+      `INSERT INTO airtable_sync_state (
+         id, health, configured, last_pull_at, last_success_at, last_error,
+         guidance, pending_change_count, base_id, access_token
+       ) VALUES ('default', 'pending', 1, ?, ?, NULL, ?, 0, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         health = 'pending',
+         configured = 1,
+         last_error = NULL,
+         guidance = excluded.guidance,
+         base_id = excluded.base_id,
+         access_token = excluded.access_token`,
+      previous.lastPullAt,
+      previous.lastSuccessAt,
+      AIRTABLE_HEALTH_GUIDANCE.pending,
+      baseId,
+      accessToken,
+    );
+    return this.getAirtableSyncState();
+  }
+
+  clearAirtableConnection(): AirtableSyncState {
+    this.ctx.storage.sql.exec(
+      `INSERT INTO airtable_sync_state (
+         id, health, configured, last_pull_at, last_success_at, last_error,
+         guidance, pending_change_count, base_id, access_token
+       ) VALUES ('default', 'unconfigured', 0, NULL, NULL, NULL, ?, 0, NULL, NULL)
+       ON CONFLICT(id) DO UPDATE SET
+         health = 'unconfigured',
+         configured = 0,
+         last_pull_at = NULL,
+         last_success_at = NULL,
+         last_error = NULL,
+         guidance = excluded.guidance,
+         pending_change_count = 0,
+         base_id = NULL,
+         access_token = NULL`,
+      AIRTABLE_HEALTH_GUIDANCE.unconfigured,
+    );
+    return this.getAirtableSyncState();
+  }
+
+  setAirtableSyncState(state: AirtableSyncState): void {
+    const existing = this.ctx.storage.sql
+      .exec<{ access_token: string | null }>(
+        `SELECT access_token FROM airtable_sync_state WHERE id = 'default' LIMIT 1`,
+      )
+      .toArray()[0];
+    this.ctx.storage.sql.exec(
+      `INSERT INTO airtable_sync_state (
+         id, health, configured, last_pull_at, last_success_at, last_error,
+         guidance, pending_change_count, base_id, access_token
+       ) VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         health = excluded.health,
+         configured = excluded.configured,
+         last_pull_at = excluded.last_pull_at,
+         last_success_at = excluded.last_success_at,
+         last_error = excluded.last_error,
+         guidance = excluded.guidance,
+         pending_change_count = excluded.pending_change_count,
+         base_id = excluded.base_id`,
+      state.health,
+      state.configured ? 1 : 0,
+      state.lastPullAt,
+      state.lastSuccessAt,
+      state.lastError,
+      state.guidance,
+      state.pendingChangeCount,
+      state.baseId,
+      existing?.access_token ?? null,
+    );
+  }
+
+  applyAirtablePullChanges(input: {
+    changes: AirtablePullChange[];
+    pulledAt: string;
+    baseId: string;
+  }): AirtablePullChange[] {
+    const applied: AirtablePullChange[] = [];
+    this.ctx.storage.transactionSync(() => {
+      for (const change of input.changes) {
+        const didApply = this.applyOneAirtableChange(change);
+        if (!didApply) continue;
+        this.ctx.storage.sql.exec(
+          `INSERT INTO airtable_record_links
+             (chartstead_kind, chartstead_id, airtable_record_id, updated_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(chartstead_kind, chartstead_id) DO UPDATE SET
+             airtable_record_id = excluded.airtable_record_id,
+             updated_at = excluded.updated_at`,
+          change.kind,
+          change.chartsteadId,
+          change.airtableRecordId,
+          input.pulledAt,
+        );
+        applied.push(change);
+      }
+    });
+    return applied;
+  }
+
+  private applyOneAirtableChange(change: AirtablePullChange): boolean {
+    if (change.kind === "event") {
+      const event = this.getEvent();
+      if (!event || event.id !== change.chartsteadId) return false;
+      const merged = applyPullWinsToLocalRecord(
+        "event",
+        {
+          name: event.name,
+          startsOn: event.startsOn,
+          endsOn: event.endsOn,
+        },
+        change.mappedValues,
+      );
+      this.ctx.storage.sql.exec(
+        `UPDATE events SET name = ?, starts_on = ?, ends_on = ? WHERE id = ?`,
+        String(merged.name ?? event.name),
+        String(merged.startsOn ?? event.startsOn),
+        String(merged.endsOn ?? event.endsOn),
+        event.id,
+      );
+      return true;
+    }
+
+    if (change.kind === "submission") {
+      const existing = this.getProposal(change.chartsteadId);
+      if (!existing) return false;
+      const event = this.getEvent();
+      if (!event) return false;
+
+      const merged = applyPullWinsToLocalRecord(
+        "submission",
+        {
+          title: existing.title,
+          abstract: existing.abstract,
+          trackId: existing.trackId,
+          speakerName: existing.speakerName,
+          speakerEmail: existing.speakerEmail,
+          biography: existing.biography,
+          supportingLink: existing.supportingLink,
+        },
+        change.mappedValues,
+      );
+
+      const nextTrackId = String(merged.trackId ?? existing.trackId);
+      const track =
+        event.tracks.find((candidate) => candidate.id === nextTrackId) ??
+        event.tracks.find((candidate) => candidate.id === existing.trackId);
+      if (!track) return false;
+
+      this.ctx.storage.sql.exec(
+        `UPDATE proposals
+         SET title = ?, abstract = ?, track_id = ?, track_name = ?,
+             speaker_name = ?, speaker_email = ?, biography = ?, supporting_link = ?
+         WHERE id = ?`,
+        String(merged.title ?? existing.title),
+        String(merged.abstract ?? existing.abstract),
+        track.id,
+        track.name,
+        String(merged.speakerName ?? existing.speakerName),
+        String(merged.speakerEmail ?? existing.speakerEmail),
+        String(merged.biography ?? existing.biography),
+        String(merged.supportingLink ?? existing.supportingLink),
+        existing.id,
+      );
+      return true;
+    }
+
+    if (change.kind === "speaker") {
+      const speaker = this.getSpeakerRow(change.chartsteadId);
+      if (!speaker) return false;
+      const merged = applyPullWinsToLocalRecord(
+        "speaker",
+        {
+          name: speaker.name,
+          email: speaker.email,
+          biography: speaker.biography,
+        },
+        change.mappedValues,
+      );
+      this.ctx.storage.sql.exec(
+        `UPDATE speakers SET name = ?, email = ?, biography = ? WHERE id = ?`,
+        String(merged.name ?? speaker.name),
+        String(merged.email ?? speaker.email)
+          .trim()
+          .toLowerCase(),
+        String(merged.biography ?? speaker.biography),
+        speaker.id,
+      );
+      return true;
+    }
+
+    if (change.kind === "session") {
+      const row = this.ctx.storage.sql
+        .exec<{
+          id: string;
+          title: string;
+          format: string;
+          track_id: string;
+          room_id: string | null;
+          starts_at: string | null;
+          ends_at: string | null;
+        }>(
+          `SELECT id, title, format, track_id, room_id, starts_at, ends_at
+           FROM sessions WHERE id = ?`,
+          change.chartsteadId,
+        )
+        .toArray()[0];
+      if (!row) return false;
+      const merged = applyPullWinsToLocalRecord(
+        "session",
+        {
+          title: row.title,
+          format: row.format,
+          trackId: row.track_id,
+          roomId: row.room_id,
+          startsAt: row.starts_at,
+          endsAt: row.ends_at,
+        },
+        change.mappedValues,
+      );
+      this.ctx.storage.sql.exec(
+        `UPDATE sessions
+         SET title = ?, format = ?, track_id = ?, room_id = ?, starts_at = ?, ends_at = ?
+         WHERE id = ?`,
+        String(merged.title ?? row.title),
+        String(merged.format ?? row.format),
+        String(merged.trackId ?? row.track_id),
+        merged.roomId == null ? null : String(merged.roomId),
+        merged.startsAt == null ? null : String(merged.startsAt),
+        merged.endsAt == null ? null : String(merged.endsAt),
+        row.id,
+      );
+      return true;
+    }
+
+    if (change.kind === "task") {
+      const row = this.ctx.storage.sql
+        .exec<{
+          id: string;
+          title: string;
+          instructions: string;
+          due_at: string | null;
+          status: string;
+        }>(
+          `SELECT id, title, instructions, due_at, status
+           FROM onboarding_tasks WHERE id = ?`,
+          change.chartsteadId,
+        )
+        .toArray()[0];
+      if (!row) return false;
+      const merged = applyPullWinsToLocalRecord(
+        "task",
+        {
+          title: row.title,
+          instructions: row.instructions,
+          dueAt: row.due_at,
+          status: row.status,
+        },
+        change.mappedValues,
+      );
+      const nextStatus = String(merged.status ?? row.status);
+      if (nextStatus !== "open" && nextStatus !== "completed") return false;
+      this.ctx.storage.sql.exec(
+        `UPDATE onboarding_tasks
+         SET title = ?, instructions = ?, due_at = ?, status = ?,
+             completed_at = CASE
+               WHEN ? = 'completed' AND completed_at IS NULL THEN ?
+               WHEN ? = 'open' THEN NULL
+               ELSE completed_at
+             END
+         WHERE id = ?`,
+        String(merged.title ?? row.title),
+        String(merged.instructions ?? row.instructions),
+        merged.dueAt == null ? null : String(merged.dueAt),
+        nextStatus,
+        nextStatus,
+        new Date().toISOString(),
+        nextStatus,
+        row.id,
+      );
+      return true;
+    }
+
+    return false;
+  }
+
+  listApiSpeakers(): Array<{
+    id: string;
+    name: string;
+    email: string;
+    biography: string;
+    createdAt: string;
+  }> {
+    return this.ctx.storage.sql
+      .exec<{
+        id: string;
+        name: string;
+        email: string;
+        biography: string;
+        created_at: string;
+      }>(
+        `SELECT id, name, email, biography, created_at
+         FROM speakers
+         ORDER BY name ASC, id ASC`,
+      )
+      .toArray()
+      .map((row) => ({
+        id: row.id,
+        name: row.name,
+        email: row.email,
+        biography: row.biography,
+        createdAt: row.created_at,
+      }));
+  }
+
+  listApiTasks(): Array<{
+    id: string;
+    speakerId: string;
+    title: string;
+    kind: string;
+    status: string;
+    dueAt: string | null;
+    instructions: string;
+    completionRequirement: string;
+    readinessFlag: string | null;
+    completedAt: string | null;
+  }> {
+    return this.ctx.storage.sql
+      .exec<{
+        id: string;
+        speaker_id: string;
+        title: string;
+        kind: string;
+        status: string;
+        due_at: string | null;
+        instructions: string;
+        completion_requirement: string;
+        readiness_flag: string | null;
+        completed_at: string | null;
+      }>(
+        `SELECT id, speaker_id, title, kind, status, due_at, instructions,
+                completion_requirement, readiness_flag, completed_at
+         FROM onboarding_tasks
+         ORDER BY created_at DESC, id ASC`,
+      )
+      .toArray()
+      .map((row) => ({
+        id: row.id,
+        speakerId: row.speaker_id,
+        title: row.title,
+        kind: row.kind,
+        status: row.status,
+        dueAt: row.due_at,
+        instructions: row.instructions,
+        completionRequirement: row.completion_requirement,
+        readinessFlag: row.readiness_flag,
+        completedAt: row.completed_at,
+      }));
+  }
+
+  listApiCommunications(): OutboxMessage[] {
+    return this.listOutboxMessages();
   }
 
   /** Test helper: pre-insert a conflicting session id for transactional rollback coverage. */
