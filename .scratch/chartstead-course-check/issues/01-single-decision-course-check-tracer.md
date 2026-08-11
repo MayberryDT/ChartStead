@@ -4,7 +4,7 @@
 
 **Blocked by:** Competition 03 — Guided CFP publishing and submitter follow-up; Competition 04 — Shared track review queue.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] Reversible `unreviewed / approve / maybe / deny` review dispositions remain immediate ordinary writes and never open Course Check.
 - [x] An administrator can create a Decision Course Check for one final accepted or declined outcome through the organizer UI and authenticated HTTP API.
