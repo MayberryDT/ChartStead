@@ -2538,6 +2538,64 @@ export function createApp(options: AppOptions = {}) {
     return c.json(result.plan);
   });
 
+  app.get("/api/events/:eventId/program", async (c) => {
+    const eventId = c.req.param("eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const revisionId = c.req.query("revision") ?? undefined;
+    const program = await c.env.EVENT_STORE.getByName(eventId).getPublicProgram(
+      revisionId,
+    );
+    if (!program) {
+      return c.json({ error: "Public program not found" }, 404);
+    }
+    return c.json(program);
+  });
+
+  app.get("/api/events/:eventId/program/sessions/:sessionId/calendar.ics", async (c) => {
+    const eventId = c.req.param("eventId");
+    const sessionId = c.req.param("sessionId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const revisionId = c.req.query("revision") ?? undefined;
+    const result = await c.env.EVENT_STORE.getByName(eventId).getPublicProgramSessionIcs(
+      sessionId,
+      revisionId,
+    );
+    if (!result.ok) {
+      return c.json({ error: "Session not found" }, 404);
+    }
+    return new Response(result.ics, {
+      status: 200,
+      headers: {
+        "content-type": "text/calendar; charset=utf-8",
+        // inline so webcal/https open in calendar apps; filename kept for Save As
+        "content-disposition": `inline; filename="${result.filename}"`,
+        "cache-control": "public, max-age=300",
+      },
+    });
+  });
+
+  app.post("/api/events/:eventId/program/publish-test", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const program = await c.env.EVENT_STORE.getByName(
+      eventId,
+    ).publishPublicProgramRevisionForTest();
+    return c.json(program, 201);
+  });
+
   app.get("/api/events/:eventId/sessions", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
     const eventId = c.req.param("eventId");

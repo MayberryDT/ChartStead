@@ -3080,3 +3080,439 @@ table.grid tbody tr[aria-selected="true"] td:first-child {
     gap: 4px;
   }
 }
+
+/* —— Public program —— */
+.program-shell {
+  min-height: 100vh;
+  display: grid;
+  gap: 16px;
+  justify-items: center;
+  align-content: start;
+  padding: 32px 16px 64px;
+  background: var(--surface-subtle);
+}
+
+.program-shell.mode-embed {
+  padding: 12px;
+  min-height: 0;
+  background: var(--surface);
+}
+
+.program-brand,
+.program-renderer,
+.program-footer {
+  width: min(100%, 1100px);
+}
+
+.program-renderer {
+  display: grid;
+  gap: 16px;
+  background: var(--surface);
+  border: 1px solid var(--outline);
+  border-radius: 12px;
+  padding: 20px;
+  border-top: 4px solid var(--program-accent, var(--secondary));
+}
+
+.program-header h1 {
+  margin: 6px 0 8px;
+  font-size: 30px;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.program-header p {
+  margin: 0;
+  color: var(--on-surface-variant);
+}
+
+.program-filters {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.program-filters label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--on-surface-variant);
+}
+
+.program-filters select {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--outline);
+  border-radius: var(--r-control);
+  background: var(--surface);
+  color: var(--on-surface);
+  padding: 0 8px;
+}
+
+.program-counts {
+  margin: 0;
+  color: var(--on-surface-variant);
+  font-size: 13px;
+}
+
+.program-counts strong {
+  color: var(--on-surface);
+}
+
+.program-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.9fr);
+  grid-template-areas:
+    "schedule detail"
+    "speakers speakers";
+  gap: 14px;
+}
+
+.program-schedule {
+  grid-area: schedule;
+}
+
+.program-detail {
+  grid-area: detail;
+}
+
+.program-speakers {
+  grid-area: speakers;
+}
+
+.program-schedule h2,
+.program-detail h2,
+.program-speakers h2 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.program-session-list,
+.program-speaker-list,
+.program-inline-speakers,
+.program-speaker-sessions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.program-session-list {
+  display: grid;
+  gap: 8px;
+}
+
+.program-session-card {
+  width: 100%;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--outline);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  cursor: pointer;
+}
+
+.program-session-card.is-selected {
+  outline: 2px solid var(--program-accent, var(--secondary));
+  outline-offset: 1px;
+}
+
+.program-session-card.track-platform,
+.program-session-card.track-1 {
+  border-left: 4px solid var(--schedule-blue);
+}
+
+.program-session-card.track-program-ops,
+.program-session-card.track-2 {
+  border-left: 4px solid var(--schedule-green);
+}
+
+.program-session-card.track-design-systems,
+.program-session-card.track-3 {
+  border-left: 4px solid var(--schedule-purple);
+}
+
+.program-session-card.track-community,
+.program-session-card.track-4,
+.program-session-card.track-agents {
+  border-left: 4px solid var(--schedule-amber);
+}
+
+.program-session-time {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--on-surface-variant);
+}
+
+.program-session-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--on-surface);
+}
+
+.program-session-meta,
+.program-session-speakers {
+  font-size: 12px;
+  color: var(--on-surface-variant);
+}
+
+.program-detail-card {
+  border: 1px solid var(--outline);
+  border-radius: 8px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  background: var(--surface-subtle);
+}
+
+.program-detail-card h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.program-detail-card h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.program-detail-card p {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--on-surface);
+}
+
+.program-dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.program-dl div {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 8px;
+}
+
+.program-dl dt {
+  margin: 0;
+  font-size: 12px;
+  color: var(--on-surface-variant);
+}
+
+.program-dl dd {
+  margin: 0;
+  font-size: 13px;
+}
+
+.program-inline-speakers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.program-inline-speakers li {
+  border: 1px solid var(--outline);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  background: var(--surface);
+}
+
+.program-calendar {
+  position: relative;
+  justify-self: start;
+}
+
+.program-calendar-trigger {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--outline);
+  border-radius: var(--r-control);
+  background: var(--surface);
+  color: var(--program-accent, var(--secondary));
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.program-calendar-trigger:hover,
+.program-calendar-trigger:focus-visible {
+  border-color: var(--program-accent, var(--secondary));
+  outline: 2px solid color-mix(in srgb, var(--program-accent, var(--secondary)) 35%, transparent);
+  outline-offset: 1px;
+}
+
+.program-calendar-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: min(280px, 80vw);
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid var(--outline);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--on-surface) 12%, transparent);
+}
+
+.program-calendar-menu-label {
+  margin: 0 4px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--on-surface-variant);
+}
+
+.program-calendar-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--on-surface);
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.program-calendar-option:hover,
+.program-calendar-option:focus-visible {
+  background: var(--surface-subtle);
+  outline: none;
+}
+
+.program-calendar-option.is-disabled {
+  color: var(--on-surface-variant);
+  font-weight: 500;
+  cursor: default;
+}
+
+.program-calendar-option-muted {
+  font-weight: 500;
+  color: var(--on-surface-variant);
+}
+
+.program-calendar-hint {
+  margin: 6px 4px 2px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--on-surface-variant);
+}
+
+.program-speaker-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.program-speaker-card {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  gap: 12px;
+  border: 1px solid var(--outline);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface-subtle);
+}
+
+.program-speaker-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--program-accent, var(--secondary));
+}
+
+.program-speaker-card h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.program-speaker-card p {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--on-surface-variant);
+}
+
+.program-speaker-sessions {
+  display: grid;
+  gap: 4px;
+}
+
+.program-speaker-sessions button {
+  border: 0;
+  background: transparent;
+  color: var(--program-accent, var(--secondary));
+  padding: 0;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.program-empty {
+  margin: 0;
+  color: var(--on-surface-variant);
+  font-size: 13px;
+}
+
+.program-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--on-surface-variant);
+  font-size: 12px;
+}
+
+.program-footer p {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .program-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .program-layout {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "schedule"
+      "detail"
+      "speakers";
+  }
+
+  .program-speaker-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .program-shell {
+    padding: 16px 12px 40px;
+  }
+
+  .program-header h1 {
+    font-size: 24px;
+  }
+
+  .program-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .program-footer {
+    flex-direction: column;
+  }
+}

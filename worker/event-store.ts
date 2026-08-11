@@ -35,6 +35,11 @@ import type {
   ProposalAuditEvent,
   ProposalInput,
   ProposalStatus,
+  PublicProgramEventSlice,
+  PublicProgramResponse,
+  PublicProgramRevisionMeta,
+  PublicProgramSession,
+  PublicProgramSpeaker,
   PublishedCfpForm,
   ReminderDraftStatus,
   SessionPlacementPatch,
@@ -42,6 +47,7 @@ import type {
   SpeakerPortalSession,
   SubmissionAnswers,
 } from "../shared/events";
+import { buildSessionIcs } from "../shared/public-program";
 import {
   detectScheduleConflicts,
   placementStatus,
@@ -1005,6 +1011,20 @@ export class EventStore extends DurableObject<AppBindings> {
       this.ctx.storage.sql.exec(`
         CREATE INDEX IF NOT EXISTS onboarding_history_speaker_created_idx
         ON onboarding_history (speaker_id, created_at DESC)
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS public_program_revisions (
+          id TEXT PRIMARY KEY,
+          version INTEGER NOT NULL,
+          is_current INTEGER NOT NULL DEFAULT 0,
+          published_at TEXT NOT NULL,
+          snapshot_json TEXT NOT NULL,
+          source TEXT NOT NULL DEFAULT 'working'
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS public_program_revisions_current_idx
+        ON public_program_revisions (is_current, version DESC)
       `);
     });
   }
@@ -3782,6 +3802,454 @@ export class EventStore extends DurableObject<AppBindings> {
       Number(row.calendar_sequence) || 0,
       sessionId,
     );
+  }
+
+  private listPublicProgramRevisionMeta(): PublicProgramRevisionMeta[] {
+    return this.ctx.storage.sql
+      .exec<{
+        id: string;
+        version: number;
+        is_current: number;
+        published_at: string;
+      }>(
+        `SELECT id, version, is_current, published_at
+         FROM public_program_revisions
+         ORDER BY version DESC`,
+      )
+      .toArray()
+      .map((row) => ({
+        id: row.id,
+        version: Number(row.version),
+        publishedAt: row.published_at,
+        isCurrent: Number(row.is_current) === 1,
+      }));
+  }
+
+  private toPublicEventSlice(event: EventRecord): PublicProgramEventSlice {
+    return {
+      id: event.id,
+      name: event.name,
+      startsOn: event.startsOn,
+      endsOn: event.endsOn,
+      themeAccent: normalizeThemeAccent(event.themeAccent),
+      tracks: event.tracks.map((track) => ({ id: track.id, name: track.name })),
+      rooms: event.rooms.map((room) => ({
+        id: room.id,
+        name: room.name,
+        readiness: room.readiness,
+      })),
+    };
+  }
+
+  private proposalAbstractMap(): Map<string, string> {
+    const rows = this.ctx.storage.sql
+      .exec<{ id: string; abstract: string }>(
+        `SELECT id, abstract FROM proposals`,
+      )
+      .toArray();
+    return new Map(rows.map((row) => [row.id, row.abstract ?? ""]));
+  }
+
+  private listPublicSessionSpeakers(session: {
+    proposal_id: string | null;
+    course_check_plan_id: string;
+  }): Array<{
+    id: string;
+    name: string;
+    role: string;
+    biography: string;
+    headshotAssetId: string | null;
+  }> {
+    return this.ctx.storage.sql
+      .exec<{
+        id: string;
+        name: string;
+        role: string;
+        biography: string;
+        headshot_asset_id: string | null;
+      }>(
+        `SELECT s.id AS id,
+                s.name AS name,
+                p.role AS role,
+                COALESCE(s.biography, '') AS biography,
+                s.headshot_asset_id AS headshot_asset_id
+         FROM event_participations p
+         JOIN speakers s ON s.id = p.speaker_id
+         WHERE (
+           (? IS NOT NULL AND p.proposal_id = ?)
+           OR (? IS NULL AND p.course_check_plan_id = ?)
+         )
+         ORDER BY CASE p.role WHEN 'primary' THEN 0 ELSE 1 END, s.name ASC`,
+        session.proposal_id,
+        session.proposal_id,
+        session.proposal_id,
+        session.course_check_plan_id,
+      )
+      .toArray()
+      .filter((row) => row.name.trim().length > 0)
+      .map((row) => ({
+        id: row.id,
+        name: row.name.trim(),
+        role: row.role,
+        biography: (row.biography ?? "").trim(),
+        headshotAssetId: row.headshot_asset_id ?? null,
+      }));
+  }
+
+  /** Build the publishable public subset from current working program state. */
+  buildPublicProgramSnapshotFromWorking(): {
+    sessions: PublicProgramSession[];
+    speakers: PublicProgramSpeaker[];
+  } {
+    this.backfillSessionCalendarUids();
+    const event = this.getEvent();
+    const rooms = event?.rooms ?? [];
+    const roomPending = new Map(
+      rooms.map((room) => [room.id, room.readiness === "pending"] as const),
+    );
+    const abstracts = this.proposalAbstractMap();
+    const tracks = this.trackNameMap();
+    const roomNames = this.roomNameMap();
+    const speakerAcc = new Map<string, PublicProgramSpeaker>();
+    const sessions: PublicProgramSession[] = [];
+
+    for (const row of this.loadSessionRows()) {
+      const speakers = this.listPublicSessionSpeakers(row);
+      if (speakers.length === 0) continue;
+      const description = row.proposal_id
+        ? (abstracts.get(row.proposal_id) ?? "").trim()
+        : "";
+      const roomId = row.room_id;
+      const session: PublicProgramSession = {
+        id: row.id,
+        title: row.title,
+        description,
+        format: row.format || "talk",
+        trackId: row.track_id,
+        trackName: tracks.get(row.track_id) ?? row.track_id,
+        roomId,
+        roomName: roomId ? (roomNames.get(roomId) ?? roomId) : null,
+        roomPending: !roomId || roomPending.get(roomId) === true,
+        startsAt: row.starts_at,
+        endsAt: row.ends_at,
+        day: row.starts_at ? row.starts_at.slice(0, 10) : null,
+        calendarUid: row.calendar_uid || `cal_${row.id}`,
+        calendarSequence: Number(row.calendar_sequence) || 0,
+        speakers: speakers.map((speaker) => ({
+          id: speaker.id,
+          name: speaker.name,
+          role: speaker.role,
+        })),
+      };
+      sessions.push(session);
+      for (const speaker of speakers) {
+        const existing = speakerAcc.get(speaker.id);
+        if (existing) {
+          if (!existing.sessionIds.includes(session.id)) {
+            existing.sessionIds.push(session.id);
+          }
+          if (!existing.biography && speaker.biography) {
+            existing.biography = speaker.biography;
+          }
+          if (!existing.headshotAssetId && speaker.headshotAssetId) {
+            existing.headshotAssetId = speaker.headshotAssetId;
+          }
+        } else {
+          speakerAcc.set(speaker.id, {
+            id: speaker.id,
+            name: speaker.name,
+            biography: speaker.biography,
+            headshotAssetId: speaker.headshotAssetId,
+            sessionIds: [session.id],
+          });
+        }
+      }
+    }
+
+    sessions.sort((a, b) => {
+      if (a.startsAt && b.startsAt) return a.startsAt.localeCompare(b.startsAt);
+      if (a.startsAt) return -1;
+      if (b.startsAt) return 1;
+      return a.title.localeCompare(b.title);
+    });
+
+    return {
+      sessions,
+      speakers: Array.from(speakerAcc.values()).sort((a, b) =>
+        a.name.localeCompare(b.name),
+      ),
+    };
+  }
+
+  publishPublicProgramRevisionFromWorking(source = "working"): PublicProgramResponse {
+    const event = this.getEvent();
+    if (!event) throw new Error("Event is not initialized.");
+    const snapshot = this.buildPublicProgramSnapshotFromWorking();
+    const now = new Date().toISOString();
+    const maxVersion = this.ctx.storage.sql
+      .exec<{ max_version: number }>(
+        `SELECT COALESCE(MAX(version), 0) AS max_version FROM public_program_revisions`,
+      )
+      .toArray()[0]?.max_version;
+    const version = Number(maxVersion ?? 0) + 1;
+    const id = `pubrev_${event.id}_${version}`;
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        `UPDATE public_program_revisions SET is_current = 0 WHERE is_current = 1`,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT INTO public_program_revisions
+          (id, version, is_current, published_at, snapshot_json, source)
+         VALUES (?, ?, 1, ?, ?, ?)`,
+        id,
+        version,
+        now,
+        JSON.stringify(snapshot),
+        source,
+      );
+    });
+    const result = this.getPublicProgram();
+    if (!result) throw new Error("Failed to load published public program.");
+    return result;
+  }
+
+  /** Test/admin seam until Course Check 06 owns publication transitions. */
+  publishPublicProgramRevisionForTest(): PublicProgramResponse {
+    return this.publishPublicProgramRevisionFromWorking("test");
+  }
+
+  seedPublicProgramDemoIfEmpty(): void {
+    const existing = this.ctx.storage.sql
+      .exec<{ total: number }>(
+        `SELECT COUNT(*) AS total FROM public_program_revisions`,
+      )
+      .toArray()[0]?.total;
+    if (Number(existing ?? 0) > 0) return;
+    const event = this.getEvent();
+    if (!event) return;
+
+    const day1 = event.startsOn;
+    const day2 = event.endsOn;
+    const trackA = event.tracks[0];
+    const trackB = event.tracks[1] ?? event.tracks[0];
+    const roomA = event.rooms[0];
+    const roomB = event.rooms[1] ?? event.rooms[0];
+    if (!trackA || !roomA) return;
+
+    const sessions: PublicProgramSession[] = [
+      {
+        id: "demo-ses-keynote",
+        title: "Opening keynote: charts that hold",
+        description:
+          "A walkthrough of how organizers keep program truth steady from first proposal to public agenda.",
+        format: "keynote",
+        trackId: trackA.id,
+        trackName: trackA.name,
+        roomId: roomA.id,
+        roomName: roomA.name,
+        roomPending: roomA.readiness === "pending",
+        startsAt: `${day1}T15:00:00.000Z`,
+        endsAt: `${day1}T15:45:00.000Z`,
+        day: day1,
+        calendarUid: "cal_demo-ses-keynote",
+        calendarSequence: 0,
+        speakers: [{ id: "demo-sp-ada", name: "Ada Lovelace", role: "primary" }],
+      },
+      {
+        id: "demo-ses-ops",
+        title: "Program ops that survive change",
+        description:
+          "Practical patterns for rooms, TBD slots, and speaker readiness without leaking committee work.",
+        format: "talk",
+        trackId: trackB.id,
+        trackName: trackB.name,
+        roomId: roomB.id,
+        roomName: roomB.name,
+        roomPending: roomB.readiness === "pending",
+        startsAt: `${day1}T16:00:00.000Z`,
+        endsAt: `${day1}T16:45:00.000Z`,
+        day: day1,
+        calendarUid: "cal_demo-ses-ops",
+        calendarSequence: 0,
+        speakers: [
+          { id: "demo-sp-grace", name: "Grace Hopper", role: "primary" },
+          { id: "demo-sp-ada", name: "Ada Lovelace", role: "co" },
+        ],
+      },
+      {
+        id: "demo-ses-workshop",
+        title: "Hands-on schedule repair",
+        description:
+          "Workshop session held with time still settling — public pages show TBD without hiding the talk.",
+        format: "workshop",
+        trackId: trackA.id,
+        trackName: trackA.name,
+        roomId: null,
+        roomName: null,
+        roomPending: true,
+        startsAt: null,
+        endsAt: null,
+        day: null,
+        calendarUid: "cal_demo-ses-workshop",
+        calendarSequence: 0,
+        speakers: [{ id: "demo-sp-katherine", name: "Katherine Johnson", role: "primary" }],
+      },
+      {
+        id: "demo-ses-day2",
+        title: "Closing circle",
+        description: "What we learned shipping a public program people can trust.",
+        format: "talk",
+        trackId: trackB.id,
+        trackName: trackB.name,
+        roomId: roomA.id,
+        roomName: roomA.name,
+        roomPending: roomA.readiness === "pending",
+        startsAt: `${day2}T17:00:00.000Z`,
+        endsAt: `${day2}T17:40:00.000Z`,
+        day: day2,
+        calendarUid: "cal_demo-ses-day2",
+        calendarSequence: 0,
+        speakers: [{ id: "demo-sp-grace", name: "Grace Hopper", role: "primary" }],
+      },
+    ];
+
+    const speakers: PublicProgramSpeaker[] = [
+      {
+        id: "demo-sp-ada",
+        name: "Ada Lovelace",
+        biography:
+          "Writes analytical engines for conference operations and keeps the public story honest.",
+        headshotAssetId: null,
+        sessionIds: ["demo-ses-keynote", "demo-ses-ops"],
+      },
+      {
+        id: "demo-sp-grace",
+        name: "Grace Hopper",
+        biography:
+          "Debugs schedules the way she debugged compilers — patiently, and with receipts.",
+        headshotAssetId: null,
+        sessionIds: ["demo-ses-ops", "demo-ses-day2"],
+      },
+      {
+        id: "demo-sp-katherine",
+        name: "Katherine Johnson",
+        biography: "Turns incomplete placement into clear public TBD states.",
+        headshotAssetId: null,
+        sessionIds: ["demo-ses-workshop"],
+      },
+    ];
+
+    const now = new Date().toISOString();
+    this.ctx.storage.sql.exec(
+      `INSERT INTO public_program_revisions
+        (id, version, is_current, published_at, snapshot_json, source)
+       VALUES (?, 1, 1, ?, ?, 'seed')`,
+      `pubrev_${event.id}_seed`,
+      now,
+      JSON.stringify({ sessions, speakers }),
+    );
+  }
+
+  getPublicProgram(revisionId?: string): PublicProgramResponse | null {
+    const event = this.getEvent();
+    if (!event) return null;
+    this.seedPublicProgramDemoIfEmpty();
+
+    const row = revisionId
+      ? this.ctx.storage.sql
+          .exec<{
+            id: string;
+            version: number;
+            is_current: number;
+            published_at: string;
+            snapshot_json: string;
+          }>(
+            `SELECT id, version, is_current, published_at, snapshot_json
+             FROM public_program_revisions
+             WHERE id = ?
+             LIMIT 1`,
+            revisionId,
+          )
+          .toArray()[0]
+      : this.ctx.storage.sql
+          .exec<{
+            id: string;
+            version: number;
+            is_current: number;
+            published_at: string;
+            snapshot_json: string;
+          }>(
+            `SELECT id, version, is_current, published_at, snapshot_json
+             FROM public_program_revisions
+             WHERE is_current = 1
+             ORDER BY version DESC
+             LIMIT 1`,
+          )
+          .toArray()[0];
+
+    if (!row) return null;
+
+    let snapshot: {
+      sessions?: PublicProgramSession[];
+      speakers?: PublicProgramSpeaker[];
+    };
+    try {
+      snapshot = JSON.parse(row.snapshot_json) as {
+        sessions?: PublicProgramSession[];
+        speakers?: PublicProgramSpeaker[];
+      };
+    } catch {
+      return null;
+    }
+
+    const revision: PublicProgramRevisionMeta = {
+      id: row.id,
+      version: Number(row.version),
+      publishedAt: row.published_at,
+      isCurrent: Number(row.is_current) === 1,
+    };
+
+    return {
+      event: this.toPublicEventSlice(event),
+      revision,
+      sessions: Array.isArray(snapshot.sessions) ? snapshot.sessions : [],
+      speakers: Array.isArray(snapshot.speakers) ? snapshot.speakers : [],
+      revisions: this.listPublicProgramRevisionMeta(),
+    };
+  }
+
+  getPublicProgramSessionIcs(
+    sessionId: string,
+    revisionId?: string,
+  ): { ok: true; ics: string; filename: string } | { ok: false; status: 404 } {
+    const program = this.getPublicProgram(revisionId);
+    if (!program) return { ok: false, status: 404 };
+    const session = program.sessions.find((item) => item.id === sessionId);
+    if (!session) return { ok: false, status: 404 };
+    const location =
+      session.roomName ??
+      (session.roomPending ? "Location pending" : "");
+    const ics = buildSessionIcs({
+      uid: session.calendarUid,
+      sequence: session.calendarSequence,
+      title: session.title,
+      description: session.description,
+      location,
+      startsAt: session.startsAt,
+      endsAt: session.endsAt,
+      eventName: program.event.name,
+    });
+    return {
+      ok: true,
+      ics,
+      filename: `${session.id}.ics`,
+    };
+  }
+
+  isPublicProgramHeadshot(assetId: string): boolean {
+    const program = this.getPublicProgram();
+    if (!program) return false;
+    return program.speakers.some((speaker) => speaker.headshotAssetId === assetId);
   }
 
   updateSpeakerProfileForTest(

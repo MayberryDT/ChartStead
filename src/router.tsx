@@ -9,6 +9,10 @@ import { AgendaPage, App, SubmissionsPage } from "./App";
 import { CfpBuilderPage, CfpFormsPage } from "./CfpBuilderPage";
 import { CourseCheckPage } from "./CourseCheckPage";
 import { ProposalDetailPage } from "./ProposalDetailPage";
+import {
+  PublicProgramEmbedPage,
+  PublicProgramPage,
+} from "./PublicProgramPage";
 import { SpeakerPortalPage } from "./SpeakerPortalPage";
 import { SubmitterEditPage } from "./SubmitterEditPage";
 
@@ -86,6 +90,26 @@ const agendaRoute = createRoute({
   component: AgendaPage,
 });
 
+function validateProgramSearch(search: Record<string, unknown>) {
+  return {
+    revision: typeof search.revision === "string" ? search.revision : undefined,
+  };
+}
+
+const programRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId/program",
+  component: PublicProgramPage,
+  validateSearch: validateProgramSearch,
+});
+
+const programEmbedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId/program/embed",
+  component: PublicProgramEmbedPage,
+  validateSearch: validateProgramSearch,
+});
+
 function validateProposalQueueSearch(search: Record<string, unknown>) {
   return {
     q: typeof search.q === "string" ? search.q : undefined,
@@ -107,6 +131,8 @@ const routeTree = rootRoute.addChildren([
   submissionDetailRoute,
   courseCheckRoute,
   agendaRoute,
+  programRoute,
+  programEmbedRoute,
 ]);
 
 export const router = createRouter({ routeTree });

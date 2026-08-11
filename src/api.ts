@@ -19,6 +19,7 @@ import type {
   ProposalStatus,
   ProposalListResponse,
   ProposalValidationError,
+  PublicProgramResponse,
   PublicProposal,
   ReviewerAssignment,
   SessionPlacementPatch,
@@ -898,6 +899,32 @@ export async function fetchAgenda(eventId: string): Promise<AgendaWorkspaceRespo
     );
   }
   return body;
+}
+
+export async function fetchPublicProgram(
+  eventId: string,
+  revisionId?: string,
+): Promise<PublicProgramResponse> {
+  const params = revisionId ? `?revision=${encodeURIComponent(revisionId)}` : "";
+  const response = await fetch(`/api/events/${eventId}/program${params}`);
+  const body = await readJson<PublicProgramResponse | { error: string }>(response);
+  if (!response.ok || !("sessions" in body) || !("revision" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to load the public program",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export function publicProgramCalendarUrl(
+  eventId: string,
+  sessionId: string,
+  revisionId?: string,
+): string {
+  const params = revisionId ? `?revision=${encodeURIComponent(revisionId)}` : "";
+  return `/api/events/${eventId}/program/sessions/${encodeURIComponent(sessionId)}/calendar.ics${params}`;
 }
 
 export async function updateSessionPlacement(

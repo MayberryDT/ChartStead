@@ -465,6 +465,71 @@ export interface SessionPlacementResponse {
   calendarIntentsCreated: CalendarIntentRecord[];
 }
 
+/** Public-safe speaker card for the program renderer. Never includes email or tasks. */
+export interface PublicProgramSpeaker {
+  id: string;
+  name: string;
+  biography: string;
+  headshotAssetId: string | null;
+  sessionIds: string[];
+}
+
+/** Public-safe session card. Times/rooms may be null → UI shows TBD / pending. */
+export interface PublicProgramSession {
+  id: string;
+  title: string;
+  description: string;
+  format: string;
+  trackId: string;
+  trackName: string;
+  roomId: string | null;
+  roomName: string | null;
+  roomPending: boolean;
+  startsAt: string | null;
+  endsAt: string | null;
+  day: string | null;
+  calendarUid: string;
+  calendarSequence: number;
+  speakers: Array<{
+    id: string;
+    name: string;
+    role: string;
+  }>;
+}
+
+export interface PublicProgramRevisionMeta {
+  id: string;
+  version: number;
+  publishedAt: string;
+  isCurrent: boolean;
+}
+
+export interface PublicProgramEventSlice {
+  id: string;
+  name: string;
+  startsOn: string;
+  endsOn: string;
+  themeAccent: string;
+  tracks: Array<{ id: string; name: string }>;
+  rooms: Array<{ id: string; name: string; readiness: "ready" | "pending" }>;
+}
+
+export interface PublicProgramResponse {
+  event: PublicProgramEventSlice;
+  revision: PublicProgramRevisionMeta;
+  sessions: PublicProgramSession[];
+  speakers: PublicProgramSpeaker[];
+  revisions: PublicProgramRevisionMeta[];
+}
+
+export interface PublicProgramFilters {
+  day?: string;
+  trackId?: string;
+  roomId?: string;
+  format?: string;
+  speakerId?: string;
+}
+
 export interface AssetUploadStartRequest {
   formId: string;
   formDefinitionVersion: number;
