@@ -40,20 +40,16 @@ const TRACKS = [
   },
 ];
 
-const COLUMNS = [
-  {
-    id: "open",
-    title: "Open",
-    match: (s) => /^(open|ready|ready-for-agent|todo|backlog)$/i.test(s) || s === "",
-  },
-  {
-    id: "in-progress",
-    title: "In progress",
-    match: (s) => /in[- ]?progress|doing|active/i.test(s),
-  },
-  { id: "blocked", title: "Other", match: () => true },
-  { id: "done", title: "Done", match: (s) => /^(done|complete|completed)$/i.test(s) },
-];
+// Order is display order left→right. Matching is explicit (not first-match
+// on a catch-all), so "done" never falls into Other.
+const COLUMN_ORDER = ["open", "in-progress", "blocked", "done"];
+
+const COLUMN_META = {
+  open: { id: "open", title: "Open" },
+  "in-progress": { id: "in-progress", title: "In progress" },
+  blocked: { id: "blocked", title: "Other" },
+  done: { id: "done", title: "Done" },
+};
 
 function parseIssue(text) {
   const lines = text.split(/\r?\n/);
@@ -102,9 +98,14 @@ function parseIssue(text) {
 }
 
 function columnFor(status) {
-  for (const col of COLUMNS) {
-    if (col.match(status)) return col.id;
-  }
+  const s = String(status || "").trim();
+  // Strip parenthetical notes: "done (merged to main)" → "done"
+  const head = s.split("(")[0].trim().toLowerCase();
+  if (/^(done|complete|completed)$/.test(head)) return "done";
+  if (/in[-\s]?progress|doing|active/.test(head)) return "in-progress";
+  if (/^(open|ready|ready-for-agent|todo|backlog)?$/.test(head)) return "open";
+  // blocked / deferred / unknown labels
+  if (/block|defer|hold|park|wont|cancel/.test(head)) return "blocked";
   return "open";
 }
 
@@ -150,7 +151,7 @@ async function buildBoard() {
       inProgress: all.filter((i) => i.column === "in-progress").length,
       blocked: all.filter((i) => i.column === "blocked").length,
     },
-    columns: COLUMNS.map(({ id, title }) => ({ id, title })),
+    columns: COLUMN_ORDER.map((id) => COLUMN_META[id]),
     tracks,
   };
 }
