@@ -10,7 +10,7 @@ Keep this file **minimal**. It only points agents at the right sources. Do not d
 - Do not invent recovery handoffs, quarantine status, or blocked gates that Tyler did not ask for.
 - Whenever you create or update a handoff, plan, research report, or other deliverable document on Halla, also copy the final file over SSH to `veelox:/home/tyler/Desktop/Plans/<filename>` and include a direct `file:///home/tyler/Desktop/Plans/<filename>` link plus the exact path in the final response; never report only the folder.
 - **Board status is mandatory — move the ticket as you work** (see [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md)):
-  1. **Start** named ticket work → `**Status:** in-progress` **before** coding (not later).
+  1. **Start** named ticket work → `**Status:** in-progress` **before** coding (not later); advance only to `in-review` or `done`, never back to `ready-for-agent`.
   2. **Ready for human QA** → `in-review` + demo URL + what-to-test.
   3. **Done** (after QA / merge as appropriate) → `done` + checklist `- [x]`.
   4. Always write the issue file on the **main checkout** board path **and** the worktree copy.

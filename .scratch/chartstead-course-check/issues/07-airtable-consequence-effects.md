@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Batch decisions and shared workspace; 06 — Program Publication Course Check; Competition 10 — Airtable mapping and authenticated HTTP foundation.
 
-**Status:** ready-for-agent
+**Status:** blocked
 
 - [ ] Decision, communication, and publication plans show exact mapped Airtable creates or updates before integration approval.
 - [ ] `Write to Airtable` remains a separate stage that can be removed, deferred, or executed after valid internal work.
@@ -17,3 +17,7 @@
 - [ ] Unknown write outcomes require reconciliation before another duplicate-prone attempt.
 - [ ] Corrective integration writes create reviewed compensation linked to the original effect.
 - [ ] Tests cover mapping evidence, deferred sync, degraded state, rate limiting, retries, unknown reconciliation, pull classification, redaction, compensation, and continued core operation.
+
+## Comments
+
+Blocked by Course Check 02 — Batch decisions and shared workspace, Course Check 06 — Program Publication Course Check, and Competition Ticket 10 — Airtable mapping and authenticated HTTP foundation.

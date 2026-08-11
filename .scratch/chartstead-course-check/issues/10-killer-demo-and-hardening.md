@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — Single Decision Course Check tracer; 02 — Batch decisions and shared workspace; 03 — Communication drafts and recipient reasoning; 04 — External sends and effect recovery; 05 — Calendar delivery lifecycle; 06 — Program Publication Course Check; 07 — Airtable consequence effects; 08 — Complete agent API control; 09 — Team policy, privacy, and durable operations.
 
-**Status:** ready-for-agent
+**Status:** blocked
 
 - [ ] Seed data supports a realistic batch with accepted and declined outcomes, co-speakers, one missing address, one duplicate identity, prior communication, unplaced sessions, conflicts, and planned Airtable effects.
 - [ ] The walkthrough reviews and applies internal outcomes without sending, publishing, or writing externally.
@@ -19,3 +19,7 @@
 - [ ] Desktop, mobile status/recovery, keyboard, automated accessibility, realistic-volume performance, deployment, and provider-boundary checks pass.
 - [ ] Course Check copy uses the product name and literal verbs consistently and contains no manifest, effect-graph, planner, control-plane, or unexplained technical language.
 - [ ] The deployed walkthrough proves Course Check is more than a confirmation modal and remains legible to nontechnical conference staff without extensive explanation.
+
+## Comments
+
+Blocked by Course Check 02 through 09. Course Check 01 is done.

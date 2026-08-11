@@ -4,7 +4,7 @@
 
 **Blocked by:** 04 — External sends and effect recovery; Competition 08 — Fluid agenda builder.
 
-**Status:** ready-for-agent
+**Status:** blocked
 
 - [ ] Private schedule placement and movement remain immediate ordinary writes, including TBD and conflicting states.
 - [ ] A Communication Course Check can plan calendar create, update, or cancel delivery for affected session participants.
@@ -17,3 +17,7 @@
 - [ ] A corrective update or cancellation is a new reviewed compensation rather than history mutation.
 - [ ] Golden fixtures validate create, update, and cancel output for Gmail, Outlook, and Apple-compatible clients.
 - [ ] Tests cover direct invite, TBD location, reschedule, cancellation, duplicate-request prevention, partial recipient failure, unknown reconciliation, and stable identity through public rollback.
+
+## Comments
+
+Blocked by Course Check 04 — External sends and effect recovery. Competition Ticket 08 is done.

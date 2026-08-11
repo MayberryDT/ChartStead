@@ -4,7 +4,7 @@
 
 **Blocked by:** 05 — Speaker portal from an applied acceptance; Course Check 03 — Communication drafts and recipient reasoning; Course Check 04 — External sends and effect recovery; Course Check 05 — Calendar delivery lifecycle.
 
-**Status:** ready-for-agent
+**Status:** blocked
 
 - [ ] Internal approve, maybe, or deny state does not imply that a message has been drafted or sent.
 - [ ] Communication state distinguishes draft, queued, sent, delivered, and failed independently from proposal state.
@@ -16,3 +16,5 @@
 - [ ] Acceptance tests prove that only an authorized Course Check stage reaches providers and that UI, API, and scoped-agent execution have equivalent outcomes.
 
 ## Comments
+
+Blocked pending Course Check 03 — Communication drafts and recipient reasoning, Course Check 04 — External sends and effect recovery, and Course Check 05 — Calendar delivery lifecycle. Competition Ticket 05 is done.

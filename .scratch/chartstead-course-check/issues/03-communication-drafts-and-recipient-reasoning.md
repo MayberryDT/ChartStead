@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Batch decisions and shared workspace.
 
-**Status:** ready-for-agent
+**Status:** blocked
 
 - [ ] A completed Decision Course Check can create a linked Communication Course Check without transferring approval.
 - [ ] Staff can also start a Communication Course Check directly from an authorized selection of proposals, sessions, speakers, or tasks.
@@ -19,3 +19,7 @@
 - [ ] Decision state, draft state, send state, and delivery state remain independently visible.
 - [ ] Reviewers without communication authority cannot inspect private recipient or draft evidence.
 - [ ] Tests cover co-speaker grouping, recipient reasons, exclusions, prior sends, edits, stale recipients/templates, role projection, exact frozen payloads, and absence of provider calls.
+
+## Comments
+
+Blocked by Course Check 02 — Batch decisions and shared workspace.

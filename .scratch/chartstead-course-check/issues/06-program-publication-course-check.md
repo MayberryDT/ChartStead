@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Batch decisions and shared workspace; Competition 08 — Fluid agenda builder; Competition 09 — Published program renderer and embed.
 
-**Status:** ready-for-agent
+**Status:** blocked
 
 - [ ] The working schedule remains continuously editable and may contain unplaced, TBD, incomplete, private, or conflicting sessions.
 - [ ] `Publish program` opens Program Publication Course Check rather than changing public state directly.
@@ -18,3 +18,7 @@
 - [ ] Calendar and speaker-notification consequences create linked Communication Course Checks without inherited approval or implicit delivery.
 - [ ] Public full-page, embed, feed, and add-to-calendar surfaces resolve from the same approved current revision.
 - [ ] Tests cover valid subset, TBD, conflict override, privacy filtering, out-of-date working/public revisions, unpublish, restore, cache/feed effects, and linked communication.
+
+## Comments
+
+Blocked by Course Check 02 — Batch decisions and shared workspace. Competition Tickets 08 and 09 are done.

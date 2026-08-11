@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — Communication drafts and recipient reasoning.
 
-**Status:** ready-for-agent
+**Status:** blocked
 
 - [ ] `Send messages` approves and begins delivery of the exact frozen Communication Course Check version.
 - [ ] Internal send intent, audit history, idempotency receipts, and address-level outbox effects commit atomically before network delivery.
@@ -19,3 +19,7 @@
 - [ ] A sent message cannot be undone; correction creates a linked compensating Communication Course Check with a reason and original-effect reference.
 - [ ] Staff can leave and return to exact live effect state through the shared workspace and event activity history.
 - [ ] Tests cover provider idempotency, at-least-once alarms, crash windows, partial failure, retry classification, unknown reconciliation, permanent failure, correction compensation, and no green batch optimism.
+
+## Comments
+
+Blocked by Course Check 03 — Communication drafts and recipient reasoning.

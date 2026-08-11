@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Batch decisions and shared workspace; 04 — External sends and effect recovery; 06 — Program Publication Course Check; 08 — Complete agent API control.
 
-**Status:** ready-for-agent
+**Status:** blocked
 
 - [ ] Event policy can require two-person approval, separate roles, mandatory reasons, or stricter agent controls without weakening baseline protections.
 - [ ] Authorized administrators and agents see complete evidence; reviewers see only assigned-track decision evidence; speakers and public users see no internal plans.
@@ -18,3 +18,7 @@
 - [ ] Desktop remains the organizer priority while mobile supports status inspection, warning review, and recovery without clipped evidence or controls.
 - [ ] Performance checks keep ordinary writes independent of external services and Course Check planning bounded against realistic seeded event volume.
 - [ ] Security and privacy tests cover role projection, stricter policy, dual approval, agent scopes, redaction, erasure, concurrent actors, and malicious plan/effect access.
+
+## Comments
+
+Blocked by Course Check 02 — Batch decisions and shared workspace, Course Check 04 — External sends and effect recovery, Course Check 06 — Program Publication Course Check, and Course Check 08 — Complete agent API control.
