@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — Guided CFP publishing and submitter follow-up.
 
-**Status:** ready-for-agent
+**Status:** blocked — human-tandem only (not agent-ready)
 
 - [ ] Builder layout matches `design/DESIGN.md` and organizer shell patterns (spacing, type scale, panel chrome, no generic “admin form” look).
 - [ ] Field cards, add-field controls, and condition controls are visually clear: hierarchy, grouping, and affordances are obvious without SurveyJS vocabulary.
@@ -19,3 +19,5 @@
 ## Comments
 
 Filed from Ticket 03 human QA (2026-08-10): end-user public form is solid after remediation; builder still “pretty bad” and needs a dedicated polish pass. Functional acceptance for Ticket 03 is separate — this ticket is visual/UX quality only.
+
+2026-08-11 — Not agent-ready. Polish work is human-led with an agent in tandem; do not grab this as a solo agent ticket. Same rule for future polish issues.

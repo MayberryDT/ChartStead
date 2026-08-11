@@ -102,7 +102,14 @@ function columnFor(status) {
   // Strip parenthetical notes: "done (merged to main)" → "done"
   const head = s.split("(")[0].trim().toLowerCase();
   if (/^(done|complete|completed)$/.test(head)) return "done";
-  if (/in[-\s]?progress|doing|active/.test(head)) return "in-progress";
+  // Human QA / review still occupies the active lane (no separate column).
+  if (
+    /in[-\s]?progress|doing|active|in[-\s]?review|ready-for-qa|human[-\s]?qa/.test(
+      head,
+    )
+  ) {
+    return "in-progress";
+  }
   if (/^(open|ready|ready-for-agent|todo|backlog)?$/.test(head)) return "open";
   // blocked / deferred / unknown labels
   if (/block|defer|hold|park|wont|cancel/.test(head)) return "blocked";

@@ -9,6 +9,11 @@ Keep this file **minimal**. It only points agents at the right sources. Do not d
 - **Never start, resume, or “helpfully continue” a competition ticket unless Tyler explicitly names that ticket in this conversation.** Course Check, research, and docs sessions stay in their lane. Do not open ticket worktrees or edit ticket implementation “while you’re here.”
 - Do not invent recovery handoffs, quarantine status, or blocked gates that Tyler did not ask for.
 - Whenever you create or update a handoff, plan, research report, or other deliverable document on Halla, also copy the final file over SSH to `veelox:/home/tyler/Desktop/Plans/<filename>` and include a direct `file:///home/tyler/Desktop/Plans/<filename>` link plus the exact path in the final response; never report only the folder.
+- **Board status is mandatory — move the ticket as you work** (see [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md)):
+  1. **Start** named ticket work → `**Status:** in-progress` **before** coding (not later).
+  2. **Ready for human QA** → `in-review` + demo URL + what-to-test.
+  3. **Done** (after QA / merge as appropriate) → `done` + checklist `- [x]`.
+  4. Always write the issue file on the **main checkout** board path **and** the worktree copy.
 - **Whenever you finish a ticket (or claim it ready for human QA), always start or reuse a Tailscale-reachable demo and put in the final response: (1) the direct demo URL `http://100.105.117.93:<port>/…` — never localhost — and (2) a short “what to test” checklist for that ticket.** Bind with `--host 0.0.0.0` (or the host Tailscale IP) and confirm the listener is not loopback-only before linking.
 
 ## Start here
@@ -28,9 +33,14 @@ Keep this file **minimal**. It only points agents at the right sources. Do not d
 
 ### Issue tracker
 
-Specs and implementation tickets live as local Markdown under `.scratch/`. See [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
+Specs and tickets: [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
 
-**Live board:** `http://100.105.117.93:3939/` reads the **main checkout** `.scratch/` only. When working in a worktree, update ticket `Status:` + checklists there **and** copy the same issue file into `/home/halla/ChartStead/.scratch/...` so the board moves.
+**Live board:** `http://100.105.117.93:3939/` — main checkout `.scratch/` only.
+
+**Board paths (write both when using a worktree):**
+
+- Competition: `/home/halla/ChartStead/.scratch/chartstead-competition-build/issues/`
+- Course Check: `/home/halla/ChartStead/.scratch/chartstead-course-check/issues/`
 
 ### Triage labels
 
