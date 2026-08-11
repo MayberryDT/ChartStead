@@ -39,18 +39,18 @@ const TRACKS = [
 ];
 
 const COLUMNS = [
-  { id: "done", title: "Done", match: (s) => /^(done|complete|completed)$/i.test(s) },
-  {
-    id: "in-progress",
-    title: "In progress",
-    match: (s) => /in[- ]?progress|doing|active/i.test(s),
-  },
   {
     id: "open",
     title: "Open",
     match: (s) => /^(open|ready|ready-for-agent|todo|backlog)$/i.test(s) || s === "",
   },
+  {
+    id: "in-progress",
+    title: "In progress",
+    match: (s) => /in[- ]?progress|doing|active/i.test(s),
+  },
   { id: "blocked", title: "Other", match: () => true },
+  { id: "done", title: "Done", match: (s) => /^(done|complete|completed)$/i.test(s) },
 ];
 
 function parseIssue(text) {
