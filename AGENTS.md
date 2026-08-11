@@ -37,6 +37,7 @@ Use the single-context domain-doc layout. See [docs/agents/domain.md](docs/agent
 - Hono Worker, Better Auth boundary, and Durable Object event store: [`worker/`](worker/)
 - Cloudflare bindings and environments: [`wrangler.jsonc`](wrangler.jsonc)
 - Implementation work: [`.scratch/chartstead-competition-build/`](.scratch/chartstead-competition-build/)
+- Course Check specification and implementation work: [`.scratch/chartstead-course-check/`](.scratch/chartstead-course-check/)
 
 ## Private / bulk source material
 

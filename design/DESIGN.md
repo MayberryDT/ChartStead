@@ -425,7 +425,7 @@ At small sizes, use the approved detailed mark. The fine chart lines and north i
 5. **Nautical metaphor, not nautical costume.** Use compass logic, plotted routes, chart lines, and directional language subtly. Avoid decorative anchors, waves, lighthouses, ropes, ships, and coastal illustrations in the product UI.
 6. **Product brand plus event theme.** ChartStead owns the application structure. Individual events may theme public forms, speaker portals, emails, and agendas without turning the core product into the event organizer's brand.
 7. **Preserve operational truth.** Incomplete and contradictory states are normal conference work. Show `TBD`, unplaced items, pending approval, and unresolved conflicts honestly instead of forcing false completion.
-8. **Keep humans in authority.** Status changes, warnings, drafts, and recommendations may be automatic. Consequential communication and escalation remain explicit organizer actions.
+8. **Keep humans in authority.** Status changes, warnings, drafts, and recommendations may be automatic. Consequential communication and escalation require an explicit organizer action or a deliberately granted scoped-agent policy through Course Check.
 
 ## Colors
 
@@ -766,7 +766,7 @@ The organizer view of onboarding should emphasize the chase: who is missing what
 
 Emails inherit event branding in the header and ChartStead structure in the body. Use one clear action, explicit deadlines, and plain-language status. Review notifications should include enough proposal context and a direct permalink to act without navigating from a generic dashboard.
 
-Internal decision state and speaker communication state are separate. Show draft, queued, sent, delivered, and failed communication states independently from approve/maybe/deny. Confirmations may send automatically; acceptance, denial, and escalation sends require deliberate organizer action. Calendar invitations may be created before room assignment and updated later; the UI must make pending location status clear and preserve one stable UID throughout the invitation lifecycle.
+Internal decision state and speaker communication state are separate. Show draft, queued, sent, delivered, and failed communication states independently from approve/maybe/deny. Confirmations may send automatically; acceptance, denial, and escalation sends require a deliberate authorized Course Check stage, performed by an organizer or explicitly scoped agent. Calendar invitations may be created before room assignment and updated later; the UI must make pending location status clear and preserve one stable UID throughout the invitation lifecycle.
 
 ### Empty, loading, and error states
 

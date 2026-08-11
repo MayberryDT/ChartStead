@@ -1,20 +1,16 @@
-# 05 — Acceptance cascade and speaker portal
+# 05 — Speaker portal from an applied acceptance
 
-**What to build:** An idempotent acceptance action that turns an approved proposal into durable speaker, historical event-participation, session, and onboarding-task records, then gives the speaker a secure portal showing the resulting work.
+**What to build:** A secure speaker portal that exposes the durable speaker, event-participation, session, and onboarding work created by an applied Decision Course Check.
 
-**Blocked by:** 03 — Guided CFP publishing and submitter follow-up; 04 — Shared track review queue.
+**Blocked by:** Course Check 01 — Single Decision Course Check tracer.
 
 **Status:** ready-for-agent
 
-- [ ] An administrator can explicitly accept a proposal without sending the acceptance letter yet.
-- [ ] Acceptance creates or reuses the current speaker identity and preserves event-time title and organization on participation.
-- [ ] Acceptance creates one session and the event's configured default onboarding tasks.
-- [ ] Retrying acceptance cannot duplicate speakers, participation records, sessions, or tasks.
-- [ ] Co-speakers receive distinct identities, participation records, and appropriate portal access.
-- [ ] An administrator can create a direct session for a guaranteed speaker without a proposal.
 - [ ] A speaker can open a secure signed portal and see the relevant proposal, acceptance state, session, profile, tasks, and deadlines.
+- [ ] Co-speakers receive distinct portal access to the records produced for their event participation.
 - [ ] The portal clearly distinguishes current profile information from event-specific participation information where needed.
 - [ ] Revoked or expired portal links fail safely.
-- [ ] Acceptance tests verify the full cascade, retry idempotency, direct-session entry, and speaker authorization.
+- [ ] Applying, revising, or compensating a Decision Course Check updates portal-visible truth without exposing Course Check evidence or audit data.
+- [ ] Acceptance tests verify signed access, co-speaker authorization, current-versus-event history, compensation visibility, and absence of committee/private leakage.
 
 ## Comments

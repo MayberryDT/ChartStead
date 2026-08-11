@@ -2,7 +2,7 @@
 
 **What to build:** A submission-ready ChartStead deployment that demonstrates the complete required workflow with realistic data, reliable providers, accessible interaction, responsive performance, concise operational documentation, and only the highest-value remaining enhancements that fit after the spine is solid.
 
-**Blocked by:** 03 — Guided CFP publishing and submitter follow-up; 04 — Shared track review queue; 06 — Onboarding and assisted chasing; 07 — Explicit decisions and calendar lifecycle; 09 — Published program and embed; 10 — Airtable synchronization and HTTP API.
+**Blocked by:** 03 — Guided CFP publishing and submitter follow-up; 04 — Shared track review queue; 06 — Onboarding and assisted chasing; 07 — Decision communication and calendar integration verification; 09 — Public program renderer and embed; 10 — Airtable mapping and authenticated HTTP foundation; Course Check 10 — Course Check killer demo and hardening.
 
 **Status:** ready-for-agent
 

@@ -1,8 +1,8 @@
 # ChartStead competition build plan
 
-**Status:** Locked via grilling 2026-08-09
+**Status:** Spine locked via grilling 2026-08-09; Course Check expansion locked via grilling 2026-08-10
 **Deadline:** Wednesday 2026-08-12, 10:00 PM Pacific
-**Strategy:** Complete vertical slice of Required + Important capabilities as fast as possible, then polish. Enhancements only if time remains.
+**Strategy:** Complete the locked vertical spine and the Course Check differentiator before submission, then polish. The competition timeline does not narrow committed Course Check scope.
 
 Research that informed locks (do not re-litigate casually):
 
@@ -10,6 +10,9 @@ Research that informed locks (do not re-litigate casually):
 - `.research/form-builder-micro-ux-pass.md`
 - `.research/chartstead-app-wide-building-blocks-micro-ux-research.md`
 - `.research/building-blocks-research-prompt.md`
+- `.research/chartstead-post-spine-differentiation-research.md`
+- `.research/chartstead-post-spine-differentiation-follow-up.md`
+- `.research/chartstead-safety-layer-precedents.md`
 
 Product requirements live in `context.md`. Design system in `design/DESIGN.md`. Implement the organizer shell and submissions spine against `design/source-of-truth/organizer-submissions.html`.
 
@@ -25,6 +28,9 @@ Product requirements live in `context.md`. Design system in `design/DESIGN.md`. 
 | Working email + calendar invites (not stubs) | Large in-app agentic chatbot |
 | Auth’d HTTP API over the vertical slice | MCP server |
 | Airtable **sync** (bonus path), not hot-path DB | Pixel Sessionboard clone |
+| **Course Check** across final decision cascades, external communication, and public-program release | Universal workflow DSL or visible review for ordinary edits |
+| Full API parity for scoped AI agents, including Course Check approval and execution | Unscoped or bypassing agent authority |
+| Direct schedule-conflict consequences in Course Check | Multi-step schedule scenarios or automatic optimization |
 
 **Principle:** Complete the job (end-to-end program workflow). Nontechnical event staff must be able to use it without explanation.
 
@@ -73,13 +79,40 @@ Product requirements live in `context.md`. Design system in `design/DESIGN.md`. 
 - Submission confirmation may send automatically after a successful submit
 - Internal review decisions never send acceptance or denial email implicitly
 - Consequential messages use explicit, auditable sends; support deliberate batch release when the slice is solid
-- Reminder automation is human-controlled: surface missing work and prepare context/drafts before adding unattended sending
+- Reminder automation defaults to assisted drafting; unattended sending requires an explicit scoped agent policy and the same Course Check evidence, approval, and audit contract
 
 ### Agentic / API
 
 - **Auth’d HTTP API** covering the vertical slice (bonus + automation)
+- Full API parity: scoped agents can create, inspect, revise, approve, execute, retry, reconcile, defer, and compensate Course Check plans
+- Agents are distinct audited principals with event and stage scopes; direct user delegation and opt-in autonomous policies are both supported
+- AI output is frozen into a versioned plan before execution; apply never silently invokes a model to change approved content
 - **No MCP** required
 - **No** required in-app LLM assistant
+
+### Course Check
+
+**Product name:** Course Check. Keep implementation terms such as planner, effect graph, and manifest out of nontechnical UI.
+
+**First-release action families:**
+
+1. Final proposal outcomes and acceptance cascades.
+2. Speaker communication and calendar delivery.
+3. Public-program publication or revision, including related Airtable writes.
+
+**Ordinary work stays immediate:** profile corrections, committee notes, reversible `approve / maybe / deny`, message drafting, private schedule movement, and incomplete or conflicting WIP saves use the authoritative command path without a separate Course Check workspace.
+
+**Architecture:** one event-scoped safety kernel owns versioned plans, relevant-input checks, stage approvals, idempotency, transactional internal application, effect outbox creation, per-effect outcomes, retry classification, compensation history, and audit. Closed action-specific planners own decision, communication, and publication semantics. Do not build a generic workflow DSL, plugin stage registry, or full event-sourced read model.
+
+**Approval boundaries:** apply internal outcomes and generated records; create drafts; send messages and calendars; publish attendee-facing changes; execute integration writes. A stage-specific verb records approval of the displayed plan version and starts that stage without a redundant second confirmation.
+
+**Blocking policy:** block only missing authority, relevant changed inputs, unresolved identity ambiguity, durable-integrity violations, and external effects that cannot be previewed safely. Soft warnings remain overridable. Private saves need no reason; overriding a material warning at send, publish, calendar, or integration boundaries records a reason.
+
+**Recovery policy:** internal stages are transactional. External effects are idempotent and independently observable. Retry only classified transient failures; unknown outcomes stop for reconciliation. Compensation is a new reviewed action, never a claim that irreversible effects were undone.
+
+**Shared operation:** Course Checks are resumable event resources rather than personal drafts. Relevant edits create immutable plan versions and invalidate only dependent approvals. Blocked items may be explicitly deferred into a follow-up queue while the remaining exact batch stays atomic.
+
+**API policy:** humans and agents use the same versioned `v1` contract and permission model. Agent operating modes are propose-only, delegated execution, and explicitly granted autonomous policy execution. Event policy may tighten approvals but cannot weaken the baseline kernel.
 
 ---
 
@@ -125,7 +158,9 @@ These are implementation constraints, not extra feature surfaces:
 2. **Deciding and telling are separate.** `approve / maybe / deny` updates internal state only. Speaker notification is a separate action with its own draft, send, delivery, and failure state.
 3. **Scheduling preserves partial truth.** Unplaced sessions, unknown rooms/times, `TBD`, and unresolved conflicts must save. Conflicts are named, actionable warnings with live counts, never save-blocking modals.
 4. **The data survives the event.** Stable IDs, historical participation snapshots, stable calendar UIDs, and API-accessible records are schema requirements even if polished export screens wait.
-5. **The chase stays human-led.** The system identifies missing work, deadlines, and escalation history. It assists message preparation; it does not impersonate the organizer or silently escalate across channels.
+5. **The chase stays authority-controlled.** The system identifies missing work, deadlines, and escalation history. It assists message preparation by default; a scoped agent may execute only through explicit event policy and never impersonates an organizer or bypasses Course Check.
+6. **Course Check is not a universal staging tax.** Routine private truth saves immediately. Final cascades, external sends, public release, and related external writes use focused review through one authoritative server path.
+7. **Agents do not bypass consequence review.** Scoped AI agents may control every organizer capability through the API, including approval and execution, but they use the same frozen plans, stage permissions, idempotency, effect states, and audit history.
 
 ---
 
@@ -135,14 +170,16 @@ These are implementation constraints, not extra feature surfaces:
 2. Data plane — stable IDs, participation snapshots, audit events, DO schema, Airtable template + outbox/pull, R2
 3. Forms — hybrid builder + public CFP + submit + confirmation page
 4. Real email — submit confirm + signed links + explicit send/delivery state
-5. Admin submissions + review — stable permalinks, shared track queues, OpsGrid, approve/maybe/deny without implicit email
-6. Accept cascade — speaker + historical participation snapshot + session + tasks
+5. Admin submissions + review — stable permalinks, shared track queues, OpsGrid, approve/maybe/deny without implicit email; add record revisions, explicit commands, and audit seams without visible Course Check ceremony
+6. Course Check foundation + accept cascade — versioned decision plans, relevant-input checks, stage approval, idempotent speaker + historical participation snapshot + session + tasks
 7. Speaker portal — profile, tasks, bio/headshot, missing-work visibility
-8. Calendar invites — stable UID lifecycle on accept / schedule
+8. Communication Course Check + calendar invites — recipient reasoning, drafts, explicit send, per-effect results, stable UID lifecycle on accept / schedule
 9. Agenda — unplaced/TBD states, day/room, DnD + Move Session, non-blocking conflicts
-10. Public program — speakers + schedule + simple embed
-11. Important remainder — drafts, reminders, templates, resources, table power
-12. API docs polish + optional tiny assist only if spine is solid
+10. Publication Course Check + public program — versioned public delta, valid subset, speakers + schedule + simple embed; calendar communication remains linked and separately approved
+11. Airtable + complete HTTP API — integration effects, inbound consequence classification, documented versioned Course Check API, full scoped agent parity
+12. Course Check integration + killer demo — shared resumable workspace, cross-plan links, stale versions, deferral, partial failure, reconciliation, compensation, and agent-controlled walkthrough
+13. Important remainder — reminders, templates, resources, table power
+14. API docs, seeded agent examples, accessibility/performance polish
 
 Seed rich demo data early so every step is walkthrough-ready.
 
@@ -167,16 +204,19 @@ Seed rich demo data early so every step is walkthrough-ready.
 - Payments, Accelevents
 - SurveyJS Creator, AG Grid Enterprise, license-unclear premium schedulers
 - MCP, large in-app agent
+- Generic workflow DSL, universal visible planning for low-risk edits, or caller-defined effect graphs
+- Hotel-style multi-move schedule scenarios, automatic agenda optimization, or the full Schedule Resilience workbench
+- Perfect rollback of sent communication, consumed calendar updates, cached public feeds, or third-party writes
 - Perfect hour estimates as planning gospel — use spine + spikes instead
 
 ---
 
 ## 8. Next actions
 
-1. Init app monorepo/workspace (Vite React + Worker Hono) under repo root (or `apps/` — pick one layout and stick to it).
-2. Land design tokens + primitive wrappers + UX checklist doc agents must follow.
-3. Auth + empty shell + demo admin + seed event.
-4. DO schema + Airtable template stub + health/sync status.
-5. Proceed down spine order; run spikes at first touch of forms/table/agenda.
+1. Finish Ticket 03 remediation without pulling review or Course Check behavior into that branch.
+2. Build Ticket 04 reversible review on explicit versioned command/audit seams while keeping routine review immediate.
+3. Establish the Course Check kernel with Ticket 05's acceptance cascade as the first complete plan/review/apply tracer.
+4. Extend the same kernel through communication, calendar, publication, Airtable, and authenticated agent control in spine order.
+5. Complete the dedicated Course Check integration and killer-demo slice before competition hardening.
 
 Do not expand scope without re-grilling the affected decision.

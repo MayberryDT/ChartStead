@@ -72,6 +72,8 @@ The organizer application follows the locked Harbor Master Desk visual direction
 54. As an event administrator, I want operational changes to be auditable, so that I can distinguish decisions, sends, schedule changes, and retries.
 55. As an evaluator, I want the application to feel fast and coherent with realistic seeded data, so that I can assess the product without extensive explanation.
 56. As an evaluator, I want the complete workflow to use real persistence, email, calendar, files, and public output, so that the demonstration proves more than interface breadth.
+57. As an event administrator, I want Course Check to show the exact consequences of final decisions, external communication, and public-program release, so that consequential actions remain inspectable without slowing ordinary private work.
+58. As an AI operator, I want complete authenticated API parity with the organizer interface, including Course Check approval, execution, retry, and compensation, so that a scoped agent can control the full application safely.
 
 ## Implementation Decisions
 
@@ -80,7 +82,7 @@ The organizer application follows the locked Harbor Master Desk visual direction
 - Use a Hono API on Cloudflare Workers, Durable Object SQLite for interactive operational data, and R2 for uploaded files.
 - Use Better Auth with Google as the primary organizer path, magic-link fallback, long sessions, speaker signed links, and a deliberate demo-admin bypass.
 - Use Resend and React Email behind an application outbox. Persist message intent, recipient, template data, send status, provider identifiers, failures, and retries.
-- Treat submission confirmation as eligible for automatic send after successful persistence. Treat acceptance, denial, and escalation messages as explicit organizer sends.
+- Treat submission confirmation as eligible for automatic send after successful persistence. Treat acceptance, denial, and escalation messages as explicit Course Check stages executed by an authorized organizer or deliberately scoped agent.
 - Use real iCalendar create, update, and cancel semantics. Persist stable UID and sequence state independently from mutable schedule details.
 - Give all durable entities stable application identifiers at creation. Never derive identity from names, email addresses, table rows, or mutable Airtable record ordering.
 - Separate the current speaker profile from event participation. Preserve submission-time title and organization on participation records.
@@ -143,4 +145,5 @@ The organizer application follows the locked Harbor Master Desk visual direction
 - Visual implementation follows `design/source-of-truth/organizer-submissions.html`; behavioral rules remain in the context, build plan, and design system.
 - Gene Kim's conference history is high-value adjacent-practitioner evidence, not a replacement for direct organizer requirements.
 - The implementation order remains spine-first. This specification adds invariants inside existing steps rather than adding parallel feature tracks.
+- The committed Course Check expansion is specified in `.scratch/chartstead-course-check/spec.md` and sequenced in `context/BUILD-PLAN.md`; it extends rather than replaces this competition spine.
 - The competition target is Wednesday, August 12, 2026 at 10:00 PM Pacific. Favor a complete, real vertical path over broad incomplete coverage.

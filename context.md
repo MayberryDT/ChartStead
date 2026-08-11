@@ -1,6 +1,6 @@
 # ChartStead: Consolidated Sessionboard Replacement Context
 
-Last updated: August 9, 2026
+Last updated: August 10, 2026
 
 This document consolidates the competition brief, walkthrough video, Sessionboard reference material, and organizer clarifications shared in Discord. It is a living record of what the customer wants and what the competition requires. It is intentionally not an implementation plan.
 
@@ -89,6 +89,8 @@ An attendee may view a mobile-friendly speaker gallery or public agenda embedded
 | Task | A speaker-onboarding action such as completing a form, uploading a file, or confirming information. |
 | Room | A physical agenda location used for scheduling and conflict detection. |
 | Agenda | The scheduled collection of accepted sessions across days, rooms, and tracks. |
+| Course Check | A focused review of what a consequential action will change, who it will affect, what will leave ChartStead, and what remains uncertain before the action executes. |
+| Course Check plan | The exact, versioned proposal being reviewed for a final decision cascade, external communication, or public-program release. |
 
 ## End-to-end workflow
 
@@ -227,6 +229,22 @@ The organizer does not require sophisticated two-way synchronization. The clarif
 
 The exact table schema, authentication model, and source-of-truth boundaries have not yet been supplied.
 
+### 11. Review consequential actions with Course Check
+
+Course Check is ChartStead's consequence-aware review layer. It applies to three connected action families:
+
+- Applying final proposal outcomes and the resulting acceptance cascade.
+- Sending speaker communication or calendar delivery.
+- Publishing or revising the public program, including related integration writes.
+
+Ordinary private work remains immediate. Correcting speaker information, writing internal notes, recording reversible `approve / maybe / deny` review dispositions, editing drafts, moving sessions in the private schedule, and saving `TBD`, unplaced, incomplete, or conflicting states do not require a separate review ceremony.
+
+Course Check preserves the distinction between recording internal truth and creating external consequences. It shows exact affected records and people, recipient inclusion and exclusion, public changes, operational warnings, integration effects, stale inputs, and honest reversibility before execution. Internal decisions, draft creation, sending, publication, and integration writes remain separately approved actions even when presented in one connected flow.
+
+Hard blocks are rare and limited to missing authority, relevant changed data, unresolved identity ambiguity, durable-integrity violations, or an external effect that cannot be previewed safely. Soft schedule and readiness warnings remain overridable. Conflicting private schedule work can save; public release defaults to the valid subset.
+
+The organizer UI, authenticated API, imports, integrations, and AI agents use the same Course Check contract. Scoped agents may inspect, approve, execute, retry, and compensate actions without bypassing the same version, permission, audit, and effect-result semantics that apply to people.
+
 ## Requirement priority
 
 ### Required for a credible MVP
@@ -253,6 +271,11 @@ The exact table schema, authentication model, and source-of-truth boundaries hav
 - Day and room agenda scheduling.
 - Drag-and-drop scheduling.
 - Speaker and room conflict detection.
+- Course Check for final decision cascades, external communication, and public-program release.
+- Version-bound review with relevant-change detection before consequential execution.
+- Exact recipient, public-change, integration-effect, and reversibility evidence.
+- Per-effect execution state, safe retry, and explicit compensation history.
+- Full authenticated API parity for scoped human and AI operators.
 
 ### Important or strongly desired
 
@@ -388,7 +411,15 @@ Stable event, submission, session, speaker, and calendar identifiers are foundat
 
 ### Assist rather than impersonate
 
-Post-acceptance coordination depends on human judgment about timing, tone, relationship, and escalation medium. Automation should assemble context, identify missing work, and draft the next message while keeping the organizer in control of consequential sends.
+Post-acceptance coordination depends on judgment about timing, tone, relationship, and escalation medium. By default, automation should assemble context, identify missing work, and draft the next message. Organizers retain authority over consequential sends by granting or revoking explicit human and agent scopes; an agent may execute only through a deliberately configured Course Check policy.
+
+### Record truth before releasing consequences
+
+Private operational work may remain incomplete or contradictory. Course Check must not turn soft warnings into barriers to recording reality. It belongs at final decision cascades, sends, publication, and external writes, where it can expose consequences before they leave the working state.
+
+### Keep one consequence contract
+
+UI, API, integration, import, and AI-agent paths must not develop different safety semantics for the same consequential action. Every actor uses the same versioned plan, scoped authority, effect tracking, and audit model.
 
 ### Make it fast
 
@@ -436,9 +467,9 @@ This is an acceptance-oriented reading of the collected evidence, not a committe
 
 ## Agentic functionality
 
-The Sessionboard marketing site emphasizes agent-native and AI features, but the competition organizer clarified that a small useful agent is enough and the administrator UI is the priority.
+The Sessionboard marketing site emphasizes agent-native and AI features, while the competition organizer clarified that the administrator UI remains the priority. ChartStead nevertheless requires complete authenticated API control so scoped AI agents can operate the same event-program workflow as authorized staff.
 
-No exact agent behavior has been required. A narrow assistant that reduces real administrative work is more aligned with the brief than a broad chatbot added only to claim AI functionality.
+Agents are first-class audited actors rather than privileged bypasses. Depending on explicit event policy and granted scopes, an agent may propose, approve, execute, retry, reconcile, or compensate Course Check stages. AI-generated plans and drafts become exact versioned inputs before execution; a model cannot silently recalculate approved content during apply. This API-first control does not require a broad chat interface or autonomous proposal evaluation.
 
 ## Naming context
 
@@ -468,7 +499,7 @@ Other contestants announced the names `opensession`, `Program Cue`, and `SuperSt
 - Which incomplete agenda states must be supported, and are conflicts always non-blocking?
 - Which exports and historical speaker fields matter to the target customer?
 - Does the target workflow need an employer-approval-pending state after acceptance?
-- What is the smallest useful agentic feature the customer would value?
+- Which first-party AI-agent interface should present the complete authenticated API most effectively without displacing the administrator UI?
 - What requirement was described as “nice to have” in an earlier Discord reply whose original question was not included in the copied thread?
 - Will the promised follow-up video introduce or freeze any additional requirements?
 - What final submission form and judging rubric will be provided?

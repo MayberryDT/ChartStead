@@ -1,0 +1,1000 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ChartStead Safety Layer Explainer</title>
+  <style>
+    :root {
+      --ink: #081d3a;
+      --ink-2: #173b70;
+      --blue: #2f5d98;
+      --blue-2: #244e7d;
+      --green: #087a4d;
+      --green-soft: #e9f8f1;
+      --amber: #8a4d09;
+      --amber-soft: #fff4e5;
+      --red: #8a1c13;
+      --red-soft: #fdecea;
+      --paper: #f3f5f7;
+      --surface: #ffffff;
+      --line: #d7dee7;
+      --line-strong: #aebac8;
+      --muted: #526071;
+      --chart: rgba(47, 93, 152, 0.075);
+      --shadow: 0 16px 48px rgba(8, 29, 58, 0.1);
+      --radius: 12px;
+      --font: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(var(--chart) 1px, transparent 1px),
+        linear-gradient(90deg, var(--chart) 1px, transparent 1px),
+        var(--paper);
+      background-size: 48px 48px;
+      font-family: var(--font);
+      line-height: 1.5;
+    }
+
+    a { color: inherit; }
+    button { font: inherit; }
+    :focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
+
+    .shell {
+      display: grid;
+      grid-template-columns: 244px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .rail {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 26px 20px;
+      color: #fff;
+      background: var(--ink);
+      overflow-y: auto;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+    }
+
+    .brand img {
+      width: 44px;
+      height: 44px;
+      object-fit: cover;
+      border-radius: 50%;
+    }
+
+    .brand strong { display: block; font-size: 17px; letter-spacing: -0.02em; }
+    .brand span { display: block; color: rgba(255, 255, 255, 0.68); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+
+    .rail-label {
+      margin: 24px 0 10px;
+      color: rgba(255, 255, 255, 0.5);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .rail nav { display: grid; gap: 4px; }
+    .rail nav a {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 40px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      color: rgba(255, 255, 255, 0.78);
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: none;
+    }
+
+    .rail nav a:hover { color: #fff; background: var(--ink-2); }
+    .rail-index {
+      display: grid;
+      place-items: center;
+      width: 22px;
+      height: 22px;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .rail-note {
+      margin-top: 28px;
+      padding: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 8px;
+      color: rgba(255, 255, 255, 0.72);
+      font-size: 12px;
+    }
+
+    main { min-width: 0; }
+    .page { width: min(1240px, 100%); margin: 0 auto; padding: 32px; }
+
+    .hero {
+      position: relative;
+      min-height: 500px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(340px, 0.85fr);
+      gap: 40px;
+      align-items: center;
+      padding: 56px;
+      color: #fff;
+      background: var(--ink);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+
+    .hero::before,
+    .hero::after {
+      content: "";
+      position: absolute;
+      border: 1px solid rgba(255, 255, 255, 0.11);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    .hero::before { width: 430px; height: 430px; right: -130px; top: -190px; }
+    .hero::after { width: 610px; height: 610px; right: -220px; top: -280px; }
+
+    .eyebrow {
+      margin: 0 0 14px;
+      color: #9db8da;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { max-width: 760px; margin-bottom: 22px; font-size: clamp(40px, 6vw, 72px); line-height: 0.98; letter-spacing: -0.055em; }
+    h2 { margin-bottom: 12px; font-size: clamp(28px, 4vw, 42px); line-height: 1.08; letter-spacing: -0.035em; }
+    h3 { margin-bottom: 8px; font-size: 17px; line-height: 1.3; }
+    .lede { max-width: 720px; margin-bottom: 0; color: rgba(255, 255, 255, 0.72); font-size: 18px; }
+
+    .hero-chain { position: relative; z-index: 1; display: grid; gap: 10px; }
+    .hero-step {
+      display: grid;
+      grid-template-columns: 32px minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
+      padding: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.055);
+      backdrop-filter: blur(8px);
+    }
+    .hero-step b { font-size: 13px; }
+    .hero-step span { display: block; color: rgba(255, 255, 255, 0.62); font-size: 12px; }
+    .hero-num { display: grid; place-items: center; width: 30px; height: 30px; color: var(--ink); background: #fff; border-radius: 50%; font-size: 11px; font-weight: 800; }
+
+    section { scroll-margin-top: 24px; padding: 88px 0 0; }
+    .section-head { display: grid; grid-template-columns: 140px minmax(0, 760px); gap: 24px; align-items: start; margin-bottom: 32px; }
+    .section-no { padding-top: 5px; color: var(--blue); font-size: 12px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
+    .section-head p { margin-bottom: 0; color: var(--muted); font-size: 16px; }
+
+    .map {
+      position: relative;
+      padding: 34px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.94);
+      box-shadow: 0 8px 26px rgba(8, 29, 58, 0.06);
+      overflow: hidden;
+    }
+
+    .map::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      opacity: 0.55;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at 20% 15%, rgba(47, 93, 152, 0.08), transparent 28%),
+        linear-gradient(rgba(47, 93, 152, 0.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(47, 93, 152, 0.045) 1px, transparent 1px);
+      background-size: auto, 32px 32px, 32px 32px;
+    }
+    .map > * { position: relative; }
+
+    .mind-grid { display: grid; grid-template-columns: 1fr 72px 1fr 72px 1fr; gap: 0; align-items: center; }
+    .mind-column { display: grid; gap: 12px; }
+    .mind-arrow { color: var(--blue); text-align: center; font-size: 26px; font-weight: 400; }
+
+    .node {
+      padding: 17px 18px;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--blue);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+    .node strong { display: block; margin-bottom: 4px; font-size: 14px; }
+    .node span { display: block; color: var(--muted); font-size: 12px; }
+    .node.problem { border-left-color: var(--red); background: var(--red-soft); }
+    .node.evidence { border-left-color: var(--amber); background: var(--amber-soft); }
+    .node.solution { border-left-color: var(--green); background: var(--green-soft); }
+    .node.central { padding: 24px; border-left-width: 6px; }
+    .node.central strong { font-size: 18px; }
+
+    .evidence-strip { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 18px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .evidence-stat { padding: 18px; background: #fff; border-right: 1px solid var(--line); }
+    .evidence-stat:last-child { border-right: 0; }
+    .evidence-stat b { display: block; margin-bottom: 4px; color: var(--blue); font-size: 24px; font-variant-numeric: tabular-nums; }
+    .evidence-stat span { color: var(--muted); font-size: 11px; }
+
+    .old-flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; align-items: stretch; }
+    .old-step { position: relative; min-height: 150px; padding: 18px; border-top: 4px solid var(--line-strong); background: #fff; border-radius: 0 0 8px 8px; }
+    .old-step::after { content: "&rarr;"; position: absolute; top: 50%; right: -14px; z-index: 2; color: var(--blue); font-size: 18px; transform: translateY(-50%); }
+    .old-step:last-child::after { display: none; }
+    .old-step b { display: block; margin-bottom: 8px; font-size: 13px; }
+    .old-step span { color: var(--muted); font-size: 12px; }
+    .breakpoint { display: inline-block; margin-top: 12px; padding: 4px 7px; color: var(--red); background: var(--red-soft); border-radius: 4px; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+
+    .decision-tree { display: grid; gap: 18px; }
+    .tree-root { justify-self: center; width: min(580px, 100%); text-align: center; }
+    .tree-branches { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+    .branch { min-height: 210px; padding: 22px; border: 1px solid var(--line); background: #fff; border-radius: 8px; }
+    .branch .branch-state { display: inline-block; margin-bottom: 22px; padding: 5px 8px; border-radius: 4px; font-size: 10px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+    .branch.rejected .branch-state { color: var(--red); background: var(--red-soft); }
+    .branch.selected { border: 2px solid var(--green); background: var(--green-soft); }
+    .branch.selected .branch-state { color: var(--green); background: #fff; }
+    .branch p { margin-bottom: 0; color: var(--muted); font-size: 13px; }
+
+    .action-trio { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 22px; }
+    .action-card { padding: 20px; color: #fff; background: var(--ink); border-radius: 8px; }
+    .action-card .action-no { display: inline-grid; place-items: center; width: 28px; height: 28px; margin-bottom: 18px; border: 1px solid rgba(255,255,255,0.28); border-radius: 50%; font-size: 10px; }
+    .action-card p { margin-bottom: 0; color: rgba(255,255,255,0.65); font-size: 12px; }
+
+    .policy-banner { display: grid; grid-template-columns: 1fr auto 1fr; gap: 22px; align-items: center; margin-bottom: 26px; }
+    .policy-side { padding: 22px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+    .policy-side b { display: block; margin-bottom: 6px; }
+    .policy-side span { color: var(--muted); font-size: 12px; }
+    .policy-plus { color: var(--blue); font-size: 26px; font-weight: 800; }
+
+    .approval-route { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0; }
+    .checkpoint { position: relative; padding: 22px 16px 18px; border-top: 2px solid var(--blue); text-align: center; }
+    .checkpoint::before { content: ""; position: absolute; top: -8px; left: 50%; width: 14px; height: 14px; border: 3px solid var(--blue); border-radius: 50%; background: #fff; transform: translateX(-50%); }
+    .checkpoint b { display: block; margin-bottom: 5px; font-size: 12px; }
+    .checkpoint span { color: var(--muted); font-size: 10px; }
+    .checkpoint.irreversible::before { border-color: var(--red); }
+    .checkpoint.irreversible { border-top-color: var(--red); }
+
+    .compact-note { margin: 22px 0 0; padding: 16px 18px; border-left: 4px solid var(--blue); color: var(--muted); background: #eaf2fb; font-size: 13px; }
+    .compact-note strong { color: var(--ink); }
+
+    .scenario-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
+    .scenario-button { min-height: 42px; padding: 9px 14px; border: 1px solid var(--blue); border-radius: 8px; color: var(--blue); background: #fff; cursor: pointer; font-weight: 700; }
+    .scenario-button:hover { background: #eaf2fb; }
+    .scenario-button[aria-pressed="true"] { color: #fff; background: var(--blue); }
+
+    .scenario-board { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 28px; }
+    .scenario-summary { padding: 22px; color: #fff; background: var(--ink); border-radius: 8px; }
+    .scenario-summary .scenario-kicker { color: #9db8da; font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+    .scenario-summary h3 { margin: 9px 0 16px; font-size: 23px; }
+    .scenario-summary p { color: rgba(255, 255, 255, 0.68); font-size: 12px; }
+    .scenario-count { margin-top: 20px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.16); }
+    .scenario-count b { display: block; font-size: 34px; line-height: 1; font-variant-numeric: tabular-nums; }
+    .scenario-count span { color: rgba(255,255,255,0.62); font-size: 11px; }
+
+    .scenario-effects { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .effect { padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: #fff; transition: transform 180ms ease, border-color 180ms ease; }
+    .effect:hover { border-color: var(--blue); transform: translateY(-2px); }
+    .effect b { display: block; margin-bottom: 4px; font-size: 13px; }
+    .effect span { color: var(--muted); font-size: 11px; }
+    .effect .effect-tag { display: inline-block; margin-bottom: 10px; padding: 3px 6px; color: var(--blue); background: #eaf2fb; border-radius: 4px; font-size: 9px; font-weight: 800; text-transform: uppercase; }
+
+    .architecture {
+      display: grid;
+      grid-template-columns: minmax(180px, 0.8fr) 44px minmax(260px, 1.2fr) 44px minmax(220px, 1fr);
+      gap: 0;
+      align-items: stretch;
+    }
+    .arch-lane { display: grid; gap: 10px; align-content: start; }
+    .arch-arrow { display: grid; place-items: center; color: var(--blue); font-size: 24px; }
+    .arch-group { padding: 18px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+    .arch-group.kernel { border: 2px solid var(--blue); }
+    .arch-title { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 14px; }
+    .arch-title b { font-size: 14px; }
+    .arch-title span { color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+    .arch-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+    .arch-list li { padding: 8px 9px; color: var(--muted); background: var(--paper); border-radius: 5px; font-size: 11px; }
+    .arch-list li strong { color: var(--ink); }
+    .arch-planners { display: grid; gap: 8px; margin-top: 10px; }
+    .planner { padding: 10px; border-left: 3px solid var(--green); background: var(--green-soft); font-size: 11px; }
+
+    .transaction {
+      margin-top: 24px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      border: 2px solid var(--ink);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .tx-step { padding: 16px; background: #fff; border-right: 1px solid var(--line); }
+    .tx-step:last-child { border-right: 0; }
+    .tx-step b { display: block; margin-bottom: 4px; font-size: 12px; }
+    .tx-step span { color: var(--muted); font-size: 10px; }
+    .transaction-label { grid-column: 1 / -1; padding: 7px 12px; color: #fff; background: var(--ink); font-size: 10px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+
+    .policy-matrix { display: grid; grid-template-columns: 1.1fr 1fr 1fr; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .matrix-cell { min-height: 92px; padding: 16px; background: #fff; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .matrix-cell:nth-child(3n) { border-right: 0; }
+    .matrix-cell:nth-last-child(-n+3) { border-bottom: 0; }
+    .matrix-cell.header { min-height: auto; color: #fff; background: var(--ink); font-size: 11px; font-weight: 800; }
+    .matrix-cell b { display: block; margin-bottom: 5px; font-size: 12px; }
+    .matrix-cell span { color: var(--muted); font-size: 10px; }
+    .matrix-cell.good { background: var(--green-soft); }
+    .matrix-cell.stop { background: var(--red-soft); }
+
+    .failure-map { display: grid; grid-template-columns: 1fr 74px 1fr 74px 1fr; gap: 0; align-items: center; }
+    .failure-column { display: grid; gap: 12px; }
+    .failure-arrow { color: var(--blue); text-align: center; font-size: 24px; }
+
+    .decision-panel { display: grid; grid-template-columns: 1fr 0.8fr; gap: 30px; padding: 40px; color: #fff; background: var(--ink); border-radius: 12px; }
+    .decision-panel h2 { max-width: 650px; }
+    .decision-panel p { color: rgba(255,255,255,0.68); }
+    .decision-rules { display: grid; gap: 10px; align-content: center; }
+    .decision-rule { display: grid; grid-template-columns: 26px 1fr; gap: 10px; align-items: start; padding: 12px; border: 1px solid rgba(255,255,255,0.16); border-radius: 7px; background: rgba(255,255,255,0.05); font-size: 12px; }
+    .check { display: grid; place-items: center; width: 22px; height: 22px; color: var(--ink); background: #fff; border-radius: 50%; font-weight: 900; }
+
+    .source-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 22px; margin: 22px 0 0; padding: 0; list-style: none; }
+    .source-list li { padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+    .source-list strong { display: block; color: var(--ink); font-size: 12px; }
+
+    .precedent-map {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+    .precedent {
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      min-height: 250px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-top: 4px solid var(--blue);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .precedent.domain { border-top-color: var(--green); }
+    .precedent.execution { border-top-color: var(--amber); }
+    .precedent-label {
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .precedent h3 { margin: 8px 0 10px; font-size: 18px; }
+    .precedent p { color: var(--muted); font-size: 12px; }
+    .precedent a { color: var(--blue); font-size: 11px; font-weight: 700; }
+    .borrow-line { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
+    .borrow-line b { display: block; margin-bottom: 4px; font-size: 10px; text-transform: uppercase; }
+    .borrow-line span { color: var(--muted); font-size: 11px; }
+
+    .git-analogy {
+      display: grid;
+      grid-template-columns: 1fr 70px 1fr;
+      gap: 0;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+    .git-side { padding: 22px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+    .git-side b { display: block; margin-bottom: 8px; }
+    .git-side span { color: var(--muted); font-size: 12px; }
+    .git-middle { color: var(--blue); text-align: center; font-size: 26px; }
+
+    .staff-examples { display: grid; gap: 18px; }
+    .staff-case {
+      display: grid;
+      grid-template-columns: 72px minmax(180px, 0.85fr) 36px minmax(240px, 1.15fr) 36px minmax(220px, 1fr);
+      gap: 12px;
+      align-items: center;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .case-no { display: grid; place-items: center; width: 54px; height: 54px; color: #fff; background: var(--ink); border-radius: 50%; font-size: 18px; font-weight: 800; }
+    .case-scene b, .case-experience b, .case-benefit b { display: block; margin-bottom: 5px; font-size: 12px; }
+    .case-scene span, .case-experience span, .case-benefit span { display: block; color: var(--muted); font-size: 11px; }
+    .case-arrow { color: var(--blue); text-align: center; font-size: 20px; }
+    .case-mode { display: inline-block; margin-bottom: 8px; padding: 4px 7px; border-radius: 4px; font-size: 9px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; }
+    .case-mode.immediate { color: var(--green); background: var(--green-soft); }
+    .case-mode.review { color: var(--amber); background: var(--amber-soft); }
+    .case-benefit { padding: 14px; border-left: 3px solid var(--green); background: var(--green-soft); }
+
+    .block-rule {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+      margin-top: 22px;
+    }
+    .block-column { padding: 18px; border-radius: 8px; }
+    .block-column.allow { background: var(--green-soft); }
+    .block-column.block { background: var(--red-soft); }
+    .block-column h3 { margin-bottom: 12px; }
+    .block-column ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 12px; }
+    .block-column li + li { margin-top: 5px; }
+
+    footer { padding: 70px 0 28px; color: var(--muted); font-size: 11px; }
+
+    @media (max-width: 1040px) {
+      .shell { grid-template-columns: 78px minmax(0, 1fr); }
+      .rail { padding: 22px 12px; }
+      .brand { justify-content: center; }
+      .brand div, .rail-label, .rail nav a span:last-child, .rail-note { display: none; }
+      .rail nav a { justify-content: center; padding: 8px; }
+      .hero { grid-template-columns: 1fr; }
+      .mind-grid, .failure-map { grid-template-columns: 1fr; gap: 12px; }
+      .mind-arrow, .failure-arrow { transform: rotate(90deg); }
+      .architecture { grid-template-columns: 1fr; gap: 12px; }
+      .arch-arrow { transform: rotate(90deg); }
+      .old-flow { grid-template-columns: repeat(2, 1fr); }
+      .old-step::after { display: none; }
+    }
+
+    @media (max-width: 760px) {
+      .shell { display: block; }
+      .rail { position: static; width: 100%; height: auto; padding: 14px 16px; }
+      .brand { justify-content: flex-start; padding-bottom: 12px; border-bottom: 0; }
+      .brand div { display: block; }
+      .rail nav { grid-template-columns: repeat(4, 1fr); }
+      .rail nav a { min-height: 36px; }
+      .page { padding: 16px; }
+      .hero { min-height: 0; padding: 30px 22px; gap: 28px; }
+      h1 { font-size: 42px; }
+      section { padding-top: 64px; }
+      .section-head { grid-template-columns: 1fr; gap: 8px; }
+      .map { padding: 20px; }
+      .evidence-strip, .tree-branches, .action-trio, .approval-route, .transaction, .source-list { grid-template-columns: 1fr; }
+      .evidence-stat { border-right: 0; border-bottom: 1px solid var(--line); }
+      .evidence-stat:last-child { border-bottom: 0; }
+      .old-flow { grid-template-columns: 1fr; }
+      .policy-banner, .scenario-board, .decision-panel { grid-template-columns: 1fr; }
+      .precedent-map, .git-analogy, .block-rule { grid-template-columns: 1fr; }
+      .git-middle { transform: rotate(90deg); }
+      .staff-case { grid-template-columns: 54px 1fr; align-items: start; }
+      .staff-case .case-arrow { grid-column: 1; transform: rotate(90deg); }
+      .staff-case .case-experience, .staff-case .case-benefit { grid-column: 2; }
+      .policy-plus { text-align: center; }
+      .scenario-effects { grid-template-columns: 1fr; }
+      .transaction-label { grid-column: 1; }
+      .tx-step { border-right: 0; border-bottom: 1px solid var(--line); }
+      .policy-matrix { grid-template-columns: 1fr; }
+      .matrix-cell, .matrix-cell:nth-child(3n), .matrix-cell:nth-last-child(-n+3) { border-right: 0; border-bottom: 1px solid var(--line); }
+      .matrix-cell:last-child { border-bottom: 0; }
+    }
+
+    @media print {
+      body { background: #fff; }
+      .shell { display: block; }
+      .rail { display: none; }
+      .page { width: 100%; padding: 0; }
+      section { break-inside: avoid; padding-top: 40px; }
+      .hero, .map, .decision-panel { box-shadow: none; }
+      .scenario-controls { display: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail" aria-label="Explainer navigation">
+      <div class="brand">
+        <img src="../design/assets/brand/chartstead-mark-on-dark.png" alt="ChartStead compass and podium mark">
+        <div><strong>ChartStead</strong><span>Decision briefing</span></div>
+      </div>
+      <p class="rail-label">Map</p>
+      <nav>
+        <a href="#research"><span class="rail-index">01</span><span>The research</span></a>
+        <a href="#problem"><span class="rail-index">02</span><span>The problem</span></a>
+        <a href="#reasoning"><span class="rail-index">03</span><span>The reasoning</span></a>
+        <a href="#solution"><span class="rail-index">04</span><span>The solution</span></a>
+        <a href="#walkthrough"><span class="rail-index">05</span><span>Walkthrough</span></a>
+        <a href="#architecture"><span class="rail-index">06</span><span>Architecture</span></a>
+        <a href="#policy"><span class="rail-index">07</span><span>Safety policy</span></a>
+        <a href="#failure"><span class="rail-index">08</span><span>Failure map</span></a>
+        <a href="#precedents"><span class="rail-index">09</span><span>Precedents</span></a>
+        <a href="#staff-examples"><span class="rail-index">10</span><span>Staff examples</span></a>
+      </nav>
+      <div class="rail-note">This explains the proposed direction. It does not record final approval or change the product plan.</div>
+    </aside>
+
+    <main>
+      <div class="page">
+        <header class="hero">
+          <div>
+            <p class="eyebrow">From evidence to architecture</p>
+            <h1>See what changes before it changes.</h1>
+            <p class="lede">ChartStead's proposed safety layer turns consequential conference operations into a reviewable route: understand the effects, approve each boundary, then track what actually happened.</p>
+          </div>
+          <div class="hero-chain" aria-label="The core reasoning in four steps">
+            <div class="hero-step"><div class="hero-num">1</div><div><b>Operators reconstruct consequences manually</b><span>Across tables, inboxes, calendars, schedules, and integrations.</span></div></div>
+            <div class="hero-step"><div class="hero-num">2</div><div><b>Existing previews are fragmented</b><span>Each module sees only its own slice of the decision.</span></div></div>
+            <div class="hero-step"><div class="hero-num">3</div><div><b>High-consequence actions cross modules</b><span>One decision can change people, records, messages, and public output.</span></div></div>
+            <div class="hero-step"><div class="hero-num">4</div><div><b>ChartStead joins the evidence before execution</b><span>One safety contract, three specialized workflows.</span></div></div>
+          </div>
+        </header>
+
+        <section id="research">
+          <div class="section-head">
+            <div class="section-no">01 / Research</div>
+            <div><h2>What the research actually found</h2><p>The starting point was not a desire to add more confirmation dialogs. It was repeated evidence that organizers must manually reconstruct the consequences of decisions that span several systems.</p></div>
+          </div>
+          <div class="map">
+            <div class="mind-grid" aria-label="Mind map from observed pain to product opportunity">
+              <div class="mind-column">
+                <div class="node problem"><strong>Communication mistakes</strong><span>Wrong audience, missing co-speakers, duplicates, prior sends, and uncertain delivery.</span></div>
+                <div class="node problem"><strong>Manual reconciliation</strong><span>Spreadsheets, inboxes, copied records, and repeated cross-checking connect the workflow.</span></div>
+                <div class="node problem"><strong>Partial schedule truth</strong><span>Accepted sessions can remain unplaced, conflicted, or incomplete for long periods.</span></div>
+                <div class="node problem"><strong>Irreversible boundaries</strong><span>Sending, publishing, calendar delivery, and external writes cannot all be cleanly undone.</span></div>
+              </div>
+              <div class="mind-arrow" aria-hidden="true">&rarr;</div>
+              <div class="mind-column">
+                <div class="node evidence central"><strong>The common job</strong><span>Before acting, an operator asks: What changes? Who is affected? What leaves the system? What could fail? What can be reversed?</span></div>
+                <div class="node evidence"><strong>Incumbents solve pieces</strong><span>Email preview, outboxes, draft schedules, conflict checks, sync logs, and explicit releases exist separately.</span></div>
+              </div>
+              <div class="mind-arrow" aria-hidden="true">&rarr;</div>
+              <div class="mind-column">
+                <div class="node solution central"><strong>The opportunity</strong><span>Unify the safety contract across a few consequential workflows without flattening their domain differences.</span></div>
+                <div class="node solution"><strong>Product promise</strong><span>Show operators something they would otherwise have to reconstruct before consequences become real.</span></div>
+              </div>
+            </div>
+            <div class="evidence-strip" aria-label="Directional source counts from the design-partner pain research">
+              <div class="evidence-stat"><b>9 / 20</b><span>Sources showed communication targeting, history, or send-safety pain.</span></div>
+              <div class="evidence-stat"><b>9 / 20</b><span>Sources showed review load or whole-program curation pain.</span></div>
+              <div class="evidence-stat"><b>7 / 20</b><span>Sources showed partial scheduling or constraint pain.</span></div>
+              <div class="evidence-stat"><b>5 / 20</b><span>Sources showed manual handoffs or data re-entry.</span></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="problem">
+          <div class="section-head">
+            <div class="section-no">02 / Problem</div>
+            <div><h2>The danger lives between modules</h2><p>A normal confirmation modal sees the button being pressed. The operator's real decision crosses review state, identity, communication, scheduling, public output, and integration state.</p></div>
+          </div>
+          <div class="map">
+            <div class="old-flow" aria-label="Current fragmented conference operation flow">
+              <div class="old-step"><b>Committee decision</b><span>Approve a proposal internally.</span><span class="breakpoint">Can change repeatedly</span></div>
+              <div class="old-step"><b>Record creation</b><span>Create speakers, participation history, sessions, and onboarding tasks.</span><span class="breakpoint">Duplicates possible</span></div>
+              <div class="old-step"><b>Recipient assembly</b><span>Resolve people, co-speakers, addresses, exclusions, and previous contact.</span><span class="breakpoint">Manual checking</span></div>
+              <div class="old-step"><b>Program change</b><span>Place or publish sessions while conflicts and TBD states remain.</span><span class="breakpoint">Partial truth</span></div>
+              <div class="old-step"><b>External effects</b><span>Send email, update calendars, publish pages, and synchronize Airtable.</span><span class="breakpoint">Not truly undoable</span></div>
+            </div>
+            <p class="compact-note"><strong>The researched problem:</strong> no single module can answer the operator's full question. Each module may be correct locally while the combined action is wrong globally.</p>
+          </div>
+        </section>
+
+        <section id="reasoning">
+          <div class="section-head">
+            <div class="section-no">03 / Reasoning</div>
+            <div><h2>How we got from pain to the proposed boundary</h2><p>The design deliberately rejects both extremes: one narrow confirmation screen is not differentiated enough, while a universal workflow engine would generalize before ChartStead understands enough workflows.</p></div>
+          </div>
+          <div class="map decision-tree">
+            <div class="node evidence central tree-root"><strong>Design question</strong><span>How can ChartStead make consequential actions inspectable without turning every edit into ceremony?</span></div>
+            <div class="tree-branches">
+              <div class="branch rejected"><span class="branch-state">Rejected</span><h3>Focused confirmation screens</h3><p>Fast to build, but each workflow invents its own stale checks, retry behavior, audit, and vocabulary. Safety semantics drift.</p></div>
+              <div class="branch selected"><span class="branch-state">Selected</span><h3>Shared safety kernel</h3><p>One versioning, approval, execution, and recovery contract. Three specialized planners retain the real domain rules.</p></div>
+              <div class="branch rejected"><span class="branch-state">Rejected for now</span><h3>Universal workflow engine</h3><p>Maximum abstraction, but it creates a generic effect language, plugin system, and graph executor before they are justified.</p></div>
+            </div>
+            <div class="action-trio" aria-label="The three selected first-release actions">
+              <div class="action-card"><span class="action-no">01</span><h3>Batch proposal decisions</h3><p>Internal decisions, acceptance cascade, created records, tasks, and integration effects.</p></div>
+              <div class="action-card"><span class="action-no">02</span><h3>Speaker communication</h3><p>Exact recipients, exclusions, prior contact, drafts, email, and calendar delivery.</p></div>
+              <div class="action-card"><span class="action-no">03</span><h3>Program publication</h3><p>Public schedule delta, unresolved private work, calendar changes, and external writes.</p></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="solution">
+          <div class="section-head">
+            <div class="section-no">04 / Solution</div>
+            <div><h2>One safety contract, proportional ceremony</h2><p>The kernel is always active for the three selected actions. The visible review expands only when the consequences need attention.</p></div>
+          </div>
+          <div class="map">
+            <div class="policy-banner">
+              <div class="policy-side"><b>Always-on machinery</b><span>Plan versioning, freshness checks, authorization, idempotency, transactional writes, effect records, retries, and audit.</span></div>
+              <div class="policy-plus" aria-hidden="true">+</div>
+              <div class="policy-side"><b>Proportional review</b><span>Clean reversible work stays concise. Warnings, exclusions, stale inputs, public changes, and irreversible effects expand.</span></div>
+            </div>
+            <div class="approval-route" aria-label="Five approval boundaries">
+              <div class="checkpoint"><b>Apply decisions</b><span>Change internal state and create required records.</span></div>
+              <div class="checkpoint"><b>Create drafts</b><span>Prepare editable communication without sending.</span></div>
+              <div class="checkpoint irreversible"><b>Send and deliver</b><span>Email and calendar effects leave ChartStead.</span></div>
+              <div class="checkpoint irreversible"><b>Publish program</b><span>Attendee-facing state becomes public.</span></div>
+              <div class="checkpoint irreversible"><b>Write integrations</b><span>Airtable and other systems receive changes.</span></div>
+            </div>
+            <p class="compact-note"><strong>Important distinction:</strong> five approval boundaries do not require five pages. A single review surface can show all stages while recording exactly which stages the operator approved.</p>
+          </div>
+        </section>
+
+        <section id="walkthrough">
+          <div class="section-head">
+            <div class="section-no">05 / Walkthrough</div>
+            <div><h2>Inspect the three action plans</h2><p>Change the selected workflow to see how the same safety contract presents different domain evidence.</p></div>
+          </div>
+          <div class="map">
+            <div class="scenario-controls" role="group" aria-label="Choose an action plan example">
+              <button class="scenario-button" type="button" data-scenario="decisions" aria-pressed="true">Batch decisions</button>
+              <button class="scenario-button" type="button" data-scenario="messages" aria-pressed="false">Speaker communication</button>
+              <button class="scenario-button" type="button" data-scenario="publish" aria-pressed="false">Publish program</button>
+            </div>
+            <div class="scenario-board" aria-live="polite">
+              <div class="scenario-summary">
+                <span class="scenario-kicker" id="scenario-kicker">Action plan 01</span>
+                <h3 id="scenario-title">Accept 12 proposals</h3>
+                <p id="scenario-description">Internal decisions create a connected set of records while preserving separate communication and publication boundaries.</p>
+                <div class="scenario-count"><b id="scenario-count">12</b><span id="scenario-count-label">proposal decisions</span></div>
+              </div>
+              <div class="scenario-effects" id="scenario-effects"></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="architecture">
+          <div class="section-head">
+            <div class="section-no">06 / Architecture</div>
+            <div><h2>How the safety kernel works</h2><p>The kernel is a deep module inside the event's Durable Object. UI and API callers use the same interface; domain-specific planners prepare the evidence; one transaction commits internal truth and queues external work.</p></div>
+          </div>
+          <div class="map">
+            <div class="architecture" aria-label="Architecture map for the ChartStead safety layer">
+              <div class="arch-lane">
+                <div class="arch-group">
+                  <div class="arch-title"><b>Callers</b><span>Intent</span></div>
+                  <ul class="arch-list"><li><strong>Organizer UI</strong><br>Buttons and review surfaces</li><li><strong>Authenticated API</strong><br>External automation</li><li><strong>Imports and integrations</strong><br>Future command sources</li></ul>
+                </div>
+                <div class="arch-group">
+                  <div class="arch-title"><b>Typed action</b><span>Closed set</span></div>
+                  <ul class="arch-list"><li>Batch proposal decisions</li><li>Speaker communication</li><li>Program publication</li></ul>
+                </div>
+              </div>
+              <div class="arch-arrow" aria-hidden="true">&rarr;</div>
+              <div class="arch-lane">
+                <div class="arch-group kernel">
+                  <div class="arch-title"><b>Safety kernel</b><span>Shared lifecycle</span></div>
+                  <ul class="arch-list">
+                    <li><strong>Plan versions</strong> freeze the exact reviewed intent.</li>
+                    <li><strong>Targeted revision checks</strong> detect changed relevant inputs.</li>
+                    <li><strong>Approval hashes</strong> bind approval to one immutable plan.</li>
+                    <li><strong>Stage policy</strong> preserves the five consequence boundaries.</li>
+                    <li><strong>Idempotency</strong> makes repeated requests return the same result.</li>
+                    <li><strong>Effect ledger</strong> tracks every external outcome independently.</li>
+                    <li><strong>Audit history</strong> records request, review, execution, failure, and correction.</li>
+                  </ul>
+                  <div class="arch-planners">
+                    <div class="planner"><strong>Decision planner:</strong> review state, acceptance cascade, speakers, sessions, tasks.</div>
+                    <div class="planner"><strong>Communication planner:</strong> recipient reasoning, drafts, prior sends, email and calendar payloads.</div>
+                    <div class="planner"><strong>Publication planner:</strong> public delta, conflicts, excluded private work, release revision.</div>
+                  </div>
+                </div>
+              </div>
+              <div class="arch-arrow" aria-hidden="true">&rarr;</div>
+              <div class="arch-lane">
+                <div class="arch-group">
+                  <div class="arch-title"><b>Event store</b><span>Durable Object SQLite</span></div>
+                  <ul class="arch-list"><li>Stable records and revisions</li><li>Immutable plan versions</li><li>Approval and audit ledger</li><li>Transactional effect outbox</li></ul>
+                </div>
+                <div class="arch-group">
+                  <div class="arch-title"><b>Effect dispatcher</b><span>At least once</span></div>
+                  <ul class="arch-list"><li>Email adapter</li><li>Calendar adapter</li><li>Public release adapter</li><li>Airtable adapter</li></ul>
+                </div>
+                <div class="arch-group">
+                  <div class="arch-title"><b>Execution receipt</b><span>Observed truth</span></div>
+                  <ul class="arch-list"><li>Succeeded</li><li>Retryable failure</li><li>Permanent failure</li><li>Unknown outcome</li><li>Compensated</li></ul>
+                </div>
+              </div>
+            </div>
+            <div class="transaction" aria-label="Atomic internal transaction">
+              <div class="transaction-label">One local transaction - all four commit or all four roll back</div>
+              <div class="tx-step"><b>1. Recheck inputs</b><span>Compare only relevant entity revisions and current authorization.</span></div>
+              <div class="tx-step"><b>2. Apply internal state</b><span>Write decisions, records, snapshots, or publication pointers.</span></div>
+              <div class="tx-step"><b>3. Create effect rows</b><span>Freeze one independently trackable outbox effect per recipient or external write.</span></div>
+              <div class="tx-step"><b>4. Append audit</b><span>Record the exact actor, plan, stage, digest, and resulting state.</span></div>
+            </div>
+            <p class="compact-note"><strong>Why network calls are outside the transaction:</strong> email, calendar, and Airtable cannot join a SQLite transaction. The transaction records the durable intent first; an alarm-driven dispatcher then executes each effect idempotently.</p>
+          </div>
+        </section>
+
+        <section id="policy">
+          <div class="section-head">
+            <div class="section-no">07 / Policy</div>
+            <div><h2>What "mandatory kernel, proportional review" means</h2><p>The product never creates a weaker alternate mutation path. It does vary how much attention the interface demands based on consequence and uncertainty.</p></div>
+          </div>
+          <div class="map">
+            <div class="policy-matrix" aria-label="Safety policy matrix">
+              <div class="matrix-cell header">Situation</div><div class="matrix-cell header">What the kernel does</div><div class="matrix-cell header">What the operator sees</div>
+              <div class="matrix-cell"><b>Ordinary low-risk edit</b><span>Edit a biography or internal note.</span></div><div class="matrix-cell"><b>Normal domain write</b><span>Outside the visible safety flow; still authorized and audited where required.</span></div><div class="matrix-cell"><b>No extra ceremony</b><span>The user saves normally.</span></div>
+              <div class="matrix-cell good"><b>Clean consequential plan</b><span>No warning, exclusion, stale input, or failed effect.</span></div><div class="matrix-cell good"><b>Full safety lifecycle</b><span>Versions, checks, approval, transaction, outbox, and audit still run.</span></div><div class="matrix-cell good"><b>Concise review</b><span>Low-risk detail collapses. Required external approvals remain explicit.</span></div>
+              <div class="matrix-cell stop"><b>Risk or uncertainty found</b><span>Missing contact, prior send, conflict, stale data, or unavailable integration.</span></div><div class="matrix-cell stop"><b>Block or isolate precisely</b><span>Stale plans block. Soft warnings remain overridable. Effects stay independent.</span></div><div class="matrix-cell stop"><b>Expanded evidence</b><span>The affected people, records, warnings, and choices become prominent.</span></div>
+            </div>
+            <p class="compact-note"><strong>No global off switch:</strong> disabling only the screen while retaining the kernel would create invisible automation. Disabling both would create a second, unsafe write path. Proportional review removes friction without removing trustworthy semantics.</p>
+          </div>
+        </section>
+
+        <section id="failure">
+          <div class="section-head">
+            <div class="section-no">08 / Failure</div>
+            <div><h2>How failure stays truthful</h2><p>The system never reports a batch as simply "done" when some effects are still pending, failed, or unknowable.</p></div>
+          </div>
+          <div class="map">
+            <div class="failure-map" aria-label="Mind map of failure detection and recovery">
+              <div class="failure-column">
+                <div class="node problem"><strong>Input changed before approval</strong><span>A speaker address, decision, schedule, template, or permission changed.</span></div>
+                <div class="node problem"><strong>Provider returned failure</strong><span>Email, calendar, publication, or Airtable rejected the request.</span></div>
+                <div class="node problem"><strong>Outcome is ambiguous</strong><span>The provider may have accepted the effect before the connection failed.</span></div>
+              </div>
+              <div class="failure-arrow" aria-hidden="true">&rarr;</div>
+              <div class="failure-column">
+                <div class="node evidence"><strong>Stale plan</strong><span>Block application, identify the changed inputs, and generate a new plan version.</span></div>
+                <div class="node evidence"><strong>Per-effect failure</strong><span>Keep successful effects terminal and retry only safe failed effects.</span></div>
+                <div class="node evidence"><strong>Unknown state</strong><span>Stop automatic retry until the outcome can be reconciled.</span></div>
+              </div>
+              <div class="failure-arrow" aria-hidden="true">&rarr;</div>
+              <div class="failure-column">
+                <div class="node solution"><strong>Review again</strong><span>Approvals never transfer automatically to a changed plan.</span></div>
+                <div class="node solution"><strong>Resume safely</strong><span>Idempotency prevents repeating internal work or completed effects.</span></div>
+                <div class="node solution"><strong>Compensate forward</strong><span>Create a new reviewed correction, cancellation, restoration, or corrective sync. Never claim email was unsent.</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="decision">
+          <div class="decision-panel">
+            <div><p class="eyebrow">Decision in front of us</p><h2>Keep the safety kernel mandatory. Make the review ceremony proportional.</h2><p>This preserves one trustworthy execution path while keeping the organizer experience concise when nothing needs attention.</p></div>
+            <div class="decision-rules">
+              <div class="decision-rule"><span class="check">1</span><span>Only the three selected consequential workflows use the visible safety layer in the first release.</span></div>
+              <div class="decision-rule"><span class="check">2</span><span>Clean and reversible detail collapses; warnings and irreversible effects expand.</span></div>
+              <div class="decision-rule"><span class="check">3</span><span>Send, publish, calendar delivery, and integration writes always retain explicit approval.</span></div>
+              <div class="decision-rule"><span class="check">4</span><span>No alternate direct path bypasses freshness, idempotency, effect tracking, or audit.</span></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="sources">
+          <div class="section-head">
+            <div class="section-no">Sources</div>
+            <div><h2>Evidence behind this map</h2><p>The product argument combines ChartStead's research with established plan/apply, transactional outbox, idempotency, and compensating-transaction patterns.</p></div>
+          </div>
+          <ul class="source-list">
+            <li><strong>ChartStead design-partner pain research</strong>.research/chartstead-design-partner-pain-research.md</li>
+            <li><strong>Post-spine differentiation research</strong>.research/chartstead-post-spine-differentiation-research.md</li>
+            <li><strong>Skeptical follow-up</strong>.research/chartstead-post-spine-differentiation-follow-up.md</li>
+            <li><strong>Product boundaries</strong>context.md and context/BUILD-PLAN.md</li>
+            <li><strong>Cloudflare Durable Objects</strong>SQLite transactions and at-least-once alarms</li>
+            <li><strong>HashiCorp Terraform</strong>Saved plan and apply separation</li>
+            <li><strong>AWS Prescriptive Guidance</strong>Transactional outbox pattern</li>
+            <li><strong>Microsoft Azure Architecture Center</strong>Saga and compensating-transaction pattern</li>
+          </ul>
+        </section>
+
+        <section id="precedents">
+          <div class="section-head">
+            <div class="section-no">09 / Precedents</div>
+            <div><h2>Yes, parts of this have been done before</h2><p>No single open-source project is the complete model. The proposed design combines mature patterns from source control, infrastructure planning, server-side admission, conference operations, outboxes, and durable workflows.</p></div>
+          </div>
+          <div class="map">
+            <div class="git-analogy">
+              <div class="git-side"><b>Where it resembles Git</b><span>Git builds a candidate snapshot, lets someone inspect a delta, and records exactly what was committed. ChartStead also needs a frozen candidate, a focused diff, and an immutable record of the approved result.</span></div>
+              <div class="git-middle" aria-hidden="true">&ne;</div>
+              <div class="git-side"><b>Where Git is not the model</b><span>A Git commit does not email people, update calendars, publish an attendee schedule, or write Airtable. Git can bypass hooks and some staging flows. ChartStead cannot permit a second path around the authoritative kernel.</span></div>
+            </div>
+            <div class="precedent-map" aria-label="Open-source precedent map">
+              <article class="precedent">
+                <span class="precedent-label">Candidate state</span>
+                <h3>Git</h3>
+                <p>The index, staged diff, and commit snapshot show how selected candidate state can be inspected and then recorded without including later edits automatically.</p>
+                <div class="borrow-line"><b>Borrow</b><span>Selective scope, old/new deltas, immutable history.</span></div>
+                <a href="https://github.com/git/git/blob/010afd3166ddc64c9863b1506f12cbcdda0d4ea1/Documentation/git-add.adoc">Official Git documentation</a>
+              </article>
+              <article class="precedent">
+                <span class="precedent-label">Plan and apply</span>
+                <h3>OpenTofu</h3>
+                <p>A saved execution plan is inspected and then applied. A speculative plan can become inaccurate when target state changes.</p>
+                <div class="borrow-line"><b>Borrow</b><span>Version-bound plans, stale invalidation, apply the reviewed plan.</span></div>
+                <a href="https://opentofu.org/docs/v1.12/cli/commands/plan/">OpenTofu plan documentation</a>
+              </article>
+              <article class="precedent">
+                <span class="precedent-label">Authoritative admission</span>
+                <h3>Kubernetes</h3>
+                <p>Server-side dry-run exercises admission, validation, mutation, and conflict logic through the authoritative path while suppressing persistence.</p>
+                <div class="borrow-line"><b>Borrow</b><span>One server kernel, side-effect-free planning, explicit unknowns.</span></div>
+                <a href="https://github.com/kubernetes/enhancements/blob/51353583266ccece601bb590f9f7d2e5e335b39e/keps/sig-api-machinery/576-dry-run/README.md">Kubernetes dry-run specification</a>
+              </article>
+              <article class="precedent domain">
+                <span class="precedent-label">Conference operations</span>
+                <h3>pretalx</h3>
+                <p>Conference staff can keep decisions pending, edit an email outbox, work continuously on a private schedule, and explicitly release a public version.</p>
+                <div class="borrow-line"><b>Borrow</b><span>Fast private work, focused send review, named public releases.</span></div>
+                <a href="https://docs.pretalx.org/user/schedule/">pretalx schedule documentation</a>
+              </article>
+              <article class="precedent execution">
+                <span class="precedent-label">Atomic intent</span>
+                <h3>Debezium outbox</h3>
+                <p>The transactional outbox records internal state and external event intent together, then dispatches only committed work with stable event identity.</p>
+                <div class="borrow-line"><b>Borrow</b><span>Atomic local commit, stable effect IDs, idempotent consumers.</span></div>
+                <a href="https://debezium.io/documentation/reference/3.6/transformations/outbox-event-router.html">Debezium outbox documentation</a>
+              </article>
+              <article class="precedent execution">
+                <span class="precedent-label">Recovery</span>
+                <h3>Temporal</h3>
+                <p>Durable histories, classified retries, and Saga examples demonstrate how execution resumes and how completed steps can require forward compensation.</p>
+                <div class="borrow-line"><b>Borrow</b><span>Durable step history, bounded retries, explicit compensation.</span></div>
+                <a href="https://docs.temporal.io/workflow-execution">Temporal workflow documentation</a>
+              </article>
+            </div>
+            <p class="compact-note"><strong>Architecture conclusion:</strong> the kernel is closest to Kubernetes admission plus OpenTofu plan/apply. Git is the useful mental model for reviewing a candidate delta. pretalx is the strongest evidence that event staff tolerate focused review when private editing remains fast.</p>
+          </div>
+        </section>
+
+        <section id="staff-examples">
+          <div class="section-head">
+            <div class="section-no">10 / Staff reality</div>
+            <div><h2>Five ways this helps conference staff without getting in the way</h2><p>The key rule is simple: entering and correcting private truth stays immediate. Review appears when the next click tells people, changes the public program, or fans one decision into many records.</p></div>
+          </div>
+          <div class="map">
+            <div class="staff-examples">
+              <article class="staff-case">
+                <div class="case-no">1</div>
+                <div class="case-scene"><b>Fix a speaker detail while they are on the phone</b><span>An AI Engineer staff member corrects a job title, biography, headshot, or dietary note shortly before doors open.</span></div>
+                <div class="case-arrow" aria-hidden="true">&rarr;</div>
+                <div class="case-experience"><span class="case-mode immediate">Immediate save</span><b>No plan page and no generic confirmation</b><span>The kernel authorizes, validates, checks the record revision, saves, and audits in one request. Incomplete information and soft warnings do not block the correction.</span></div>
+                <div class="case-arrow" aria-hidden="true">&rarr;</div>
+                <div class="case-benefit"><b>Benefit</b><span>The staff member gets the person through quickly without sacrificing data integrity or losing who changed what.</span></div>
+              </article>
+
+              <article class="staff-case">
+                <div class="case-no">2</div>
+                <div class="case-scene"><b>Add a last-minute sponsor session</b><span>A guaranteed speaker arrives late and staff create the speaker, private session, and a TBD room before the conference starts.</span></div>
+                <div class="case-arrow" aria-hidden="true">&rarr;</div>
+                <div class="case-experience"><span class="case-mode immediate">Immediate private work</span><b>Save the truthful incomplete state</b><span>The session can remain unplaced or conflicted. Focused review appears only when staff publish it or send a calendar invitation.</span></div>
+                <div class="case-arrow" aria-hidden="true">&rarr;</div>
+                <div class="case-benefit"><b>Benefit</b><span>ChartStead does not demand fake completeness, but it prevents an unfinished private session from becoming public by accident.</span></div>
+              </article>
+
+              <article class="staff-case">
+                <div class="case-no">3</div>
+                <div class="case-scene"><b>Move a room after attendees have arrived</b><span>A room becomes unavailable. A producer moves one session in the private schedule and leaves another session temporarily conflicted.</span></div>
+                <div class="case-arrow" aria-hidden="true">&rarr;</div>
+                <div class="case-experience"><span class="case-mode review">Focused release review</span><b>The move saves immediately; publication is separate</b><span>Before release, staff see the attendee-facing delta, affected embeds, two calendar updates, and the unresolved private conflict. They can publish the valid change without sending speaker messages yet.</span></div>
+                <div class="case-arrow" aria-hidden="true">&rarr;</div>
+                <div class="case-benefit"><b>Benefit</b><span>The public program changes deliberately while the internal schedule can remain honestly messy during the emergency.</span></div>
+              </article>
+
+              <article class="staff-case">
+                <div class="case-no">4</div>
+                <div class="case-scene"><b>Retry one failed acceptance email</b><span>A batch of 120 decision messages succeeds for 119 recipients; one address temporarily rejects delivery.</span></div>
+                <div class="case-arrow" aria-hidden="true">&rarr;</div>
+                <div class="case-experience"><span class="case-mode review">Effect recovery</span><b>Retry only the failed effect</b><span>The execution receipt preserves the 119 successes, shows the provider failure, and retries the same frozen message with the same idempotency identity.</span></div>
+                <div class="case-arrow" aria-hidden="true">&rarr;</div>
+                <div class="case-benefit"><b>Benefit</b><span>Staff do not resend the whole batch, duplicate messages, or reconstruct delivery state from the provider dashboard.</span></div>
+              </article>
+
+              <article class="staff-case">
+                <div class="case-no">5</div>
+                <div class="case-scene"><b>Apply committee decisions after a long review meeting</b><span>Staff select 30 proposals to accept and expect speakers, sessions, tasks, drafts, and Airtable records to follow.</span></div>
+                <div class="case-arrow" aria-hidden="true">&rarr;</div>
+                <div class="case-experience"><span class="case-mode review">Focused decision review</span><b>Catch the expensive mistakes before the cascade</b><span>The plan exposes a duplicate speaker identity, one missing co-speaker address, two prior acceptance sends, and three accepted sessions that remain safely unplaced. Internal decisions can apply without sending anything.</span></div>
+                <div class="case-arrow" aria-hidden="true">&rarr;</div>
+                <div class="case-benefit"><b>Benefit</b><span>The system replaces manual spreadsheet and inbox checks exactly where one mistake would multiply across records and people.</span></div>
+              </article>
+            </div>
+
+            <div class="block-rule">
+              <div class="block-column allow"><h3>What must never block quick staff work</h3><ul><li>Typos, biography edits, headshot replacement, and internal notes</li><li>Recording approve, maybe, or deny during committee deliberation</li><li>Drafting or editing an unsent message</li><li>Moving sessions in the private working schedule</li><li>Saving TBD, unplaced, incomplete, or softly conflicted truth</li></ul></div>
+              <div class="block-column block"><h3>What can legitimately stop a consequential apply</h3><ul><li>The staff member lacks permission</li><li>A relevant record changed after review</li><li>Identity ambiguity could create duplicate people or sessions</li><li>An external effect cannot be previewed safely</li><li>A hard invariant would corrupt durable state</li></ul></div>
+            </div>
+          </div>
+        </section>
+
+        <footer>ChartStead safety-layer decision explainer &middot; Prepared August 10, 2026 &middot; No product decision is recorded by this file.</footer>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const scenarios = {
+      decisions: {
+        kicker: "Action plan 01",
+        title: "Accept 12 proposals",
+        description: "Internal decisions create a connected set of records while preserving separate communication and publication boundaries.",
+        count: "12",
+        countLabel: "proposal decisions",
+        effects: [
+          ["Internal delta", "12 status changes and 12 acceptance cascades", "Reversible"],
+          ["People", "19 speakers across 11 co-speaker groups", "Evidence"],
+          ["Records", "12 sessions and 36 onboarding tasks", "Transactional"],
+          ["Warning", "1 speaker has no deliverable email address", "Needs review"],
+          ["Prior contact", "2 speakers already received acceptance messages", "Needs review"],
+          ["External", "12 planned Airtable updates, not yet written", "Separate approval"]
+        ]
+      },
+      messages: {
+        kicker: "Action plan 02",
+        title: "Send speaker decisions",
+        description: "The communication planner freezes exact recipients and content. Each recipient becomes an independently tracked effect.",
+        count: "214",
+        countLabel: "unique recipients",
+        effects: [
+          ["Recipients", "214 people in 191 co-speaker groups", "Evidence"],
+          ["Exclusions", "3 missing addresses and 2 opted-out contacts", "Needs review"],
+          ["Prior contact", "7 newly included and 3 already contacted", "Evidence"],
+          ["Drafts", "191 editable message previews", "Reversible"],
+          ["Email", "One effect and one idempotency key per recipient", "Irreversible"],
+          ["Result", "Success, failure, or unknown tracked independently", "Observed truth"]
+        ]
+      },
+      publish: {
+        kicker: "Action plan 03",
+        title: "Publish schedule revision 8",
+        description: "The publication planner compares the private working schedule with the current public revision and keeps calendar delivery separate.",
+        count: "27",
+        countLabel: "public program changes",
+        effects: [
+          ["Public delta", "14 additions, 3 removals, and 10 changed sessions", "Public"],
+          ["Private truth", "4 unplaced sessions remain private", "Preserved"],
+          ["Warning", "1 published session still has a TBD room", "Needs review"],
+          ["Conflicts", "2 known conflicts remain non-blocking", "Visible"],
+          ["Calendar", "11 update requests prepared but not sent", "Separate approval"],
+          ["Integration", "Airtable is unavailable; public release can proceed", "Partial failure"]
+        ]
+      }
+    };
+
+    const buttons = Array.from(document.querySelectorAll("[data-scenario]"));
+    const effectsRoot = document.getElementById("scenario-effects");
+    const kicker = document.getElementById("scenario-kicker");
+    const title = document.getElementById("scenario-title");
+    const description = document.getElementById("scenario-description");
+    const count = document.getElementById("scenario-count");
+    const countLabel = document.getElementById("scenario-count-label");
+
+    function renderScenario(key) {
+      const scenario = scenarios[key];
+      if (!scenario) return;
+      kicker.textContent = scenario.kicker;
+      title.textContent = scenario.title;
+      description.textContent = scenario.description;
+      count.textContent = scenario.count;
+      countLabel.textContent = scenario.countLabel;
+      effectsRoot.replaceChildren(...scenario.effects.map(([label, detail, tag]) => {
+        const item = document.createElement("div");
+        item.className = "effect";
+        const tagEl = document.createElement("span");
+        tagEl.className = "effect-tag";
+        tagEl.textContent = tag;
+        const heading = document.createElement("b");
+        heading.textContent = label;
+        const body = document.createElement("span");
+        body.textContent = detail;
+        item.append(tagEl, heading, body);
+        return item;
+      }));
+      buttons.forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.scenario === key)));
+    }
+
+    buttons.forEach((button) => button.addEventListener("click", () => renderScenario(button.dataset.scenario)));
+    renderScenario("decisions");
+  </script>
+</body>
+</html>
