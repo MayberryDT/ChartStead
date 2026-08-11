@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Batch decisions and shared workspace; 06 — Program Publication Course Check; Competition 10 — Airtable mapping and authenticated HTTP foundation.
 
-**Status:** blocked
+**Status:** ready-for-agent
 
 - [ ] Decision, communication, and publication plans show exact mapped Airtable creates or updates before integration approval.
 - [ ] `Write to Airtable` remains a separate stage that can be removed, deferred, or executed after valid internal work.
@@ -22,4 +22,4 @@
 
 Blocked by Course Check 02 — Batch decisions and shared workspace, Course Check 06 — Program Publication Course Check, and Competition Ticket 10 — Airtable mapping and authenticated HTTP foundation.
 
-- 2026-08-11 — frontier-reconcile: Still blocked on: Course Check 06 (ready-for-agent).
+- 2026-08-11 — frontier-reconcile: All blockers done → ready-for-agent.

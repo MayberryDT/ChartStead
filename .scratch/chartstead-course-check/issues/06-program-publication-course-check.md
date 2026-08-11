@@ -30,4 +30,4 @@ Blocked by Course Check 02 — Batch decisions and shared workspace. Competition
   - Branch: `course-check-06-program-publication`
   - Demo: http://100.105.117.93:5186/e/pacific-open-data-summit-2026/agenda
   - Verified: typecheck, build, publication + public-program + decision/batch worker tests (34)
-- 2026-08-11 — Merged to main. Course Check 06 done.
+- 2026-08-11 — Merged to main (`17047e0`). Course Check 06 done.
