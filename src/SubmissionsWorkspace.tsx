@@ -110,9 +110,13 @@ export function SubmissionsWorkspace({
   onQueueChange: (next: ProposalQueueState) => void;
   cfpHref: string;
 }) {
+  const navigate = useNavigate();
   const [search, setSearch] = useState(queue.query);
   const [routingOpen, setRoutingOpen] = useState(false);
   const [inspectorWidth, setInspectorWidth] = useState(460);
+  const [batchIds, setBatchIds] = useState<Set<string>>(new Set());
+  const [batchOutcome, setBatchOutcome] = useState<ProgramOutcome>("accepted");
+  const [batchMessage, setBatchMessage] = useState<string | null>(null);
 
   useEffect(() => setSearch(queue.query), [queue.query]);
   useEffect(() => {
@@ -141,6 +145,28 @@ export function SubmissionsWorkspace({
   function setQueue(patch: Partial<ProposalQueueState>) {
     onQueueChange({ ...queue, ...patch });
   }
+
+  const batchMutation = useMutation({
+    mutationFn: () =>
+      createDecisionCourseCheck(event.id, {
+        items: [...batchIds].map((proposalId) => ({
+          proposalId,
+          outcome: batchOutcome,
+        })),
+        idempotencyKey: `ui-batch-${[...batchIds].sort().join("-")}-${batchOutcome}-${createClientId()}`,
+      }),
+    onSuccess: (plan) => {
+      setBatchIds(new Set());
+      setBatchMessage(null);
+      void navigate({
+        to: "/e/$eventId/course-checks/$planId",
+        params: { eventId: event.id, planId: plan.id },
+      });
+    },
+    onError: (error) => {
+      setBatchMessage(error instanceof Error ? error.message : "Unable to open batch Course Check.");
+    },
+  });
 
   function startInspectorResize(pointer: ReactPointerEvent<HTMLDivElement>) {
     pointer.preventDefault();
@@ -253,6 +279,46 @@ export function SubmissionsWorkspace({
         style={{ "--inspector-width": `${inspectorWidth}px` } as CSSProperties}
       >
         <div className="table-wrap">
+          {currentRole === "admin" && batchIds.size > 0 ? (
+            <div className="batch-decision-bar" role="region" aria-label="Batch final decisions">
+              <strong>{batchIds.size} selected</strong>
+              <AppSelect
+                label="Final outcome"
+                ariaLabel="Batch final outcome"
+                value={batchOutcome}
+                options={[
+                  { value: "accepted", label: "Accept" },
+                  { value: "declined", label: "Decline" },
+                ]}
+                onValueChange={(value) =>
+                  setBatchOutcome(value === "declined" ? "declined" : "accepted")
+                }
+              />
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={batchMutation.isPending}
+                onClick={() => {
+                  setBatchMessage(null);
+                  batchMutation.mutate();
+                }}
+              >
+                Open batch Course Check
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setBatchIds(new Set())}
+              >
+                Clear
+              </button>
+              {batchMessage ? (
+                <span className="form-message" data-tone="error">
+                  {batchMessage}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
           {query.isPending ? (
             <p className="empty-state">Loading submissions…</p>
           ) : query.isError ? (
@@ -276,6 +342,7 @@ export function SubmissionsWorkspace({
             <table className="grid" aria-label="Submissions">
               <thead>
                 <tr>
+                  {currentRole === "admin" ? <th scope="col">Batch</th> : null}
                   <th scope="col"> </th>
                   <th scope="col">Talk</th>
                   <th scope="col">Track</th>
@@ -292,6 +359,24 @@ export function SubmissionsWorkspace({
                       data-id={proposal.id}
                       aria-selected={selected?.id === proposal.id}
                     >
+                      {currentRole === "admin" ? (
+                        <td>
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${proposal.id} for batch decision`}
+                            checked={batchIds.has(proposal.id)}
+                            disabled={Boolean(proposal.programOutcome)}
+                            onChange={() => {
+                              setBatchIds((current) => {
+                                const next = new Set(current);
+                                if (next.has(proposal.id)) next.delete(proposal.id);
+                                else next.add(proposal.id);
+                                return next;
+                              });
+                            }}
+                          />
+                        </td>
+                      ) : null}
                       <td>
                         <span className="avatar" aria-hidden="true">
                           {initials(proposal.speakerName)}

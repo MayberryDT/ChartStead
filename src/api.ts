@@ -812,11 +812,12 @@ export async function sendOnboardingReminder(
 export async function createDecisionCourseCheck(
   eventId: string,
   input: {
-    proposalId: string;
-    outcome: ProgramOutcome;
+    proposalId?: string;
+    outcome?: ProgramOutcome;
+    items?: Array<{ proposalId: string; outcome: ProgramOutcome }>;
     idempotencyKey: string;
   },
-): Promise<CourseCheckPlan> {
+): Promise<CourseCheckPlan & { linkedPlans?: CourseCheckPlan[] }> {
   const response = await fetch(`/api/events/${eventId}/course-checks/decisions`, {
     method: "POST",
     headers: {
@@ -825,7 +826,9 @@ export async function createDecisionCourseCheck(
     },
     body: JSON.stringify(input),
   });
-  const body = await readJson<CourseCheckPlan | { error: string }>(response);
+  const body = await readJson<
+    (CourseCheckPlan & { linkedPlans?: CourseCheckPlan[] }) | { error: string }
+  >(response);
   if (!response.ok || !("id" in body)) {
     throw new ApiError(
       "error" in body ? body.error : "Unable to create Decision Course Check",
@@ -834,6 +837,23 @@ export async function createDecisionCourseCheck(
     );
   }
   return body;
+}
+
+export async function fetchCourseCheckPlans(
+  eventId: string,
+): Promise<CourseCheckPlan[]> {
+  const response = await fetch(`/api/events/${eventId}/course-checks`);
+  const body = await readJson<{ plans: CourseCheckPlan[] } | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("plans" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to list Course Checks",
+      response.status,
+      body,
+    );
+  }
+  return body.plans;
 }
 
 export async function fetchCourseCheckPlan(
@@ -852,6 +872,43 @@ export async function fetchCourseCheckPlan(
   return body;
 }
 
+export async function deferCourseCheckItems(
+  eventId: string,
+  planId: string,
+  input: {
+    planVersion: number;
+    digest: string;
+    itemIds: string[];
+    reason: string;
+    idempotencyKey: string;
+  },
+): Promise<CourseCheckPlan> {
+  const response = await fetch(
+    `/api/events/${eventId}/course-checks/${planId}/defer`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": input.idempotencyKey,
+      },
+      body: JSON.stringify(input),
+    },
+  );
+  const body = await readJson<
+    CourseCheckPlan | { error: string; recoveryGuidance?: string }
+  >(response);
+  if (!response.ok || !("id" in body)) {
+    const message =
+      "error" in body
+        ? body.recoveryGuidance
+          ? `${body.error} ${body.recoveryGuidance}`
+          : body.error
+        : "Unable to defer Course Check items";
+    throw new ApiError(message, response.status, body);
+  }
+  return body;
+}
+
 export async function applyCourseCheckPlan(
   eventId: string,
   planId: string,
@@ -860,6 +917,7 @@ export async function applyCourseCheckPlan(
     digest: string;
     stageId: string;
     idempotencyKey: string;
+    softWarningOverrides?: Array<{ findingId: string; reason?: string | null }>;
   },
 ): Promise<CourseCheckPlan> {
   const response = await fetch(
