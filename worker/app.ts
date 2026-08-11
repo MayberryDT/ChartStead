@@ -53,6 +53,22 @@ import {
   type SignedPortalTokenPayload,
 } from "./signed-links";
 import type { AppBindings } from "./types";
+import {
+  assignedTrackIds,
+  canAccessEvent,
+  canReviewProposal,
+  isEventAdmin,
+  scopeEventForPrincipal,
+} from "./authz";
+import { createV1App, type V1AppOptions } from "./api/v1";
+import {
+  defaultAirtableClientFactory,
+  pullAirtableForEvent,
+  resolveAirtableConnection,
+  type AirtableClientFactory,
+  type AirtableCredentialClientFactory,
+} from "./airtable/sync";
+
 
 const MAX_PROPOSAL_BODY_BYTES = 64 * 1_024;
 const EDIT_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
@@ -254,6 +270,9 @@ interface AppOptions {
   resolvePrincipal?: PrincipalResolver;
   emailSender?: EmailSender | null;
   signingSecret?: string;
+  airtableClientFactory?: AirtableClientFactory;
+  airtableCredentialClientFactory?: AirtableCredentialClientFactory;
+  resolveApiKeyPrincipal?: V1AppOptions["resolveApiKeyPrincipal"];
 }
 
 async function loadEvent(
@@ -286,72 +305,6 @@ function findSeed(eventId: string): EventRecord | undefined {
   return seedEvents.find((event) => event.id === eventId);
 }
 
-function eventRole(
-  principal: OrganizerPrincipal,
-  eventId: string,
-): "admin" | "reviewer" | null {
-  if (!principal.eventIds.includes(eventId)) return null;
-  return principal.rolesByEvent?.[eventId] ?? principal.role;
-}
-
-function assignedTrackIds(
-  principal: OrganizerPrincipal,
-  eventId: string,
-): string[] | null {
-  return eventRole(principal, eventId) === "admin"
-    ? null
-    : (principal.trackIdsByEvent?.[eventId] ?? []);
-}
-
-function canAccessEvent(
-  principal: OrganizerPrincipal | null,
-  eventId: string,
-): principal is OrganizerPrincipal {
-  return Boolean(principal && eventRole(principal, eventId));
-}
-
-function isEventAdmin(
-  principal: OrganizerPrincipal | null,
-  eventId: string,
-): principal is OrganizerPrincipal {
-  return Boolean(principal && eventRole(principal, eventId) === "admin");
-}
-
-function canReviewProposal(
-  principal: OrganizerPrincipal,
-  eventId: string,
-  proposal: Pick<OrganizerProposal, "trackId">,
-): boolean {
-  const tracks = assignedTrackIds(principal, eventId);
-  return tracks === null || tracks.includes(proposal.trackId);
-}
-
-async function scopeEventForPrincipal(
-  env: AppBindings,
-  event: EventRecord,
-  principal: OrganizerPrincipal,
-): Promise<EventRecord> {
-  const tracks = assignedTrackIds(principal, event.id);
-  if (tracks === null) return event;
-  const proposals = (await env.EVENT_STORE.getByName(event.id).listProposals({
-    trackIds: tracks,
-  })) as OrganizerProposal[];
-  const counts = new Map<string, number>();
-  let unreviewedCount = 0;
-  for (const proposal of proposals) {
-    counts.set(proposal.trackId, (counts.get(proposal.trackId) ?? 0) + 1);
-    if (proposal.status === "unreviewed") unreviewedCount += 1;
-  }
-  return {
-    ...event,
-    submissionCount: proposals.length,
-    unreviewedCount,
-    tracks: event.tracks
-      .filter((track) => tracks.includes(track.id))
-      .map((track) => ({ ...track, proposalCount: counts.get(track.id) ?? 0 })),
-  };
-}
-
 function publicBaseUrl(request: Request, env: AppBindings): string {
   return env.BETTER_AUTH_URL || new URL(request.url).origin;
 }
@@ -367,6 +320,19 @@ export function createApp(options: AppOptions = {}) {
   const app = new Hono<{ Bindings: AppBindings }>();
   const resolvePrincipal =
     options.resolvePrincipal ?? resolveProductionPrincipal;
+  const airtableFactory =
+    options.airtableClientFactory ?? defaultAirtableClientFactory;
+  const airtableCredentialFactory = options.airtableCredentialClientFactory;
+
+  app.route(
+    "/api/v1",
+    createV1App({
+      resolvePrincipal,
+      airtableClientFactory: airtableFactory,
+      airtableCredentialClientFactory: airtableCredentialFactory,
+      resolveApiKeyPrincipal: options.resolveApiKeyPrincipal,
+    }),
+  );
 
   app.get("/api/health", (c) => c.json({ status: "ok" }));
 
@@ -2658,6 +2624,118 @@ export function createApp(options: AppOptions = {}) {
       return c.json({ error: result.error }, result.status);
     }
     return c.json(result.result);
+  });
+
+  app.get("/api/events/:eventId/integrations/airtable", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const sync = await store.getAirtableSyncState();
+    return c.json({ sync });
+  });
+
+  app.put("/api/events/:eventId/integrations/airtable", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const body = (await c.req.json().catch(() => null)) as {
+      baseId?: unknown;
+      accessToken?: unknown;
+    } | null;
+    if (!body || typeof body.baseId !== "string") {
+      return c.json({ error: "baseId is required." }, 400);
+    }
+    const accessToken =
+      typeof body.accessToken === "string" ? body.accessToken : "";
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    try {
+      await store.saveAirtableConnection({
+        baseId: body.baseId,
+        accessToken,
+      });
+    } catch (error) {
+      return c.json(
+        { error: error instanceof Error ? error.message : "Unable to save connection." },
+        400,
+      );
+    }
+
+    const connection = await resolveAirtableConnection({
+      store,
+      env: c.env,
+      clientFactory: airtableFactory,
+      credentialClientFactory: airtableCredentialFactory,
+    });
+    const result = await pullAirtableForEvent({
+      store,
+      client: connection?.client ?? null,
+      baseId: connection?.baseId ?? null,
+    });
+    return c.json({
+      sync: await store.getAirtableSyncState(),
+      pull: result,
+    });
+  });
+
+  app.delete("/api/events/:eventId/integrations/airtable", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const sync = await store.clearAirtableConnection();
+    return c.json({ sync });
+  });
+
+  app.post("/api/events/:eventId/integrations/airtable/pull", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const connection = await resolveAirtableConnection({
+      store,
+      env: c.env,
+      clientFactory: airtableFactory,
+      credentialClientFactory: airtableCredentialFactory,
+    });
+    const result = await pullAirtableForEvent({
+      store,
+      client: connection?.client ?? null,
+      baseId: connection?.baseId ?? null,
+    });
+    return c.json({ pull: result, sync: await store.getAirtableSyncState() });
   });
 
   return app;

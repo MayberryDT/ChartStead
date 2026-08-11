@@ -31,15 +31,21 @@ Copy `.dev.vars.example` to `.dev.vars`. Names only — never commit values:
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
 | `RESEND_API_KEY` | Resend API key for magic-link auth and submission confirmation delivery |
 | `AUTH_EMAIL_FROM` | From address for magic-link auth and confirmation email |
+| `AIRTABLE_ACCESS_TOKEN` | Optional Airtable personal access token for pull sync |
+| `AIRTABLE_BASE_ID` | Optional Airtable base id for the ChartStead Program template |
 
 Remote production and demo Workers use the same secret names via `wrangler secret put`. Binding names (not secrets) live in `wrangler.jsonc`: `AUTH_DB`, `EVENT_STORE`, `ASSETS`, and environment-specific D1 / R2 resource ids.
+
+Airtable is optional. When unset, Settings shows **unconfigured** and the core app stays fully usable. Base template and field map: `docs/airtable-base-template.md`. Authenticated HTTP API: `docs/http-api-v1.md`.
 
 ### Deployment gates
 
 - **`BETTER_AUTH_SECRET`** must be set before public submissions work. Without it, the Worker refuses to create proposals (signed edit links cannot be issued) and returns `503`.
 - **`RESEND_API_KEY` + `AUTH_EMAIL_FROM`** are required for real confirmation email delivery. When either is missing, confirmation messages stay **queued** in the Durable Object outbox (they are not pretended sent). A `*/5 * * * *` cron flushes due outbox rows when Resend is configured.
 - **`ASSETS` R2 buckets** (`chartstead-assets` default, `chartstead-assets-demo` for demo) must exist before file uploads work.
+- **`AIRTABLE_*`** are optional. Missing values leave sync degraded (`unconfigured`); they never block submissions, review, agenda, or public program.
 - Local Worker tests inject an in-memory email sender. They prove outbox state transitions and React Email rendering; they do **not** prove live Resend provider delivery.
+- Local Worker tests inject an in-memory Airtable client for mapping, pull precedence, and degraded-state contracts. They do **not** call live Airtable.
 
 ## Local setup
 

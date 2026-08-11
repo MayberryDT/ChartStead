@@ -11,6 +11,7 @@ import { AppSelect } from "./AppSelect";
 import { authClient } from "./auth-client";
 import { AgendaWorkspace } from "./AgendaWorkspace";
 import { OnboardingWorkspace } from "./OnboardingWorkspace";
+import { SettingsWorkspace } from "./SettingsWorkspace";
 import {
   SubmissionsWorkspace,
   type ProposalQueueState,
@@ -402,7 +403,9 @@ function EventDesk({
         ? "Agenda"
         : activeNav === "Speakers"
           ? "Speaker onboarding"
-          : event.name;
+          : activeNav === "Settings"
+            ? "Settings"
+            : event.name;
   const topbarMeta =
     activeNav === "Submissions"
       ? `${event.submissionCount} total · ${event.unreviewedCount} unreviewed · track routing on`
@@ -410,7 +413,9 @@ function EventDesk({
         ? `${formatDateRange(event.startsOn, event.endsOn)} · day and room placement`
         : activeNav === "Speakers"
           ? "Readiness, missing work, and assisted reminder drafts"
-          : formatDateRange(event.startsOn, event.endsOn);
+          : activeNav === "Settings"
+            ? "Airtable sync status and API foundation"
+            : formatDateRange(event.startsOn, event.endsOn);
   const currentRole = data.principal.rolesByEvent?.[event.id] ?? data.principal.role;
 
   return (
@@ -438,7 +443,12 @@ function EventDesk({
               }
               aria-current={activeNav === item ? "page" : undefined}
               onClick={(click) => {
-                if (item === "Messages" || item === "Settings") {
+                if (item === "Messages") {
+                  click.preventDefault();
+                  setActiveNav(item);
+                  return;
+                }
+                if (item === "Settings") {
                   click.preventDefault();
                   setActiveNav(item);
                   return;
@@ -522,6 +532,8 @@ function EventDesk({
           <OverviewWorkspace event={event} />
         ) : activeNav === "Speakers" ? (
           <OnboardingWorkspace eventId={event.id} />
+        ) : activeNav === "Settings" ? (
+          <SettingsWorkspace eventId={event.id} />
         ) : (
           <div className="workspace">
             <section className="operations-panel">

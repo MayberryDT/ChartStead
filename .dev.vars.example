@@ -4,3 +4,5 @@ GOOGLE_CLIENT_ID=replace-with-google-oauth-client-id
 GOOGLE_CLIENT_SECRET=replace-with-google-oauth-client-secret
 RESEND_API_KEY=replace-with-resend-api-key
 AUTH_EMAIL_FROM=ChartStead <sign-in@example.com>
+AIRTABLE_ACCESS_TOKEN=replace-with-airtable-personal-access-token
+AIRTABLE_BASE_ID=replace-with-airtable-base-id

@@ -1,4 +1,8 @@
 import { createApp } from "./app";
+import {
+  pullAirtableForEvent,
+  resolveAirtableConnection,
+} from "./airtable/sync";
 import { createResendSender } from "./email";
 import { flushEventOutbox } from "./outbox";
 import { seedEvents } from "./seed-events";
@@ -12,17 +16,28 @@ export default {
   fetch: (request, env, ctx) => app.fetch(request, env, ctx),
   async scheduled(_controller, env) {
     const sender = createResendSender(env);
-    if (!sender) return;
-
     const now = new Date();
+
     for (const event of seedEvents) {
       const store = env.EVENT_STORE.getByName(event.id);
-      await flushEventOutbox({
-        store,
-        sender,
-        now,
-        limit: 50,
-      });
+      if (sender) {
+        await flushEventOutbox({
+          store,
+          sender,
+          now,
+          limit: 50,
+        });
+      }
+      // Interval pull when Settings or env is configured; never on interactive hot path.
+      const connection = await resolveAirtableConnection({ store, env });
+      if (connection) {
+        await pullAirtableForEvent({
+          store,
+          client: connection.client,
+          baseId: connection.baseId,
+          now,
+        });
+      }
     }
   },
 } satisfies ExportedHandler<AppBindings>;
