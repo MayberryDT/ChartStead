@@ -1,4 +1,4 @@
-/** Client id helper safe on non-secure origins (e.g. Tailscale HTTP). */
+/** Client id for idempotency keys. Prefers crypto.randomUUID when available. */
 
 export function createClientId(): string {
   const webCrypto = globalThis.crypto;
