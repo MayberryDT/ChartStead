@@ -1,4 +1,8 @@
 import type {
+  CourseCheckPlan,
+  ProgramOutcome,
+} from "../shared/course-check";
+import type {
   AssetUploadSession,
   CfpDefinitionV1,
   CfpFormResponse,
@@ -537,6 +541,85 @@ export async function fetchSubmitterEditSession(
       response.status,
       body,
     );
+  }
+  return body;
+}
+
+export async function createDecisionCourseCheck(
+  eventId: string,
+  input: {
+    proposalId: string;
+    outcome: ProgramOutcome;
+    idempotencyKey: string;
+  },
+): Promise<CourseCheckPlan> {
+  const response = await fetch(`/api/events/${eventId}/course-checks/decisions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": input.idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<CourseCheckPlan | { error: string }>(response);
+  if (!response.ok || !("id" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to create Decision Course Check",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function fetchCourseCheckPlan(
+  eventId: string,
+  planId: string,
+): Promise<CourseCheckPlan> {
+  const response = await fetch(`/api/events/${eventId}/course-checks/${planId}`);
+  const body = await readJson<CourseCheckPlan | { error: string }>(response);
+  if (!response.ok || !("id" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Course Check not found",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function applyCourseCheckPlan(
+  eventId: string,
+  planId: string,
+  input: {
+    planVersion: number;
+    digest: string;
+    stageId: string;
+    idempotencyKey: string;
+  },
+): Promise<CourseCheckPlan> {
+  const response = await fetch(
+    `/api/events/${eventId}/course-checks/${planId}/apply`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": input.idempotencyKey,
+      },
+      body: JSON.stringify(input),
+    },
+  );
+  const body = await readJson<
+    CourseCheckPlan | { error: string; recoveryGuidance?: string }
+  >(response);
+  if (!response.ok || !("id" in body)) {
+    const message =
+      "error" in body
+        ? body.recoveryGuidance
+          ? `${body.error} ${body.recoveryGuidance}`
+          : body.error
+        : "Unable to apply Course Check";
+    throw new ApiError(message, response.status, body);
   }
   return body;
 }

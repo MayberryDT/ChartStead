@@ -2062,3 +2062,119 @@ table.grid tbody tr[aria-selected="true"] td:first-child {
     grid-template-columns: 1fr;
   }
 }
+
+.final-outcome-panel {
+  margin-top: 16px;
+}
+
+.final-outcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.course-check-page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 20px 48px;
+  display: grid;
+  gap: 16px;
+}
+
+.course-check-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.course-check-header h1 {
+  margin: 4px 0 8px;
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.course-check-header .lede {
+  margin: 0;
+  color: var(--on-surface-variant);
+  max-width: 48ch;
+}
+
+.course-check-sections {
+  display: grid;
+  gap: 12px;
+}
+
+.course-check-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.course-check-meta dt {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--on-surface-muted);
+}
+
+.course-check-meta dd {
+  margin: 2px 0 0;
+  font-size: 14px;
+}
+
+.course-check-findings,
+.course-check-deltas {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.course-check-findings li,
+.course-check-deltas li {
+  padding: 10px 12px;
+  border: 1px solid var(--outline);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+}
+
+.course-check-findings li[data-severity="blocker"] {
+  border-color: var(--error);
+  background: var(--error-container);
+  color: var(--on-error-container);
+}
+
+.course-check-findings li[data-severity="warning"] {
+  border-color: var(--outline-strong);
+  background: var(--warning-container, var(--info-container));
+  color: var(--on-warning-container, var(--on-info-container));
+}
+
+.course-check-recovery {
+  color: var(--on-surface-variant);
+}
+
+.course-check-delta-type {
+  display: inline-block;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--on-surface-muted);
+  margin-bottom: 4px;
+}
+
+.course-check-actions {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+  padding-top: 8px;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}

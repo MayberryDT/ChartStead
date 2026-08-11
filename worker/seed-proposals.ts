@@ -54,6 +54,7 @@ export function createSeedProposals(event: EventRecord): OrganizerProposal[] {
         coSpeakers: [],
         supportingFile: null,
         status,
+        programOutcome: null,
         committeeNote: "",
         privateNote: "",
         reviewVersion: 0,

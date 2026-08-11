@@ -54,6 +54,9 @@ export interface EventListResponse {
 
 export type ProposalStatus = "unreviewed" | "approve" | "maybe" | "deny";
 
+/** Final program outcome — separate from reversible review disposition. */
+export type ProgramOutcome = "accepted" | "declined";
+
 /** JSON-shaped answer bag (interface form keeps DO RPC types finite). */
 export interface SubmissionAnswers {
   [key: string]:
@@ -125,6 +128,8 @@ export interface OrganizerProposal extends PublicProposal {
   coSpeakers: CoSpeakerInput[];
   supportingFile: UploadedAssetAnswer | null;
   status: ProposalStatus;
+  /** Final accepted/declined program state; null until a Decision Course Check applies. */
+  programOutcome: ProgramOutcome | null;
   committeeNote: string;
   privateNote: string;
   reviewVersion: number;
@@ -134,11 +139,11 @@ export interface OrganizerProposal extends PublicProposal {
 export interface ProposalAuditEvent {
   id: string;
   proposalId: string;
-  type: "proposal.review.changed";
+  type: "proposal.review.changed" | "course_check.decision.applied";
   actorId: string;
   actorName: string;
-  fromStatus: ProposalStatus;
-  toStatus: ProposalStatus;
+  fromStatus: ProposalStatus | string;
+  toStatus: ProposalStatus | string;
   committeeNoteChanged: boolean;
   createdAt: string;
 }

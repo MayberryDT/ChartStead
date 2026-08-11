@@ -1653,5 +1653,233 @@ export function createApp(options: AppOptions = {}) {
     },
   );
 
+  app.post("/api/events/:eventId/course-checks/decisions", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json(
+        {
+          error: "Administrator access is required to create a Decision Course Check.",
+          code: "missing_authority",
+          recoveryGuidance:
+            "Ask an event administrator to create or apply this Course Check.",
+        },
+        403,
+      );
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const body = (await c.req.json().catch(() => null)) as {
+      proposalId?: unknown;
+      outcome?: unknown;
+      idempotencyKey?: unknown;
+    } | null;
+    const headerKey = c.req.header("idempotency-key");
+    const idempotencyKey =
+      (typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim()) ||
+      (typeof headerKey === "string" && headerKey.trim()) ||
+      "";
+    if (!body || typeof body.proposalId !== "string" || !body.proposalId.trim()) {
+      return c.json({ error: "proposalId is required" }, 400);
+    }
+    if (body.outcome !== "accepted" && body.outcome !== "declined") {
+      return c.json({ error: "outcome must be accepted or declined" }, 400);
+    }
+    if (!idempotencyKey) {
+      return c.json({ error: "idempotencyKey is required" }, 400);
+    }
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const proposal = await store.getProposal(body.proposalId);
+    if (!proposal) return c.json({ error: "Proposal not found" }, 404);
+    const result = (await store.createDecisionCourseCheck({
+      proposalId: body.proposalId,
+      outcome: body.outcome,
+      idempotencyKey,
+      actor: { id: principal.id, displayName: principal.displayName },
+    })) as { plan: import("../shared/course-check").CourseCheckPlan; created: boolean };
+    return c.json(result.plan, result.created ? 201 : 200);
+  });
+
+  app.post("/api/events/:eventId/course-checks/guaranteed-speakers", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json(
+        {
+          error: "Administrator access is required to create a Course Check.",
+          code: "missing_authority",
+          recoveryGuidance:
+            "Ask an event administrator to create or apply this Course Check.",
+        },
+        403,
+      );
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const body = (await c.req.json().catch(() => null)) as {
+      sourceLabel?: unknown;
+      title?: unknown;
+      format?: unknown;
+      trackId?: unknown;
+      speakers?: unknown;
+      idempotencyKey?: unknown;
+    } | null;
+    const headerKey = c.req.header("idempotency-key");
+    const idempotencyKey =
+      (typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim()) ||
+      (typeof headerKey === "string" && headerKey.trim()) ||
+      "";
+    if (!body || typeof body.title !== "string" || !body.title.trim()) {
+      return c.json({ error: "title is required" }, 400);
+    }
+    if (typeof body.trackId !== "string" || !body.trackId.trim()) {
+      return c.json({ error: "trackId is required" }, 400);
+    }
+    if (!Array.isArray(body.speakers) || body.speakers.length === 0) {
+      return c.json({ error: "At least one speaker is required" }, 400);
+    }
+    if (!idempotencyKey) {
+      return c.json({ error: "idempotencyKey is required" }, 400);
+    }
+    const speakers: Array<{
+      name: string;
+      email: string;
+      biography?: string;
+      role?: "primary" | "co";
+    }> = body.speakers.map((speaker) => {
+      const row = speaker as {
+        name?: unknown;
+        email?: unknown;
+        biography?: unknown;
+        role?: unknown;
+      };
+      return {
+        name: typeof row.name === "string" ? row.name : "",
+        email: typeof row.email === "string" ? row.email : "",
+        biography: typeof row.biography === "string" ? row.biography : "",
+        role:
+          row.role === "primary" || row.role === "co" ? row.role : undefined,
+      };
+    });
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const result = (await store.createGuaranteedSpeakerCourseCheck({
+      sourceLabel:
+        typeof body.sourceLabel === "string" ? body.sourceLabel : "Guaranteed speaker",
+      title: body.title,
+      format: typeof body.format === "string" ? body.format : "talk",
+      trackId: body.trackId,
+      speakers,
+      idempotencyKey,
+      actor: { id: principal.id, displayName: principal.displayName },
+    })) as { plan: import("../shared/course-check").CourseCheckPlan; created: boolean };
+    return c.json(result.plan, result.created ? 201 : 200);
+  });
+
+  app.get("/api/events/:eventId/course-checks/:planId", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    const planId = c.req.param("planId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const plan = await c.env.EVENT_STORE.getByName(eventId).getCourseCheckPlan(planId);
+    if (!plan) return c.json({ error: "Course Check not found" }, 404);
+    return c.json(plan);
+  });
+
+  app.post("/api/events/:eventId/course-checks/:planId/apply", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    const planId = c.req.param("planId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json(
+        {
+          error: "Administrator access is required to apply a Course Check.",
+          code: "missing_authority",
+          recoveryGuidance:
+            "Ask an event administrator to apply this Course Check.",
+        },
+        403,
+      );
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const body = (await c.req.json().catch(() => null)) as {
+      planVersion?: unknown;
+      digest?: unknown;
+      stageId?: unknown;
+      idempotencyKey?: unknown;
+    } | null;
+    const headerKey = c.req.header("idempotency-key");
+    const idempotencyKey =
+      (typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim()) ||
+      (typeof headerKey === "string" && headerKey.trim()) ||
+      "";
+    if (
+      !body ||
+      !Number.isInteger(body.planVersion) ||
+      typeof body.digest !== "string" ||
+      typeof body.stageId !== "string" ||
+      !idempotencyKey
+    ) {
+      return c.json(
+        {
+          error:
+            "planVersion, digest, stageId, and idempotencyKey are required to apply a Course Check.",
+        },
+        400,
+      );
+    }
+    const result = (await c.env.EVENT_STORE.getByName(eventId).applyCourseCheck({
+      planId,
+      planVersion: body.planVersion as number,
+      digest: body.digest,
+      stageId: body.stageId,
+      idempotencyKey,
+      actor: { id: principal.id, displayName: principal.displayName },
+    })) as
+      | { ok: true; plan: import("../shared/course-check").CourseCheckPlan; created: boolean }
+      | {
+          ok: false;
+          status: 400 | 409;
+          code: string;
+          error: string;
+          recoveryGuidance: string;
+          findings?: import("../shared/course-check").CourseCheckFinding[];
+          changedInputs?: string[];
+        };
+    if (!result.ok) {
+      return c.json(
+        {
+          error: result.error,
+          code: result.code,
+          recoveryGuidance: result.recoveryGuidance,
+          findings: result.findings,
+          changedInputs: result.changedInputs,
+        },
+        result.status,
+      );
+    }
+    return c.json(result.plan);
+  });
+
   return app;
 }

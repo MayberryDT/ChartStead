@@ -7,6 +7,9 @@ import type {
   ReactNode,
 } from "react";
 
+import { useNavigate } from "@tanstack/react-router";
+
+import type { ProgramOutcome } from "../shared/course-check";
 import type {
   EventRecord,
   OrganizerPrincipal,
@@ -17,6 +20,7 @@ import type {
   SubmissionAnswers,
 } from "../shared/events";
 import {
+  createDecisionCourseCheck,
   fetchOrganizerProposal,
   fetchProposals,
   fetchReviewerAssignments,
@@ -364,6 +368,7 @@ export function SubmissionsWorkspace({
               eventId={event.id}
               proposal={selected}
               auditEvents={auditEvents}
+              isAdmin={currentRole === "admin"}
               onClose={onCloseProposal}
             />
           ) : (
@@ -658,14 +663,17 @@ function ProposalInspector({
   eventId,
   proposal,
   auditEvents,
+  isAdmin,
   onClose,
 }: {
   eventId: string;
   proposal: OrganizerProposal;
   auditEvents: ProposalAuditEvent[];
+  isAdmin: boolean;
   onClose?: () => void;
 }) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const closeRef = useRef<HTMLButtonElement>(null);
   const [committeeNote, setCommitteeNote] = useState(proposal.committeeNote);
   const [message, setMessage] = useState<string | null>(null);
@@ -719,6 +727,21 @@ function ProposalInspector({
     setMessage(null);
     mutation.mutate({ status });
   }
+
+  const outcomeMutation = useMutation({
+    mutationFn: (outcome: ProgramOutcome) =>
+      createDecisionCourseCheck(eventId, {
+        proposalId: proposal.id,
+        outcome,
+        idempotencyKey: `ui-decision-${proposal.id}-${outcome}-${crypto.randomUUID()}`,
+      }),
+    onSuccess: (plan) => {
+      void navigate({
+        to: "/e/$eventId/course-checks/$planId",
+        params: { eventId, planId: plan.id },
+      });
+    },
+  });
 
   return (
     <div
@@ -866,15 +889,30 @@ function ProposalInspector({
           ) : (
             <details>
               <summary>
-                <strong>{auditEvents[0]!.actorName}</strong> set{" "}
-                {statusLabel(auditEvents[0]!.toStatus)}
+                <strong>{auditEvents[0]!.actorName}</strong>{" "}
+                {auditEvents[0]!.type === "course_check.decision.applied"
+                  ? `applied final outcome ${String(auditEvents[0]!.toStatus)}`
+                  : `set ${statusLabel(auditEvents[0]!.toStatus as ProposalStatus)}`}
                 <span>{formatSubmittedAt(auditEvents[0]!.createdAt)}</span>
               </summary>
               <ol>
                 {auditEvents.map((audit) => (
                   <li key={audit.id}>
-                    <strong>{audit.actorName}</strong> set {statusLabel(audit.toStatus)}
-                    {audit.committeeNoteChanged ? " and updated the committee note" : ""}.
+                    {audit.type === "course_check.decision.applied" ? (
+                      <>
+                        <strong>{audit.actorName}</strong> applied final outcome{" "}
+                        {String(audit.toStatus)}.
+                      </>
+                    ) : (
+                      <>
+                        <strong>{audit.actorName}</strong> set{" "}
+                        {statusLabel(audit.toStatus as ProposalStatus)}
+                        {audit.committeeNoteChanged
+                          ? " and updated the committee note"
+                          : ""}
+                        .
+                      </>
+                    )}
                     <time dateTime={audit.createdAt}>{formatSubmittedAt(audit.createdAt)}</time>
                   </li>
                 ))}
@@ -883,6 +921,44 @@ function ProposalInspector({
           )}
         </section>
         <p className="internal-only-note">Internal only. No speaker email is sent when this decision changes.</p>
+        {isAdmin ? (
+          <section className="panel final-outcome-panel" aria-label="Final program outcome">
+            <h3>Final program outcome</h3>
+            <p className="internal-only-note">
+              Accepted or declined opens Course Check. This is separate from Approve / Maybe /
+              Deny above and does not send speaker email.
+            </p>
+            {proposal.programOutcome ? (
+              <p role="status">
+                Final outcome: <strong>{proposal.programOutcome}</strong>
+              </p>
+            ) : (
+              <div className="final-outcome-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={outcomeMutation.isPending}
+                  onClick={() => outcomeMutation.mutate("accepted")}
+                >
+                  Accept via Course Check
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={outcomeMutation.isPending}
+                  onClick={() => outcomeMutation.mutate("declined")}
+                >
+                  Decline via Course Check
+                </button>
+              </div>
+            )}
+            {outcomeMutation.isError ? (
+              <p className="form-message" data-tone="error" role="alert">
+                {outcomeMutation.error.message}
+              </p>
+            ) : null}
+          </section>
+        ) : null}
         {mutation.isError ? (
           <p className="form-message" data-tone="error" role="alert">{mutation.error.message}</p>
         ) : message ? (

@@ -6,6 +6,15 @@ import {
   type UploadedAssetAnswer,
 } from "../shared/cfp-definition";
 import type {
+  CourseCheckActionType,
+  CourseCheckActor,
+  CourseCheckPlan,
+  CourseCheckPlanBody,
+  CourseCheckPlanState,
+  CourseCheckReceipt,
+  ProgramOutcome,
+} from "../shared/course-check";
+import type {
   CoSpeakerInput,
   EventRecord,
   OrganizerCfpForm,
@@ -20,6 +29,13 @@ import type {
   SubmissionAnswers,
 } from "../shared/events";
 import type { AssetClaimInput } from "./cfp-submissions";
+import {
+  hasBlockerFindings,
+  planDecisionCascade,
+  planGuaranteedSpeaker,
+  type ExistingSpeaker,
+} from "./course-check/decision-planner";
+import { digestPayload } from "./course-check/digest";
 import { createStableProposalId } from "./proposals";
 import type { AppBindings } from "./types";
 
@@ -65,11 +81,66 @@ interface ProposalRow {
   co_speakers_json: string;
   supporting_file_json: string;
   status: string;
+  program_outcome: string;
   committee_note: string;
   private_note: string;
   review_version: number;
   submitted_at: string;
   confirmation_email_status: string;
+}
+
+interface CourseCheckPlanRow {
+  [key: string]: string | number | null;
+  id: string;
+  action_type: string;
+  state: string;
+  version: number;
+  digest: string;
+  body_json: string;
+  created_at: string;
+  updated_at: string;
+  created_by_id: string;
+  created_by_name: string;
+  approval_json: string | null;
+  receipt_id: string | null;
+}
+
+interface SpeakerRow {
+  [key: string]: string;
+  id: string;
+  name: string;
+  email: string;
+  biography: string;
+  created_at: string;
+}
+
+export interface AcceptanceCascadeSnapshot {
+  speakers: Array<{ id: string; name: string; email: string; biography: string }>;
+  participations: Array<{
+    id: string;
+    speakerId: string;
+    proposalId: string | null;
+    titleSnapshot: string;
+    organizationSnapshot: string;
+    role: string;
+  }>;
+  sessions: Array<{
+    id: string;
+    proposalId: string | null;
+    title: string;
+    format: string;
+    trackId: string;
+  }>;
+  tasks: Array<{ id: string; title: string; kind: string; speakerId: string }>;
+  portalAccessIntents: Array<{
+    id: string;
+    speakerId: string;
+    email: string;
+    intent: string;
+  }>;
+  messagesQueued: number;
+  calendarEffects: number;
+  publicRevisions: number;
 }
 
 interface CfpFormRow {
@@ -233,6 +304,10 @@ function mapProposal(row: ProposalRow, eventId: string): OrganizerProposal {
     coSpeakers,
     supportingFile,
     status: row.status as ProposalStatus,
+    programOutcome:
+      row.program_outcome === "accepted" || row.program_outcome === "declined"
+        ? row.program_outcome
+        : null,
     committeeNote: row.committee_note,
     privateNote: row.private_note,
     reviewVersion: Number(row.review_version ?? 0),
@@ -247,11 +322,44 @@ function mapProposal(row: ProposalRow, eventId: string): OrganizerProposal {
   };
 }
 
+function mapCourseCheckPlan(row: CourseCheckPlanRow, eventId: string): CourseCheckPlan {
+  let receipt: CourseCheckReceipt | null = null;
+  let approval: CourseCheckPlan["approval"] = null;
+  if (row.approval_json) {
+    try {
+      approval = JSON.parse(row.approval_json) as CourseCheckPlan["approval"];
+    } catch {
+      approval = null;
+    }
+  }
+  return {
+    id: row.id,
+    eventId,
+    actionType: row.action_type as CourseCheckActionType,
+    state: row.state as CourseCheckPlanState,
+    version: Number(row.version),
+    digest: row.digest,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    createdBy: {
+      id: row.created_by_id,
+      displayName: row.created_by_name,
+    },
+    body: JSON.parse(row.body_json) as CourseCheckPlanBody,
+    approval,
+    receipt,
+  };
+}
+
 function mapAuditEvent(row: AuditEventRow): ProposalAuditEvent {
+  const type =
+    row.type === "course_check.decision.applied"
+      ? "course_check.decision.applied"
+      : "proposal.review.changed";
   return {
     id: row.id,
     proposalId: row.proposal_id,
-    type: "proposal.review.changed",
+    type,
     actorId: row.actor_id,
     actorName: row.actor_name,
     fromStatus: row.from_status as ProposalStatus,
@@ -445,6 +553,112 @@ export class EventStore extends DurableObject<AppBindings> {
         )
       `);
 
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS speakers (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          email TEXT NOT NULL UNIQUE,
+          biography TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS event_participations (
+          id TEXT PRIMARY KEY,
+          speaker_id TEXT NOT NULL,
+          proposal_id TEXT,
+          course_check_plan_id TEXT NOT NULL,
+          title_snapshot TEXT NOT NULL,
+          organization_snapshot TEXT NOT NULL DEFAULT '',
+          role TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS sessions (
+          id TEXT PRIMARY KEY,
+          proposal_id TEXT,
+          course_check_plan_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          format TEXT NOT NULL DEFAULT '',
+          track_id TEXT NOT NULL DEFAULT '',
+          room_id TEXT,
+          starts_at TEXT,
+          ends_at TEXT,
+          created_at TEXT NOT NULL
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS onboarding_tasks (
+          id TEXT PRIMARY KEY,
+          speaker_id TEXT NOT NULL,
+          session_id TEXT,
+          proposal_id TEXT,
+          course_check_plan_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'open',
+          created_at TEXT NOT NULL
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS portal_access_intents (
+          id TEXT PRIMARY KEY,
+          speaker_id TEXT NOT NULL,
+          email TEXT NOT NULL,
+          intent TEXT NOT NULL,
+          proposal_id TEXT,
+          course_check_plan_id TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS course_check_plans (
+          id TEXT PRIMARY KEY,
+          action_type TEXT NOT NULL,
+          state TEXT NOT NULL,
+          version INTEGER NOT NULL,
+          digest TEXT NOT NULL,
+          body_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          created_by_id TEXT NOT NULL,
+          created_by_name TEXT NOT NULL,
+          approval_json TEXT,
+          receipt_id TEXT
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS course_check_idempotency (
+          command TEXT NOT NULL,
+          idempotency_key TEXT NOT NULL,
+          plan_id TEXT NOT NULL,
+          receipt_id TEXT,
+          response_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (command, idempotency_key)
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS course_check_receipts (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT NOT NULL,
+          plan_version INTEGER NOT NULL,
+          digest TEXT NOT NULL,
+          stage_id TEXT NOT NULL,
+          applied_at TEXT NOT NULL,
+          actor_id TEXT NOT NULL,
+          actor_name TEXT NOT NULL
+        )
+      `);
+
       this.ensureColumn("events", "submission_count", "INTEGER NOT NULL DEFAULT 0");
       this.ensureColumn("events", "unreviewed_count", "INTEGER NOT NULL DEFAULT 0");
       this.ensureColumn(
@@ -489,6 +703,7 @@ export class EventStore extends DurableObject<AppBindings> {
         "INTEGER NOT NULL DEFAULT 0",
       );
       this.ensureColumn("outbox_messages", "next_attempt_at", "TEXT");
+      this.ensureColumn("proposals", "program_outcome", "TEXT NOT NULL DEFAULT ''");
     });
   }
 
@@ -1407,10 +1622,10 @@ export class EventStore extends DurableObject<AppBindings> {
     const row = this.ctx.storage.sql
       .exec<ProposalRow>(
         `SELECT id, form_id, form_definition_version, answers_json, title, abstract,
-                track_id, track_name, speaker_name, speaker_email,
-                biography, supporting_link, session_format, workshop_duration,
-                co_speakers_json, supporting_file_json, status, committee_note,
-                private_note, review_version, submitted_at, confirmation_email_status
+                track_id, track_name, speaker_name, speaker_email, biography,
+                supporting_link, session_format, workshop_duration, co_speakers_json,
+                supporting_file_json, status, program_outcome, committee_note, private_note,
+                review_version, submitted_at, confirmation_email_status
          FROM proposals
          WHERE id = ?`,
         proposalId,
@@ -1432,8 +1647,9 @@ export class EventStore extends DurableObject<AppBindings> {
         `SELECT id, form_id, form_definition_version, answers_json, title, abstract,
                 track_id, track_name, speaker_name, speaker_email,
                 biography, supporting_link, session_format, workshop_duration,
-                co_speakers_json, supporting_file_json, status, committee_note,
-                 private_note, review_version, submitted_at, confirmation_email_status
+                co_speakers_json, supporting_file_json, status, program_outcome,
+                committee_note, private_note, review_version, submitted_at,
+                confirmation_email_status
          FROM proposals
          ORDER BY submitted_at DESC, id DESC`,
       )
@@ -2033,6 +2249,789 @@ export class EventStore extends DurableObject<AppBindings> {
       }
     }
     return null;
+  }
+
+  private eventIdOrThrow(): string {
+    const event = this.getEvent();
+    if (!event) throw new Error("Event is not initialized.");
+    return event.id;
+  }
+
+  private listExistingSpeakersByEmail(): Map<string, ExistingSpeaker[]> {
+    const rows = this.ctx.storage.sql
+      .exec<SpeakerRow>(`SELECT id, name, email, biography, created_at FROM speakers`)
+      .toArray();
+    const map = new Map<string, ExistingSpeaker[]>();
+    for (const row of rows) {
+      const email = row.email.toLowerCase();
+      const list = map.get(email) ?? [];
+      list.push({
+        id: row.id,
+        name: row.name,
+        email: row.email,
+        biography: row.biography,
+      });
+      map.set(email, list);
+    }
+    return map;
+  }
+
+  private loadCourseCheckPlanRow(planId: string): CourseCheckPlanRow | null {
+    return (
+      this.ctx.storage.sql
+        .exec<CourseCheckPlanRow>(
+          `SELECT id, action_type, state, version, digest, body_json, created_at,
+                  updated_at, created_by_id, created_by_name, approval_json, receipt_id
+           FROM course_check_plans
+           WHERE id = ?`,
+          planId,
+        )
+        .toArray()[0] ?? null
+    );
+  }
+
+  private attachReceipt(plan: CourseCheckPlan, receiptId: string | null): CourseCheckPlan {
+    if (!receiptId) return plan;
+    const row = this.ctx.storage.sql
+      .exec<{
+        id: string;
+        plan_id: string;
+        plan_version: number;
+        digest: string;
+        stage_id: string;
+        applied_at: string;
+        actor_id: string;
+        actor_name: string;
+      }>(
+        `SELECT id, plan_id, plan_version, digest, stage_id, applied_at, actor_id, actor_name
+         FROM course_check_receipts
+         WHERE id = ?`,
+        receiptId,
+      )
+      .toArray()[0];
+    if (!row) return plan;
+    return {
+      ...plan,
+      receipt: {
+        id: row.id,
+        planId: row.plan_id,
+        planVersion: Number(row.plan_version),
+        digest: row.digest,
+        stageId: row.stage_id,
+        appliedAt: row.applied_at,
+        actor: { id: row.actor_id, displayName: row.actor_name },
+      },
+    };
+  }
+
+  getCourseCheckPlan(planId: string): CourseCheckPlan | null {
+    const eventId = this.eventIdOrThrow();
+    const row = this.loadCourseCheckPlanRow(planId);
+    if (!row) return null;
+    return this.attachReceipt(mapCourseCheckPlan(row, eventId), row.receipt_id);
+  }
+
+  listCourseCheckPlans(): CourseCheckPlan[] {
+    const eventId = this.eventIdOrThrow();
+    return this.ctx.storage.sql
+      .exec<CourseCheckPlanRow>(
+        `SELECT id, action_type, state, version, digest, body_json, created_at,
+                updated_at, created_by_id, created_by_name, approval_json, receipt_id
+         FROM course_check_plans
+         ORDER BY created_at DESC, id DESC`,
+      )
+      .toArray()
+      .map((row) => this.attachReceipt(mapCourseCheckPlan(row, eventId), row.receipt_id));
+  }
+
+  private readIdempotency(
+    command: string,
+    key: string,
+  ): { planId: string; receiptId: string | null; responseJson: string } | null {
+    const row = this.ctx.storage.sql
+      .exec<{
+        plan_id: string;
+        receipt_id: string | null;
+        response_json: string;
+      }>(
+        `SELECT plan_id, receipt_id, response_json
+         FROM course_check_idempotency
+         WHERE command = ? AND idempotency_key = ?`,
+        command,
+        key,
+      )
+      .toArray()[0];
+    if (!row) return null;
+    return {
+      planId: row.plan_id,
+      receiptId: row.receipt_id,
+      responseJson: row.response_json,
+    };
+  }
+
+  private writeIdempotency(input: {
+    command: string;
+    key: string;
+    planId: string;
+    receiptId?: string | null;
+    response: CourseCheckPlan;
+  }): void {
+    this.ctx.storage.sql.exec(
+      `INSERT INTO course_check_idempotency
+        (command, idempotency_key, plan_id, receipt_id, response_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(command, idempotency_key) DO NOTHING`,
+      input.command,
+      input.key,
+      input.planId,
+      input.receiptId ?? null,
+      JSON.stringify(input.response),
+      new Date().toISOString(),
+    );
+  }
+
+  async createDecisionCourseCheck(input: {
+    proposalId: string;
+    outcome: ProgramOutcome;
+    idempotencyKey: string;
+    actor: CourseCheckActor;
+  }): Promise<{ plan: CourseCheckPlan; created: boolean }> {
+    const existing = this.readIdempotency("create-decision", input.idempotencyKey);
+    if (existing) {
+      const plan = this.getCourseCheckPlan(existing.planId);
+      if (!plan) throw new Error("Idempotent decision plan is missing.");
+      return { plan, created: false };
+    }
+
+    const proposal = this.getProposal(input.proposalId);
+    if (!proposal) throw new Error(`Proposal ${input.proposalId} not found.`);
+
+    const planId = crypto.randomUUID();
+    const body = planDecisionCascade({
+      proposal,
+      outcome: input.outcome,
+      existingSpeakersByEmail: this.listExistingSpeakersByEmail(),
+      planId,
+    });
+    const digest = await digestPayload({
+      actionType: body.actionType,
+      proposalId: body.proposalId,
+      outcome: body.outcome,
+      proposalRevision: body.proposalRevision,
+      speakers: body.speakers,
+      participations: body.participations,
+      session: body.session,
+      tasks: body.tasks,
+      portalAccess: body.portalAccess,
+      deltas: body.deltas,
+      findings: body.findings,
+      stages: body.stages,
+    });
+    const now = new Date().toISOString();
+    const state: CourseCheckPlanState = hasBlockerFindings(body.findings)
+      ? "Needs attention"
+      : "Ready";
+    this.ctx.storage.sql.exec(
+      `INSERT INTO course_check_plans
+        (id, action_type, state, version, digest, body_json, created_at, updated_at,
+         created_by_id, created_by_name, approval_json, receipt_id)
+       VALUES (?, 'decision', ?, 1, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+      planId,
+      state,
+      digest,
+      JSON.stringify(body),
+      now,
+      now,
+      input.actor.id,
+      input.actor.displayName,
+    );
+    const plan = this.getCourseCheckPlan(planId);
+    if (!plan) throw new Error("Decision Course Check was not persisted.");
+    this.writeIdempotency({
+      command: "create-decision",
+      key: input.idempotencyKey,
+      planId,
+      response: plan,
+    });
+    return { plan, created: true };
+  }
+
+  async createGuaranteedSpeakerCourseCheck(input: {
+    sourceLabel: string;
+    title: string;
+    format: string;
+    trackId: string;
+    speakers: Array<{
+      name: string;
+      email: string;
+      biography?: string;
+      role?: "primary" | "co";
+    }>;
+    idempotencyKey: string;
+    actor: CourseCheckActor;
+  }): Promise<{ plan: CourseCheckPlan; created: boolean }> {
+    const existing = this.readIdempotency("create-guaranteed", input.idempotencyKey);
+    if (existing) {
+      const plan = this.getCourseCheckPlan(existing.planId);
+      if (!plan) throw new Error("Idempotent guaranteed plan is missing.");
+      return { plan, created: false };
+    }
+
+    const planId = crypto.randomUUID();
+    const body = planGuaranteedSpeaker({
+      planId,
+      sourceLabel: input.sourceLabel,
+      title: input.title,
+      format: input.format,
+      trackId: input.trackId,
+      speakers: input.speakers,
+      existingSpeakersByEmail: this.listExistingSpeakersByEmail(),
+    });
+    const digest = await digestPayload(body);
+    const now = new Date().toISOString();
+    const state: CourseCheckPlanState = hasBlockerFindings(body.findings)
+      ? "Needs attention"
+      : "Ready";
+    this.ctx.storage.sql.exec(
+      `INSERT INTO course_check_plans
+        (id, action_type, state, version, digest, body_json, created_at, updated_at,
+         created_by_id, created_by_name, approval_json, receipt_id)
+       VALUES (?, 'guaranteed_speaker', ?, 1, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+      planId,
+      state,
+      digest,
+      JSON.stringify(body),
+      now,
+      now,
+      input.actor.id,
+      input.actor.displayName,
+    );
+    const plan = this.getCourseCheckPlan(planId);
+    if (!plan) throw new Error("Guaranteed-speaker Course Check was not persisted.");
+    this.writeIdempotency({
+      command: "create-guaranteed",
+      key: input.idempotencyKey,
+      planId,
+      response: plan,
+    });
+    return { plan, created: true };
+  }
+
+  async applyCourseCheck(input: {
+    planId: string;
+    planVersion: number;
+    digest: string;
+    stageId: string;
+    idempotencyKey: string;
+    actor: CourseCheckActor;
+  }): Promise<
+    | { ok: true; plan: CourseCheckPlan; created: boolean }
+    | {
+        ok: false;
+        status: 409 | 400;
+        code: string;
+        error: string;
+        recoveryGuidance: string;
+        findings?: CourseCheckPlanBody["findings"];
+        changedInputs?: string[];
+      }
+  > {
+    const existing = this.readIdempotency("apply", input.idempotencyKey);
+    if (existing) {
+      const plan = this.getCourseCheckPlan(existing.planId);
+      if (!plan) throw new Error("Idempotent apply receipt plan is missing.");
+      return { ok: true, plan, created: false };
+    }
+
+    const row = this.loadCourseCheckPlanRow(input.planId);
+    if (!row) {
+      return {
+        ok: false,
+        status: 400,
+        code: "plan_not_found",
+        error: "Course Check plan not found.",
+        recoveryGuidance: "Create a new Course Check from the current records.",
+      };
+    }
+    const plan = this.attachReceipt(
+      mapCourseCheckPlan(row, this.eventIdOrThrow()),
+      row.receipt_id,
+    );
+    if (plan.receipt) {
+      return { ok: true, plan, created: false };
+    }
+    if (plan.version !== input.planVersion || plan.digest !== input.digest) {
+      return {
+        ok: false,
+        status: 409,
+        code: "plan_version_mismatch",
+        error: "This Course Check changed since you loaded it.",
+        recoveryGuidance: "Reload the Course Check and review the latest plan version.",
+      };
+    }
+    if (input.stageId !== "apply-decision") {
+      return {
+        ok: false,
+        status: 400,
+        code: "unknown_stage",
+        error: "Unknown Course Check stage.",
+        recoveryGuidance: "Use the Apply decision stage for this plan.",
+      };
+    }
+
+    if (plan.body.actionType === "decision") {
+      const proposal = this.getProposal(plan.body.proposalId);
+      if (!proposal) {
+        return {
+          ok: false,
+          status: 409,
+          code: "relevant_input_changed",
+          error: "The proposal for this plan no longer exists.",
+          recoveryGuidance: "Create a new Decision Course Check from current proposals.",
+          changedInputs: ["proposal"],
+        };
+      }
+      if (proposal.reviewVersion !== plan.body.proposalRevision) {
+        return {
+          ok: false,
+          status: 409,
+          code: "relevant_input_changed",
+          error: "Relevant proposal inputs changed after this plan was created.",
+          recoveryGuidance:
+            "Create a new Decision Course Check from the current proposal revision.",
+          changedInputs: ["proposal.reviewVersion"],
+        };
+      }
+    }
+
+    if (hasBlockerFindings(plan.body.findings)) {
+      const blocker = plan.body.findings.find((finding) => finding.severity === "blocker");
+      return {
+        ok: false,
+        status: 409,
+        code: blocker?.code ?? "blocked",
+        error: blocker?.message ?? "This Course Check has blocking findings.",
+        recoveryGuidance:
+          blocker?.recoveryGuidance ??
+          "Resolve the blocking findings, then create a new Course Check.",
+        findings: plan.body.findings,
+      };
+    }
+
+    const receiptId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const approval = {
+      stageId: input.stageId,
+      planVersion: plan.version,
+      digest: plan.digest,
+      actor: input.actor,
+      approvedAt: now,
+    };
+
+    let appliedPlan: CourseCheckPlan | null = null;
+    try {
+      this.ctx.storage.transactionSync(() => {
+        this.applyCascadeRecords(plan, now);
+        this.ctx.storage.sql.exec(
+          `INSERT INTO course_check_receipts
+            (id, plan_id, plan_version, digest, stage_id, applied_at, actor_id, actor_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          receiptId,
+          plan.id,
+          plan.version,
+          plan.digest,
+          input.stageId,
+          now,
+          input.actor.id,
+          input.actor.displayName,
+        );
+        this.ctx.storage.sql.exec(
+          `UPDATE course_check_plans
+           SET state = 'Complete',
+               updated_at = ?,
+               approval_json = ?,
+               receipt_id = ?
+           WHERE id = ?`,
+          now,
+          JSON.stringify(approval),
+          receiptId,
+          plan.id,
+        );
+        const proposalId =
+          plan.body.actionType === "decision" ? plan.body.proposalId : "";
+        const outcomeLabel =
+          plan.body.actionType === "decision"
+            ? plan.body.outcome
+            : "guaranteed_speaker";
+        this.ctx.storage.sql.exec(
+          `INSERT INTO audit_events
+            (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+             committee_note_changed, created_at)
+           VALUES (?, ?, 'course_check.decision.applied', ?, ?, ?, ?, 0, ?)`,
+          crypto.randomUUID(),
+          proposalId || plan.id,
+          input.actor.id,
+          input.actor.displayName,
+          plan.state,
+          outcomeLabel,
+          now,
+        );
+        appliedPlan = this.attachReceipt(
+          mapCourseCheckPlan(
+            {
+              ...row,
+              state: "Complete",
+              updated_at: now,
+              approval_json: JSON.stringify(approval),
+              receipt_id: receiptId,
+            },
+            this.eventIdOrThrow(),
+          ),
+          receiptId,
+        );
+        this.writeIdempotency({
+          command: "apply",
+          key: input.idempotencyKey,
+          planId: plan.id,
+          receiptId,
+          response: appliedPlan,
+        });
+      });
+    } catch (error) {
+      return {
+        ok: false,
+        status: 409,
+        code: "durable_integrity",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Applying this Course Check violated durable integrity.",
+        recoveryGuidance:
+          "Resolve the conflicting records, then create a new Course Check from current state.",
+      };
+    }
+
+    const applied = appliedPlan ?? this.getCourseCheckPlan(plan.id);
+    if (!applied) throw new Error("Applied Course Check is missing.");
+    return { ok: true, plan: applied, created: true };
+  }
+
+  private applyCascadeRecords(plan: CourseCheckPlan, now: string): void {
+    const body = plan.body;
+    const speakerIdByPlanned = new Map<string, string>();
+
+    if (body.actionType === "decision") {
+      const current = this.ctx.storage.sql
+        .exec<{ review_version: number; program_outcome: string }>(
+          `SELECT review_version, program_outcome FROM proposals WHERE id = ?`,
+          body.proposalId,
+        )
+        .toArray()[0];
+      if (!current) {
+        throw new Error(`Proposal ${body.proposalId} disappeared during apply.`);
+      }
+      if (Number(current.review_version) !== body.proposalRevision) {
+        throw new Error("Proposal revision changed during apply.");
+      }
+      if (current.program_outcome) {
+        throw new Error(
+          `Proposal already has final outcome "${current.program_outcome}".`,
+        );
+      }
+      this.ctx.storage.sql.exec(
+        `UPDATE proposals SET program_outcome = ? WHERE id = ?`,
+        body.outcome,
+        body.proposalId,
+      );
+      if (body.outcome === "declined") {
+        return;
+      }
+    }
+
+    for (const speaker of body.speakers) {
+      let speakerId = speaker.existingSpeakerId;
+      if (speaker.match === "reuse" && speakerId) {
+        const existing = this.ctx.storage.sql
+          .exec<{ id: string }>(`SELECT id FROM speakers WHERE id = ?`, speakerId)
+          .toArray()[0];
+        if (!existing) {
+          throw new Error(`Expected speaker ${speakerId} was not found.`);
+        }
+      } else {
+        speakerId = speaker.plannedId;
+        this.ctx.storage.sql.exec(
+          `INSERT INTO speakers (id, name, email, biography, created_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          speakerId,
+          speaker.name,
+          speaker.email,
+          speaker.biography,
+          now,
+        );
+      }
+      speakerIdByPlanned.set(speaker.plannedId, speakerId!);
+    }
+
+    for (const participation of body.participations) {
+      const speakerId = speakerIdByPlanned.get(participation.speakerPlannedId);
+      if (!speakerId) {
+        throw new Error("Participation is missing its speaker mapping.");
+      }
+      this.ctx.storage.sql.exec(
+        `INSERT INTO event_participations
+          (id, speaker_id, proposal_id, course_check_plan_id, title_snapshot,
+           organization_snapshot, role, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        participation.plannedId,
+        speakerId,
+        body.actionType === "decision" ? body.proposalId : null,
+        plan.id,
+        participation.titleSnapshot,
+        participation.organizationSnapshot,
+        participation.role,
+        now,
+      );
+    }
+
+    const session = body.session;
+    if (session) {
+      this.ctx.storage.sql.exec(
+        `INSERT INTO sessions
+          (id, proposal_id, course_check_plan_id, title, format, track_id,
+           room_id, starts_at, ends_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        session.plannedId,
+        body.actionType === "decision" ? body.proposalId : null,
+        plan.id,
+        session.title,
+        session.format,
+        session.trackId,
+        session.roomId,
+        session.startsAt,
+        session.endsAt,
+        now,
+      );
+    }
+
+    for (const task of body.tasks) {
+      const speakerId = speakerIdByPlanned.get(task.speakerPlannedId);
+      if (!speakerId) throw new Error("Task is missing its speaker mapping.");
+      this.ctx.storage.sql.exec(
+        `INSERT INTO onboarding_tasks
+          (id, speaker_id, session_id, proposal_id, course_check_plan_id, title, kind,
+           status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)`,
+        task.plannedId,
+        speakerId,
+        session?.plannedId ?? null,
+        body.actionType === "decision" ? body.proposalId : null,
+        plan.id,
+        task.title,
+        task.kind,
+        now,
+      );
+    }
+
+    for (const access of body.portalAccess) {
+      const speakerId = speakerIdByPlanned.get(access.speakerPlannedId);
+      if (!speakerId) throw new Error("Portal access is missing its speaker mapping.");
+      this.ctx.storage.sql.exec(
+        `INSERT INTO portal_access_intents
+          (id, speaker_id, email, intent, proposal_id, course_check_plan_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        crypto.randomUUID(),
+        speakerId,
+        access.email,
+        access.intent,
+        body.actionType === "decision" ? body.proposalId : null,
+        plan.id,
+        now,
+      );
+    }
+  }
+
+  getAcceptanceCascade(proposalId: string): AcceptanceCascadeSnapshot {
+    return this.cascadeSnapshot({ proposalId });
+  }
+
+  getGuaranteedCascade(planId: string): AcceptanceCascadeSnapshot {
+    return this.cascadeSnapshot({ planId });
+  }
+
+  private cascadeSnapshot(filter: {
+    proposalId?: string;
+    planId?: string;
+  }): AcceptanceCascadeSnapshot {
+    const proposalId = filter.proposalId ?? null;
+    const planId = filter.planId ?? null;
+
+    const participations = this.ctx.storage.sql
+      .exec<{
+        id: string;
+        speaker_id: string;
+        proposal_id: string | null;
+        title_snapshot: string;
+        organization_snapshot: string;
+        role: string;
+      }>(
+        proposalId
+          ? `SELECT id, speaker_id, proposal_id, title_snapshot, organization_snapshot, role
+             FROM event_participations WHERE proposal_id = ?`
+          : `SELECT id, speaker_id, proposal_id, title_snapshot, organization_snapshot, role
+             FROM event_participations WHERE course_check_plan_id = ?`,
+        proposalId ?? planId,
+      )
+      .toArray();
+
+    const speakerIds = [...new Set(participations.map((row) => row.speaker_id))];
+    const speakers =
+      speakerIds.length === 0
+        ? []
+        : this.ctx.storage.sql
+            .exec<SpeakerRow>(
+              `SELECT id, name, email, biography, created_at
+               FROM speakers
+               WHERE id IN (${speakerIds.map(() => "?").join(",")})`,
+              ...speakerIds,
+            )
+            .toArray()
+            .map((row) => ({
+              id: row.id,
+              name: row.name,
+              email: row.email,
+              biography: row.biography,
+            }));
+
+    const sessions = this.ctx.storage.sql
+      .exec<{
+        id: string;
+        proposal_id: string | null;
+        title: string;
+        format: string;
+        track_id: string;
+      }>(
+        proposalId
+          ? `SELECT id, proposal_id, title, format, track_id FROM sessions WHERE proposal_id = ?`
+          : `SELECT id, proposal_id, title, format, track_id FROM sessions WHERE course_check_plan_id = ?`,
+        proposalId ?? planId,
+      )
+      .toArray()
+      .map((row) => ({
+        id: row.id,
+        proposalId: row.proposal_id,
+        title: row.title,
+        format: row.format,
+        trackId: row.track_id,
+      }));
+
+    const tasks = this.ctx.storage.sql
+      .exec<{
+        id: string;
+        title: string;
+        kind: string;
+        speaker_id: string;
+      }>(
+        proposalId
+          ? `SELECT id, title, kind, speaker_id FROM onboarding_tasks WHERE proposal_id = ?`
+          : `SELECT id, title, kind, speaker_id FROM onboarding_tasks WHERE course_check_plan_id = ?`,
+        proposalId ?? planId,
+      )
+      .toArray()
+      .map((row) => ({
+        id: row.id,
+        title: row.title,
+        kind: row.kind,
+        speakerId: row.speaker_id,
+      }));
+
+    const portalAccessIntents = this.ctx.storage.sql
+      .exec<{
+        id: string;
+        speaker_id: string;
+        email: string;
+        intent: string;
+      }>(
+        proposalId
+          ? `SELECT id, speaker_id, email, intent FROM portal_access_intents WHERE proposal_id = ?`
+          : `SELECT id, speaker_id, email, intent FROM portal_access_intents WHERE course_check_plan_id = ?`,
+        proposalId ?? planId,
+      )
+      .toArray()
+      .map((row) => ({
+        id: row.id,
+        speakerId: row.speaker_id,
+        email: row.email,
+        intent: row.intent,
+      }));
+
+    return {
+      speakers,
+      participations: participations.map((row) => ({
+        id: row.id,
+        speakerId: row.speaker_id,
+        proposalId: row.proposal_id,
+        titleSnapshot: row.title_snapshot,
+        organizationSnapshot: row.organization_snapshot,
+        role: row.role,
+      })),
+      sessions,
+      tasks,
+      portalAccessIntents,
+      messagesQueued: 0,
+      calendarEffects: 0,
+      publicRevisions: 0,
+    };
+  }
+
+  /** Test helper: pre-insert a conflicting session id for transactional rollback coverage. */
+  insertSessionConflictForTest(sessionId: string): void {
+    this.ctx.storage.sql.exec(
+      `INSERT INTO sessions
+        (id, proposal_id, course_check_plan_id, title, format, track_id,
+         room_id, starts_at, ends_at, created_at)
+       VALUES (?, NULL, 'conflict-fixture', 'Conflict fixture', 'talk', 'platform',
+               NULL, NULL, NULL, ?)`,
+      sessionId,
+      new Date().toISOString(),
+    );
+  }
+
+  /** Test helper: attach co-speakers without going through public submit. */
+  setProposalCoSpeakersForTest(
+    proposalId: string,
+    coSpeakers: CoSpeakerInput[],
+  ): void {
+    this.ctx.storage.sql.exec(
+      `UPDATE proposals
+       SET co_speakers_json = ?, review_version = review_version + 1
+       WHERE id = ?`,
+      JSON.stringify(coSpeakers),
+      proposalId,
+    );
+  }
+
+  /** Test helper: create or return a speaker by email. */
+  upsertSpeakerForTest(input: {
+    name: string;
+    email: string;
+    biography: string;
+  }): string {
+    const email = input.email.trim().toLowerCase();
+    const existing = this.ctx.storage.sql
+      .exec<{ id: string }>(`SELECT id FROM speakers WHERE email = ?`, email)
+      .toArray()[0];
+    if (existing) return existing.id;
+    const id = crypto.randomUUID();
+    this.ctx.storage.sql.exec(
+      `INSERT INTO speakers (id, name, email, biography, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      id,
+      input.name,
+      email,
+      input.biography,
+      new Date().toISOString(),
+    );
+    return id;
   }
 }
 

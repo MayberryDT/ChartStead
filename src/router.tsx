@@ -7,6 +7,7 @@ import {
 
 import { App, SubmissionsPage } from "./App";
 import { CfpBuilderPage, CfpFormsPage } from "./CfpBuilderPage";
+import { CourseCheckPage } from "./CourseCheckPage";
 import { ProposalDetailPage } from "./ProposalDetailPage";
 import { SubmitterEditPage } from "./SubmitterEditPage";
 
@@ -66,6 +67,12 @@ const submissionDetailRoute = createRoute({
   validateSearch: validateProposalQueueSearch,
 });
 
+const courseCheckRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId/course-checks/$planId",
+  component: CourseCheckPage,
+});
+
 function validateProposalQueueSearch(search: Record<string, unknown>) {
   return {
     q: typeof search.q === "string" ? search.q : undefined,
@@ -84,6 +91,7 @@ const routeTree = rootRoute.addChildren([
   formBuilderRoute,
   submissionsRoute,
   submissionDetailRoute,
+  courseCheckRoute,
 ]);
 
 export const router = createRouter({ routeTree });
