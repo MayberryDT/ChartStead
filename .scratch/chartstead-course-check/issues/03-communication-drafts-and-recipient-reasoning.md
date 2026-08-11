@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Batch decisions and shared workspace.
 
-**Status:** blocked
+**Status:** ready-for-agent
 
 - [ ] A completed Decision Course Check can create a linked Communication Course Check without transferring approval.
 - [ ] Staff can also start a Communication Course Check directly from an authorized selection of proposals, sessions, speakers, or tasks.
@@ -23,3 +23,5 @@
 ## Comments
 
 Blocked by Course Check 02 — Batch decisions and shared workspace.
+
+- 2026-08-11 — frontier-reconcile: All blockers done → ready-for-agent.

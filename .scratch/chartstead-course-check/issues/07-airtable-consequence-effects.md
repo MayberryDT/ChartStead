@@ -21,3 +21,5 @@
 ## Comments
 
 Blocked by Course Check 02 — Batch decisions and shared workspace, Course Check 06 — Program Publication Course Check, and Competition Ticket 10 — Airtable mapping and authenticated HTTP foundation.
+
+- 2026-08-11 — frontier-reconcile: Still blocked on: Course Check 06 (ready-for-agent).

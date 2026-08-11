@@ -21,3 +21,5 @@
 Filed from Ticket 08 human QA (2026-08-11): drag/drop, counts, conflict persistence, and keyboard move work; day tabs, pills, card chrome, and overall agenda readability need a human-led polish pass. Functional acceptance for Ticket 08 stays separate — this ticket is visual/UX quality only.
 
 Same rule as Ticket 12: not solo agent-ready; polish is human-tandem.
+
+- 2026-08-11 — frontier-reconcile: Blockers satisfied; remains human-tandem only (not agent-ready).

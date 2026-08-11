@@ -23,3 +23,5 @@
 ## Comments
 
 Blocked by Course Check 02 through 09. Course Check 01 is done.
+
+- 2026-08-11 — frontier-reconcile: Still blocked on: Course Check 03 (ready-for-agent); Course Check 04 (blocked); Course Check 05 (blocked); Course Check 06 (ready-for-agent); Course Check 07 (blocked); Course Check 08 (blocked); Course Check 09 (blocked).

@@ -16,3 +16,5 @@
 ## Comments
 
 Filed from Ticket 09 human QA after the calendar chooser feedback. Human-led visual/UX polish only; Course Check 06 owns publication transitions and ticket 07 owns calendar-provider delivery lifecycle.
+
+- 2026-08-11 — frontier-reconcile: Blockers satisfied; remains human-tandem only (not agent-ready).

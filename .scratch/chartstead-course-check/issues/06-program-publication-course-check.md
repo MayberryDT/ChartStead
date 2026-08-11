@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Batch decisions and shared workspace; Competition 08 — Fluid agenda builder; Competition 09 — Published program renderer and embed.
 
-**Status:** blocked
+**Status:** ready-for-agent
 
 - [ ] The working schedule remains continuously editable and may contain unplaced, TBD, incomplete, private, or conflicting sessions.
 - [ ] `Publish program` opens Program Publication Course Check rather than changing public state directly.
@@ -22,3 +22,5 @@
 ## Comments
 
 Blocked by Course Check 02 — Batch decisions and shared workspace. Competition Tickets 08 and 09 are done.
+
+- 2026-08-11 — frontier-reconcile: All blockers done → ready-for-agent.

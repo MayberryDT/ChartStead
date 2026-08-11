@@ -15,3 +15,5 @@
 ## Comments
 
 Filed after Ticket 06 functional completion. Human-led visual/UX work only; outbox semantics, signed portal access, and reminder delivery behavior remain unchanged.
+
+- 2026-08-11 — frontier-reconcile: Blockers satisfied; remains human-tandem only (not agent-ready).

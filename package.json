@@ -20,7 +20,9 @@
     "deploy": "npm run build && wrangler deploy",
     "deploy:demo": "CLOUDFLARE_ENV=demo npm run build && CLOUDFLARE_ENV=demo wrangler deploy",
     "deploy:dry": "npm run build && wrangler deploy --dry-run",
-    "issues:board": "node scripts/issue-board/server.mjs --host 0.0.0.0 --port 3939"
+    "issues:board": "node scripts/issue-board/server.mjs --host 0.0.0.0 --port 3939",
+    "issues:reconcile": "node scripts/issue-board/reconcile.mjs",
+    "issues:reconcile:apply": "node scripts/issue-board/reconcile.mjs --apply"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

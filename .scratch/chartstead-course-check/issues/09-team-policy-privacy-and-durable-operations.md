@@ -22,3 +22,5 @@
 ## Comments
 
 Blocked by Course Check 02 — Batch decisions and shared workspace, Course Check 04 — External sends and effect recovery, Course Check 06 — Program Publication Course Check, and Course Check 08 — Complete agent API control.
+
+- 2026-08-11 — frontier-reconcile: Still blocked on: Course Check 04 (blocked); Course Check 06 (ready-for-agent); Course Check 08 (blocked).

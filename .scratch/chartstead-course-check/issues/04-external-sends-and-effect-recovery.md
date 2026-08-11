@@ -23,3 +23,5 @@
 ## Comments
 
 Blocked by Course Check 03 — Communication drafts and recipient reasoning.
+
+- 2026-08-11 — frontier-reconcile: Still blocked on: Course Check 03 (ready-for-agent).

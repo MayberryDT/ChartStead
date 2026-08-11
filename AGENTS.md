@@ -14,6 +14,8 @@ Keep this file **minimal**. It only points agents at the right sources. Do not d
   2. **Ready for human QA** → `in-review` + demo URL + what-to-test.
   3. **Done** (after QA / merge as appropriate) → `done` + checklist `- [x]`.
   4. Always write the issue file on the **main checkout** board path **and** the worktree copy.
+  5. **Frontier maintenance on every start/finish/block (same rule as Masthead Pages):** re-scan **both** tracks. For every non-human-tandem ticket still `blocked`, if all declared blockers are `done`/`complete`, set it to `ready-for-agent` and comment why. Partially cleared blockers stay `blocked` (annotate remaining). Never leave Open empty when the graph has free agent work. Human-tandem tickets never auto-promote.
+  6. Run `npm run issues:reconcile` (dry-run) then `npm run issues:reconcile:apply` on ticket closeout so dependents cannot stay stale.
 - **Whenever you finish a ticket (or claim it ready for human QA), always start or reuse a Tailscale-reachable demo and put in the final response: (1) the direct demo URL `http://100.105.117.93:<port>/…` — never localhost — and (2) a short “what to test” checklist for that ticket.** Bind with `--host 0.0.0.0` (or the host Tailscale IP) and confirm the listener is not loopback-only before linking.
 
 ## Start here

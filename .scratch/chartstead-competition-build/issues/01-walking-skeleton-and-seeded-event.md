@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** complete
+**Status:** done
 
 - [x] The application runs locally and deploys through the selected Cloudflare architecture.
 - [x] The organizer shell matches the locked source-of-truth structure, hierarchy, spacing, and navigation behavior.

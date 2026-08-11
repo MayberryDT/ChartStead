@@ -21,3 +21,5 @@
 ## Comments
 
 Blocked by Course Check 04 — External sends and effect recovery. Competition Ticket 08 is done.
+
+- 2026-08-11 — frontier-reconcile: Still blocked on: Course Check 04 (blocked).

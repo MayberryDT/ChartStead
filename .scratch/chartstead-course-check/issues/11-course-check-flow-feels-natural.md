@@ -4,7 +4,7 @@
 
 **Blocked by:** Course Check 01 — Single Decision Course Check tracer.
 
-**Status:** open
+**Status:** blocked — human-tandem only (not agent-ready)
 
 ## Problem
 
@@ -35,3 +35,4 @@ Function is good enough to continue the spine. Visual + flow polish is deferred 
 - 2026-08-11 — Tyler: after Course Check 01 demo QA, file this so we come back once the tracer works. Working is enough for now; natural flow is the follow-up.
 - 2026-08-11 — Tyler: Course Check works end-to-end now, but the screen **looks horrible**. Fold look + flow into this one issue; continue spine and return later.
 - 2026-08-11 — After Course Check 02 ship: batch/shared workspace visual overhaul is **12** (human-tandem). This ticket stays single-decision entry/exit + flow.
+- 2026-08-11 — frontier-reconcile: Blockers satisfied; remains human-tandem only (not agent-ready).
