@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import type { CourseCheckFinding, CourseCheckPlan } from "../shared/course-check";
 import { ApiError, applyCourseCheckPlan, fetchCourseCheckPlan } from "./api";
+import { createClientId } from "./id";
 
 function findingTone(severity: CourseCheckFinding["severity"]) {
   if (severity === "blocker") return "error";
@@ -144,7 +145,7 @@ export function CourseCheckPage() {
   const queryClient = useQueryClient();
   const [message, setMessage] = useState<string | null>(null);
   const applyKey = useMemo(
-    () => `ui-apply-${planId}-${crypto.randomUUID()}`,
+    () => `ui-apply-${planId}-${createClientId()}`,
     [planId],
   );
 

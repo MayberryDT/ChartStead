@@ -30,6 +30,7 @@ import {
   updateProposalReview,
 } from "./api";
 import { AppSelect } from "./AppSelect";
+import { createClientId } from "./id";
 
 export interface ProposalQueueState {
   query: string;
@@ -733,7 +734,7 @@ function ProposalInspector({
       createDecisionCourseCheck(eventId, {
         proposalId: proposal.id,
         outcome,
-        idempotencyKey: `ui-decision-${proposal.id}-${outcome}-${crypto.randomUUID()}`,
+        idempotencyKey: `ui-decision-${proposal.id}-${outcome}-${createClientId()}`,
       }),
     onSuccess: (plan) => {
       void navigate({
