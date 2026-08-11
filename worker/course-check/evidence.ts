@@ -55,14 +55,24 @@ function classifyFinding(finding: CourseCheckFinding): CourseCheckEvidenceKind {
 }
 
 function classifyDelta(delta: CourseCheckDelta): CourseCheckEvidenceKind {
-  if (delta.entityType === "proposal" && delta.action === "update") {
+  if (
+    delta.entityType === "public_revision" ||
+    (delta.entityType === "proposal" && delta.action === "update")
+  ) {
     return "irreversible";
   }
   if (delta.entityType === "speaker" || delta.entityType === "participation") {
     return "people";
   }
-  if (delta.entityType === "session" || delta.entityType === "portal_access") {
+  if (
+    delta.entityType === "session" ||
+    delta.entityType === "portal_access" ||
+    delta.entityType === "public_session"
+  ) {
     return "public";
+  }
+  if (delta.entityType === "communication_plan") {
+    return "operational";
   }
   if (delta.entityType === "task") {
     return "operational";

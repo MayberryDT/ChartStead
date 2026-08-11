@@ -1,8 +1,14 @@
-/** Course Check v1 contract — decision cascade + batch workspace. */
+/** Course Check v1 contract — decision cascade + publication + batch workspace. */
 
 export type ProgramOutcome = "accepted" | "declined";
 
-export type CourseCheckActionType = "decision" | "guaranteed_speaker";
+export type CourseCheckActionType =
+  | "decision"
+  | "guaranteed_speaker"
+  | "publication"
+  | "communication";
+
+export type PublicationOperation = "publish" | "unpublish" | "restore";
 
 export type CourseCheckPlanState =
   | "Draft"
@@ -53,12 +59,16 @@ export interface CourseCheckDelta {
     | "participation"
     | "session"
     | "task"
-    | "portal_access";
-  action: "create" | "update" | "reuse" | "none";
+    | "portal_access"
+    | "public_revision"
+    | "public_session"
+    | "communication_plan";
+  action: "create" | "update" | "reuse" | "none" | "remove";
   summary: string;
   before?: Record<string, unknown> | null;
   after?: Record<string, unknown> | null;
   proposalId?: string;
+  sessionId?: string;
 }
 
 export interface CourseCheckStage {
@@ -233,7 +243,110 @@ export interface GuaranteedSpeakerPlanBody {
   } | null;
 }
 
-export type CourseCheckPlanBody = DecisionPlanBody | GuaranteedSpeakerPlanBody;
+export type PublicationSessionChange =
+  | "add"
+  | "remove"
+  | "time"
+  | "room"
+  | "speaker"
+  | "visibility"
+  | "title"
+  | "description"
+  | "unchanged";
+
+export interface PublicationSessionDelta {
+  sessionId: string;
+  title: string;
+  change: PublicationSessionChange;
+  changes: PublicationSessionChange[];
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+}
+
+export interface PublicationExclusion {
+  sessionId: string;
+  title: string;
+  reasons: string[];
+}
+
+export interface PublicationConflictEvidence {
+  conflictId: string;
+  kind: string;
+  summary: string;
+  sessionIds: string[];
+  sessionTitles: string[];
+}
+
+export interface PublicationPlanBody {
+  actionType: "publication";
+  operation: PublicationOperation;
+  workingFingerprint: string;
+  publicRevisionId: string | null;
+  publicRevisionVersion: number | null;
+  restoreFromRevisionId: string | null;
+  /** Frozen snapshot that becomes the new current public revision on apply. */
+  proposedSnapshot: {
+    sessions: Array<Record<string, unknown>>;
+    speakers: Array<Record<string, unknown>>;
+  };
+  sessionDeltas: PublicationSessionDelta[];
+  includedSessionIds: string[];
+  excludedSessions: PublicationExclusion[];
+  conflicts: PublicationConflictEvidence[];
+  calendarConsequences: Array<{
+    sessionId: string;
+    kind: "create" | "update" | "cancel";
+    uid: string;
+    sequence: number;
+  }>;
+  deltas: CourseCheckDelta[];
+  findings: CourseCheckFinding[];
+  stages: CourseCheckStage[];
+  evidenceSections: CourseCheckEvidenceSection[];
+  softWarningOverrides: SoftWarningOverride[];
+  linkedPlanIds: string[];
+  parentPlanId: string | null;
+  ageWarningHours: number;
+  ageWarning?: {
+    active: boolean;
+    ageHours: number;
+    message: string;
+  } | null;
+}
+
+/** Stub communication plan created by publication (no delivery; CC-03 owns drafts/send). */
+export interface CommunicationPlanBody {
+  actionType: "communication";
+  source: "publication" | "decision";
+  purpose: "calendar_update" | "speaker_notification";
+  parentPlanId: string | null;
+  calendarOps: Array<{
+    sessionId: string;
+    kind: "create" | "update" | "cancel";
+    uid: string;
+    sequence: number;
+  }>;
+  drafts: [];
+  recipients: [];
+  deltas: CourseCheckDelta[];
+  findings: CourseCheckFinding[];
+  stages: CourseCheckStage[];
+  evidenceSections: CourseCheckEvidenceSection[];
+  softWarningOverrides: SoftWarningOverride[];
+  linkedPlanIds: string[];
+  ageWarningHours: number;
+  ageWarning?: {
+    active: boolean;
+    ageHours: number;
+    message: string;
+  } | null;
+}
+
+export type CourseCheckPlanBody =
+  | DecisionPlanBody
+  | GuaranteedSpeakerPlanBody
+  | PublicationPlanBody
+  | CommunicationPlanBody;
 
 export interface CourseCheckActor {
   id: string;
@@ -311,6 +424,13 @@ export interface CreateGuaranteedSpeakerCourseCheckRequest {
     biography?: string;
     role?: "primary" | "co";
   }>;
+  idempotencyKey: string;
+}
+
+export interface CreatePublicationCourseCheckRequest {
+  operation: PublicationOperation;
+  /** Required when operation is restore. */
+  restoreRevisionId?: string;
   idempotencyKey: string;
 }
 

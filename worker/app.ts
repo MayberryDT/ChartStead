@@ -2689,6 +2689,86 @@ export function createApp(options: AppOptions = {}) {
     });
   });
 
+  app.post("/api/events/:eventId/course-checks/publications", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json(
+        {
+          error: "Administrator access is required to create a Publication Course Check.",
+          code: "missing_authority",
+          recoveryGuidance:
+            "Ask an event administrator to create or apply this Course Check.",
+        },
+        403,
+      );
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const body = (await c.req.json().catch(() => null)) as {
+      operation?: unknown;
+      restoreRevisionId?: unknown;
+      idempotencyKey?: unknown;
+    } | null;
+    const headerKey = c.req.header("idempotency-key");
+    const idempotencyKey =
+      (typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim()) ||
+      (typeof headerKey === "string" && headerKey.trim()) ||
+      "";
+    const operation = body?.operation;
+    if (
+      operation !== "publish" &&
+      operation !== "unpublish" &&
+      operation !== "restore"
+    ) {
+      return c.json(
+        { error: "operation must be publish, unpublish, or restore" },
+        400,
+      );
+    }
+    if (!idempotencyKey) {
+      return c.json({ error: "idempotencyKey is required" }, 400);
+    }
+    if (
+      operation === "restore" &&
+      (typeof body?.restoreRevisionId !== "string" || !body.restoreRevisionId.trim())
+    ) {
+      return c.json({ error: "restoreRevisionId is required for restore" }, 400);
+    }
+    try {
+      const result = (await c.env.EVENT_STORE.getByName(
+        eventId,
+      ).createPublicationCourseCheck({
+        operation,
+        restoreRevisionId:
+          typeof body?.restoreRevisionId === "string"
+            ? body.restoreRevisionId.trim()
+            : undefined,
+        idempotencyKey,
+        actor: { id: principal.id, displayName: principal.displayName },
+      })) as {
+        plan: import("../shared/course-check").CourseCheckPlan;
+        created: boolean;
+      };
+      return c.json(result.plan, result.created ? 201 : 200);
+    } catch (error) {
+      return c.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unable to create Publication Course Check",
+        },
+        400,
+      );
+    }
+  });
+
+  /** Legacy test seam — still valid-subset publish without Course Check ceremony. */
   app.post("/api/events/:eventId/program/publish-test", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
     const eventId = c.req.param("eventId");

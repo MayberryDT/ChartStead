@@ -14,8 +14,15 @@ import type {
   CourseCheckPlanVersion,
   CourseCheckReceipt,
   DecisionPlanBody,
+  PlannedParticipation,
+  PlannedPortalAccess,
+  PlannedSession,
+  PlannedSpeaker,
+  PlannedTask,
   PlanMutationRecord,
   ProgramOutcome,
+  PublicationOperation,
+  PublicationPlanBody,
 } from "../shared/course-check";
 import {
   DEFAULT_AGE_WARNING_HOURS,
@@ -60,7 +67,10 @@ import type {
   SpeakerPortalSession,
   SubmissionAnswers,
 } from "../shared/events";
-import { buildSessionIcs } from "../shared/public-program";
+import {
+  buildSessionIcs,
+  selectValidPublicSubset,
+} from "../shared/public-program";
 import {
   detectScheduleConflicts,
   placementStatus,
@@ -77,8 +87,14 @@ import {
   splitSelectionsIfNeeded,
   type ExistingSpeaker,
 } from "./course-check/decision-planner";
-import { digestPayload } from "./course-check/digest";
+import { digestPayload, stableStringify } from "./course-check/digest";
 import { computeAgeWarning } from "./course-check/evidence";
+import {
+  communicationBodyDigestPayload,
+  planCommunicationStub,
+  planPublication,
+  publicationBodyDigestPayload,
+} from "./course-check/publication-planner";
 import { createStableProposalId } from "./proposals";
 import type { AppBindings } from "./types";
 
@@ -551,6 +567,36 @@ function normalizeCourseCheckBody(body: CourseCheckPlanBody): CourseCheckPlanBod
       ...body,
       evidenceSections: body.evidenceSections ?? [],
       softWarningOverrides: body.softWarningOverrides ?? [],
+      ageWarningHours: body.ageWarningHours ?? DEFAULT_AGE_WARNING_HOURS,
+      ageWarning: body.ageWarning ?? null,
+    };
+  }
+  if (body.actionType === "publication") {
+    return {
+      ...body,
+      sessionDeltas: body.sessionDeltas ?? [],
+      includedSessionIds: body.includedSessionIds ?? [],
+      excludedSessions: body.excludedSessions ?? [],
+      conflicts: body.conflicts ?? [],
+      calendarConsequences: body.calendarConsequences ?? [],
+      evidenceSections: body.evidenceSections ?? [],
+      softWarningOverrides: body.softWarningOverrides ?? [],
+      linkedPlanIds: body.linkedPlanIds ?? [],
+      parentPlanId: body.parentPlanId ?? null,
+      restoreFromRevisionId: body.restoreFromRevisionId ?? null,
+      ageWarningHours: body.ageWarningHours ?? DEFAULT_AGE_WARNING_HOURS,
+      ageWarning: body.ageWarning ?? null,
+    };
+  }
+  if (body.actionType === "communication") {
+    return {
+      ...body,
+      drafts: body.drafts ?? [],
+      recipients: body.recipients ?? [],
+      calendarOps: body.calendarOps ?? [],
+      evidenceSections: body.evidenceSections ?? [],
+      softWarningOverrides: body.softWarningOverrides ?? [],
+      linkedPlanIds: body.linkedPlanIds ?? [],
       ageWarningHours: body.ageWarningHours ?? DEFAULT_AGE_WARNING_HOURS,
       ageWarning: body.ageWarning ?? null,
     };
@@ -4065,8 +4111,14 @@ export class EventStore extends DurableObject<AppBindings> {
       }));
   }
 
-  /** Build the publishable public subset from current working program state. */
-  buildPublicProgramSnapshotFromWorking(): {
+  /**
+   * Build working public-shaped sessions/speakers from private schedule.
+   * When `validSubset` is true (Course Check default), fully unplaced and
+   * unpublishable sessions stay internal; TBD time/room remains allowed.
+   */
+  buildPublicProgramSnapshotFromWorking(options?: {
+    validSubset?: boolean;
+  }): {
     sessions: PublicProgramSession[];
     speakers: PublicProgramSpeaker[];
   } {
@@ -4087,7 +4139,9 @@ export class EventStore extends DurableObject<AppBindings> {
       if (speakers.length === 0) continue;
       const description = row.proposal_id
         ? (abstracts.get(row.proposal_id) ?? "").trim()
-        : "";
+        : row.title.trim()
+          ? row.title.trim()
+          : "";
       const roomId = row.room_id;
       const session: PublicProgramSession = {
         id: row.id,
@@ -4142,19 +4196,51 @@ export class EventStore extends DurableObject<AppBindings> {
       return a.title.localeCompare(b.title);
     });
 
-    return {
+    const full = {
       sessions,
       speakers: Array.from(speakerAcc.values()).sort((a, b) =>
         a.name.localeCompare(b.name),
       ),
     };
+    if (options?.validSubset) {
+      return selectValidPublicSubset(full.sessions, full.speakers);
+    }
+    return full;
   }
 
-  publishPublicProgramRevisionFromWorking(source = "working"): PublicProgramResponse {
+  computeWorkingProgramFingerprint(): string {
+    const snapshot = this.buildPublicProgramSnapshotFromWorking({ validSubset: false });
+    const agenda = this.getAgendaWorkspace();
+    const payload = {
+      sessions: snapshot.sessions,
+      speakers: snapshot.speakers.map((speaker) => ({
+        id: speaker.id,
+        name: speaker.name,
+        biography: speaker.biography,
+        headshotAssetId: speaker.headshotAssetId,
+        sessionIds: [...speaker.sessionIds].sort(),
+      })),
+      conflicts: agenda.conflicts.map((conflict) => conflict.id).sort(),
+      calendarIntents: agenda.calendarIntents.map((intent) => ({
+        sessionId: intent.sessionId,
+        kind: intent.kind,
+        uid: intent.uid,
+        sequence: intent.sequence,
+      })),
+    };
+    return stableStringify(payload);
+  }
+
+  private insertPublicProgramRevision(input: {
+    snapshot: {
+      sessions: PublicProgramSession[];
+      speakers: PublicProgramSpeaker[];
+    };
+    source: string;
+    now: string;
+  }): { id: string; version: number } {
     const event = this.getEvent();
     if (!event) throw new Error("Event is not initialized.");
-    const snapshot = this.buildPublicProgramSnapshotFromWorking();
-    const now = new Date().toISOString();
     const maxVersion = this.ctx.storage.sql
       .exec<{ max_version: number }>(
         `SELECT COALESCE(MAX(version), 0) AS max_version FROM public_program_revisions`,
@@ -4162,29 +4248,75 @@ export class EventStore extends DurableObject<AppBindings> {
       .toArray()[0]?.max_version;
     const version = Number(maxVersion ?? 0) + 1;
     const id = `pubrev_${event.id}_${version}`;
+    this.ctx.storage.sql.exec(
+      `UPDATE public_program_revisions SET is_current = 0 WHERE is_current = 1`,
+    );
+    this.ctx.storage.sql.exec(
+      `INSERT INTO public_program_revisions
+        (id, version, is_current, published_at, snapshot_json, source)
+       VALUES (?, ?, 1, ?, ?, ?)`,
+      id,
+      version,
+      input.now,
+      JSON.stringify(input.snapshot),
+      input.source,
+    );
+    return { id, version };
+  }
+
+  publishPublicProgramRevisionFromWorking(source = "working"): PublicProgramResponse {
+    const snapshot = this.buildPublicProgramSnapshotFromWorking({ validSubset: true });
+    const now = new Date().toISOString();
     this.ctx.storage.transactionSync(() => {
-      this.ctx.storage.sql.exec(
-        `UPDATE public_program_revisions SET is_current = 0 WHERE is_current = 1`,
-      );
-      this.ctx.storage.sql.exec(
-        `INSERT INTO public_program_revisions
-          (id, version, is_current, published_at, snapshot_json, source)
-         VALUES (?, ?, 1, ?, ?, ?)`,
-        id,
-        version,
-        now,
-        JSON.stringify(snapshot),
-        source,
-      );
+      this.insertPublicProgramRevision({ snapshot, source, now });
     });
     const result = this.getPublicProgram();
     if (!result) throw new Error("Failed to load published public program.");
     return result;
   }
 
-  /** Test/admin seam until Course Check 06 owns publication transitions. */
+  /** Test/admin seam — uses valid subset; product path is Course Check publication. */
   publishPublicProgramRevisionForTest(): PublicProgramResponse {
     return this.publishPublicProgramRevisionFromWorking("test");
+  }
+
+  getPublicProgramRevisionSnapshot(revisionId: string): {
+    sessions: PublicProgramSession[];
+    speakers: PublicProgramSpeaker[];
+  } | null {
+    const row = this.ctx.storage.sql
+      .exec<{ snapshot_json: string }>(
+        `SELECT snapshot_json FROM public_program_revisions WHERE id = ? LIMIT 1`,
+        revisionId,
+      )
+      .toArray()[0];
+    if (!row) return null;
+    try {
+      const snapshot = JSON.parse(row.snapshot_json) as {
+        sessions?: PublicProgramSession[];
+        speakers?: PublicProgramSpeaker[];
+      };
+      return {
+        sessions: Array.isArray(snapshot.sessions) ? snapshot.sessions : [],
+        speakers: Array.isArray(snapshot.speakers) ? snapshot.speakers : [],
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private currentPublicRevisionMeta(): {
+    id: string;
+    version: number;
+  } | null {
+    const row = this.ctx.storage.sql
+      .exec<{ id: string; version: number }>(
+        `SELECT id, version FROM public_program_revisions
+         WHERE is_current = 1 ORDER BY version DESC LIMIT 1`,
+      )
+      .toArray()[0];
+    if (!row) return null;
+    return { id: row.id, version: Number(row.version) };
   }
 
   seedPublicProgramDemoIfEmpty(): void {
@@ -4920,33 +5052,55 @@ export class EventStore extends DurableObject<AppBindings> {
 
     // Stage-scoped freshness: mark dependent stages out of date when relevant inputs change.
     let state = plan.state;
-    if (
-      plan.state !== "Complete" &&
-      plan.state !== "Superseded" &&
-      nextBody.actionType === "decision"
-    ) {
-      const changed = this.detectDecisionStaleInputs(nextBody);
-      if (changed.length > 0) {
-        state = "Out of date";
-        nextBody = {
-          ...nextBody,
-          stages: nextBody.stages.map((stage) =>
-            stage.id === "apply-decision"
-              ? { ...stage, status: "out_of_date" as const }
-              : stage,
-          ),
-          findings: [
-            ...nextBody.findings.filter((f) => f.code !== "relevant_input_changed"),
-            {
-              id: "relevant-input-changed",
-              severity: "blocker",
-              code: "relevant_input_changed",
-              message: `Relevant inputs changed: ${changed.join(", ")}.`,
-              recoveryGuidance:
-                "Create a new Decision Course Check from the current proposal revisions, or defer the changed items.",
-            },
-          ],
-        };
+    if (plan.state !== "Complete" && plan.state !== "Superseded") {
+      if (nextBody.actionType === "decision") {
+        const changed = this.detectDecisionStaleInputs(nextBody);
+        if (changed.length > 0) {
+          state = "Out of date";
+          nextBody = {
+            ...nextBody,
+            stages: nextBody.stages.map((stage) =>
+              stage.id === "apply-decision"
+                ? { ...stage, status: "out_of_date" as const }
+                : stage,
+            ),
+            findings: [
+              ...nextBody.findings.filter((f) => f.code !== "relevant_input_changed"),
+              {
+                id: "relevant-input-changed",
+                severity: "blocker",
+                code: "relevant_input_changed",
+                message: `Relevant inputs changed: ${changed.join(", ")}.`,
+                recoveryGuidance:
+                  "Create a new Decision Course Check from the current proposal revisions, or defer the changed items.",
+              },
+            ],
+          };
+        }
+      } else if (nextBody.actionType === "publication") {
+        const changed = this.detectPublicationStaleInputs(nextBody);
+        if (changed.length > 0) {
+          state = "Out of date";
+          nextBody = {
+            ...nextBody,
+            stages: nextBody.stages.map((stage) =>
+              stage.id.endsWith("-program")
+                ? { ...stage, status: "out_of_date" as const }
+                : stage,
+            ),
+            findings: [
+              ...nextBody.findings.filter((f) => f.code !== "relevant_input_changed"),
+              {
+                id: "relevant-input-changed",
+                severity: "blocker",
+                code: "relevant_input_changed",
+                message: `Relevant inputs changed: ${changed.join(", ")}.`,
+                recoveryGuidance:
+                  "Create a new Program Publication Course Check from the current working schedule and public revision.",
+              },
+            ],
+          };
+        }
       }
     }
 
@@ -4971,6 +5125,27 @@ export class EventStore extends DurableObject<AppBindings> {
       if (proposal.reviewVersion !== item.proposalRevision) {
         changed.push(`${item.proposalId}:reviewVersion`);
       }
+    }
+    return changed;
+  }
+
+  private detectPublicationStaleInputs(body: PublicationPlanBody): string[] {
+    const changed: string[] = [];
+    if (body.operation === "publish") {
+      const fingerprint = this.computeWorkingProgramFingerprint();
+      if (fingerprint !== body.workingFingerprint) {
+        changed.push("workingSchedule");
+      }
+    }
+    const current = this.currentPublicRevisionMeta();
+    const currentId = current?.id ?? null;
+    const currentVersion = current?.version ?? null;
+    if (currentId !== body.publicRevisionId || currentVersion !== body.publicRevisionVersion) {
+      changed.push("publicRevision");
+    }
+    if (body.operation === "restore" && body.restoreFromRevisionId) {
+      const snapshot = this.getPublicProgramRevisionSnapshot(body.restoreFromRevisionId);
+      if (!snapshot) changed.push("restoreRevision:missing");
     }
     return changed;
   }
@@ -5407,6 +5582,119 @@ export class EventStore extends DurableObject<AppBindings> {
     return { plan, created: true };
   }
 
+  async createPublicationCourseCheck(input: {
+    operation: PublicationOperation;
+    restoreRevisionId?: string;
+    idempotencyKey: string;
+    actor: CourseCheckActor;
+  }): Promise<{ plan: CourseCheckPlan; created: boolean }> {
+    const existing = this.readIdempotency("create-publication", input.idempotencyKey);
+    if (existing) {
+      const plan = this.getCourseCheckPlan(existing.planId);
+      if (!plan) throw new Error("Idempotent publication plan is missing.");
+      return { plan, created: false };
+    }
+
+    const operation = input.operation;
+    if (
+      operation !== "publish" &&
+      operation !== "unpublish" &&
+      operation !== "restore"
+    ) {
+      throw new Error("operation must be publish, unpublish, or restore.");
+    }
+    if (operation === "restore" && !input.restoreRevisionId?.trim()) {
+      throw new Error("restoreRevisionId is required for restore.");
+    }
+
+    // Avoid demo seed when comparing to real public state for planning.
+    const currentMeta = this.currentPublicRevisionMeta();
+    let currentPublicSessions: PublicProgramSession[] = [];
+    let currentPublicSpeakers: PublicProgramSpeaker[] = [];
+    if (currentMeta) {
+      const snap = this.getPublicProgramRevisionSnapshot(currentMeta.id);
+      currentPublicSessions = snap?.sessions ?? [];
+      currentPublicSpeakers = snap?.speakers ?? [];
+    }
+
+    const working = this.buildPublicProgramSnapshotFromWorking({ validSubset: false });
+    const agenda = this.getAgendaWorkspace();
+    const settings = this.courseCheckSettings();
+    let restoreSnapshot: {
+      sessions: PublicProgramSession[];
+      speakers: PublicProgramSpeaker[];
+    } | null = null;
+    if (operation === "restore" && input.restoreRevisionId) {
+      restoreSnapshot = this.getPublicProgramRevisionSnapshot(input.restoreRevisionId);
+      if (!restoreSnapshot) {
+        throw new Error(`Public revision ${input.restoreRevisionId} not found.`);
+      }
+    }
+
+    const planId = crypto.randomUUID();
+    const body = planPublication({
+      planId,
+      operation,
+      workingFingerprint: this.computeWorkingProgramFingerprint(),
+      publicRevisionId: currentMeta?.id ?? null,
+      publicRevisionVersion: currentMeta?.version ?? null,
+      restoreFromRevisionId: input.restoreRevisionId ?? null,
+      workingSessions: working.sessions,
+      workingSpeakers: working.speakers,
+      currentPublicSessions,
+      currentPublicSpeakers,
+      restoreSnapshot,
+      conflicts: agenda.conflicts,
+      calendarIntents: agenda.calendarIntents.map((intent) => ({
+        sessionId: intent.sessionId,
+        kind: intent.kind,
+        uid: intent.uid,
+        sequence: intent.sequence,
+      })),
+      ageWarningHours: settings.ageWarningHours,
+    });
+    const digest = await digestPayload(publicationBodyDigestPayload(body));
+    const now = new Date().toISOString();
+    const state: CourseCheckPlanState = hasBlockerFindings(body.findings)
+      ? "Needs attention"
+      : "Ready";
+    this.ctx.storage.sql.exec(
+      `INSERT INTO course_check_plans
+        (id, action_type, state, version, digest, body_json, created_at, updated_at,
+         created_by_id, created_by_name, approval_json, receipt_id)
+       VALUES (?, 'publication', ?, 1, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+      planId,
+      state,
+      digest,
+      JSON.stringify(body),
+      now,
+      now,
+      input.actor.id,
+      input.actor.displayName,
+    );
+    this.recordPlanVersion({
+      planId,
+      version: 1,
+      digest,
+      state,
+      body,
+      actor: input.actor,
+      at: now,
+      mutationKind: "create",
+      summary: `Created Program Publication Course Check (${operation}).`,
+      fromVersion: 0,
+    });
+    const plan = this.getCourseCheckPlan(planId);
+    if (!plan) throw new Error("Publication Course Check was not persisted.");
+    this.writeIdempotency({
+      command: "create-publication",
+      key: input.idempotencyKey,
+      planId,
+      response: plan,
+    });
+    return { plan, created: true };
+  }
+
   async applyCourseCheck(input: {
     planId: string;
     planVersion: number;
@@ -5460,13 +5748,26 @@ export class EventStore extends DurableObject<AppBindings> {
         recoveryGuidance: "Reload the Course Check and review the latest plan version.",
       };
     }
-    if (input.stageId !== "apply-decision") {
+    const knownStages = new Set(
+      plan.body.stages.map((stage) => stage.id).concat(["apply-decision"]),
+    );
+    if (!knownStages.has(input.stageId)) {
       return {
         ok: false,
         status: 400,
         code: "unknown_stage",
         error: "Unknown Course Check stage.",
-        recoveryGuidance: "Use the Apply decision stage for this plan.",
+        recoveryGuidance: "Use a stage listed on this plan.",
+      };
+    }
+    if (plan.body.actionType === "communication") {
+      return {
+        ok: false,
+        status: 400,
+        code: "unsupported_action",
+        error: "Communication Course Check apply is not available yet.",
+        recoveryGuidance:
+          "Communication draft/send is owned by Course Check 03. This linked plan is a non-delivering stub.",
       };
     }
 
@@ -5494,6 +5795,21 @@ export class EventStore extends DurableObject<AppBindings> {
       }
     }
 
+    if (plan.body.actionType === "publication") {
+      const changed = this.detectPublicationStaleInputs(plan.body);
+      if (changed.length > 0) {
+        return {
+          ok: false,
+          status: 409,
+          code: "relevant_input_changed",
+          error: "Working schedule or public revision changed after this plan was created.",
+          recoveryGuidance:
+            "Create a new Program Publication Course Check from current state.",
+          changedInputs: changed,
+        };
+      }
+    }
+
     // Soft-warning overrides: internal apply is reason-free; material external requires reason.
     const overrides = input.softWarningOverrides ?? [];
     for (const override of overrides) {
@@ -5507,6 +5823,32 @@ export class EventStore extends DurableObject<AppBindings> {
           error: `A short reason is required to override material warning "${finding.message}".`,
           recoveryGuidance:
             "Provide a reason when overriding material external-boundary warnings.",
+          findings: plan.body.findings,
+        };
+      }
+    }
+
+    // Publication boundary: every material external warning must be explicitly overridden.
+    if (plan.body.actionType === "publication") {
+      const overridden = new Set(
+        overrides
+          .filter((row) => row.reason?.trim())
+          .map((row) => row.findingId),
+      );
+      const missing = plan.body.findings.filter(
+        (finding) =>
+          finding.severity === "warning" &&
+          finding.materialExternal &&
+          !overridden.has(finding.id),
+      );
+      if (missing.length > 0) {
+        return {
+          ok: false,
+          status: 400,
+          code: "override_reason_required",
+          error: `Publishing a known material warning requires an explicit override reason (${missing[0]!.message}).`,
+          recoveryGuidance:
+            "Provide softWarningOverrides with a short reason for each material conflict or empty-subset warning.",
           findings: plan.body.findings,
         };
       }
@@ -5536,12 +5878,35 @@ export class EventStore extends DurableObject<AppBindings> {
       approvedAt: now,
     };
 
+    let linkedCommunication: {
+      planId: string;
+      digest: string;
+      body: ReturnType<typeof planCommunicationStub>;
+    } | null = null;
+    if (
+      plan.body.actionType === "publication" &&
+      plan.body.calendarConsequences.length > 0
+    ) {
+      const commPlanId = crypto.randomUUID();
+      const commBody = planCommunicationStub({
+        planId: commPlanId,
+        parentPlanId: plan.id,
+        calendarOps: plan.body.calendarConsequences,
+        ageWarningHours: plan.body.ageWarningHours,
+      });
+      linkedCommunication = {
+        planId: commPlanId,
+        digest: await digestPayload(communicationBodyDigestPayload(commBody)),
+        body: commBody,
+      };
+    }
+
     let appliedPlan: CourseCheckPlan | null = null;
     try {
       this.ctx.storage.transactionSync(() => {
-        this.applyCascadeRecords(plan, now);
         let nextBody = plan.body;
         if (plan.body.actionType === "decision") {
+          this.applyCascadeRecords(plan, now);
           nextBody = markDecisionItemsApplied(plan.body);
           if (overrides.length > 0) {
             nextBody = {
@@ -5557,6 +5922,16 @@ export class EventStore extends DurableObject<AppBindings> {
               ],
             };
           }
+        } else if (plan.body.actionType === "guaranteed_speaker") {
+          this.applyCascadeRecords(plan, now);
+        } else if (plan.body.actionType === "publication") {
+          nextBody = this.applyPublicationPlan(
+            plan,
+            overrides,
+            input.actor,
+            now,
+            linkedCommunication,
+          );
         }
         this.ctx.storage.sql.exec(
           `INSERT INTO course_check_receipts
@@ -5574,8 +5949,8 @@ export class EventStore extends DurableObject<AppBindings> {
         const finalState: CourseCheckPlanState =
           plan.body.actionType === "decision" &&
           (plan.body.aggregateProgress.deferred > 0 ||
-            nextBody.actionType === "decision" &&
-              nextBody.followUpQueue.some((item) => item.status === "open"))
+            (nextBody.actionType === "decision" &&
+              nextBody.followUpQueue.some((item) => item.status === "open")))
             ? "Partially complete"
             : "Complete";
         this.ctx.storage.sql.exec(
@@ -5605,19 +5980,26 @@ export class EventStore extends DurableObject<AppBindings> {
           summary: `Applied ${input.stageId} for plan version ${plan.version}.`,
           fromVersion: plan.version,
         });
+        const auditType =
+          plan.body.actionType === "publication"
+            ? "course_check.publication.applied"
+            : "course_check.decision.applied";
         const proposalId =
           plan.body.actionType === "decision" ? plan.body.proposalId : "";
         const outcomeLabel =
           plan.body.actionType === "decision"
             ? `${plan.body.aggregateProgress.active} decision(s)`
-            : "guaranteed_speaker";
+            : plan.body.actionType === "publication"
+              ? plan.body.operation
+              : "guaranteed_speaker";
         this.ctx.storage.sql.exec(
           `INSERT INTO audit_events
             (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
              committee_note_changed, created_at)
-           VALUES (?, ?, 'course_check.decision.applied', ?, ?, ?, ?, 0, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
           crypto.randomUUID(),
           proposalId || plan.id,
+          auditType,
           input.actor.id,
           input.actor.displayName,
           plan.state,
@@ -5665,13 +6047,90 @@ export class EventStore extends DurableObject<AppBindings> {
     return { ok: true, plan: this.enrichPlan(applied), created: true };
   }
 
+  private applyPublicationPlan(
+    plan: CourseCheckPlan,
+    overrides: Array<{ findingId: string; reason?: string | null }>,
+    actor: CourseCheckActor,
+    now: string,
+    linkedCommunication: {
+      planId: string;
+      digest: string;
+      body: ReturnType<typeof planCommunicationStub>;
+    } | null,
+  ): PublicationPlanBody {
+    if (plan.body.actionType !== "publication") {
+      throw new Error("Expected publication plan body.");
+    }
+    const body = plan.body;
+    const snapshot = {
+      sessions: body.proposedSnapshot.sessions as unknown as PublicProgramSession[],
+      speakers: body.proposedSnapshot.speakers as unknown as PublicProgramSpeaker[],
+    };
+    this.insertPublicProgramRevision({
+      snapshot,
+      source: `course_check:${plan.id}:${body.operation}`,
+      now,
+    });
+
+    const linkedIds: string[] = [...body.linkedPlanIds];
+    if (linkedCommunication) {
+      this.ctx.storage.sql.exec(
+        `INSERT INTO course_check_plans
+          (id, action_type, state, version, digest, body_json, created_at, updated_at,
+           created_by_id, created_by_name, approval_json, receipt_id)
+         VALUES (?, 'communication', 'Ready', 1, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+        linkedCommunication.planId,
+        linkedCommunication.digest,
+        JSON.stringify(linkedCommunication.body),
+        now,
+        now,
+        actor.id,
+        actor.displayName,
+      );
+      this.recordPlanVersion({
+        planId: linkedCommunication.planId,
+        version: 1,
+        digest: linkedCommunication.digest,
+        state: "Ready",
+        body: linkedCommunication.body,
+        actor,
+        at: now,
+        mutationKind: "create",
+        summary: `Linked communication stub from publication ${plan.id}.`,
+        fromVersion: 0,
+      });
+      linkedIds.push(linkedCommunication.planId);
+    }
+
+    return {
+      ...body,
+      linkedPlanIds: linkedIds,
+      softWarningOverrides: [
+        ...body.softWarningOverrides,
+        ...overrides.map((override) => ({
+          findingId: override.findingId,
+          reason: override.reason?.trim() || null,
+          actor,
+          at: now,
+        })),
+      ],
+    };
+  }
+
   private applyCascadeRecords(plan: CourseCheckPlan, now: string): void {
     const body = plan.body;
+    if (body.actionType === "publication" || body.actionType === "communication") {
+      return;
+    }
     if (body.actionType === "decision" && body.items && body.items.length > 0) {
       for (const item of body.items) {
         if (item.status !== "active") continue;
         this.applyDecisionItemCascade(plan.id, item, now);
       }
+      return;
+    }
+
+    if (body.actionType !== "guaranteed_speaker" && body.actionType !== "decision") {
       return;
     }
 
@@ -5683,7 +6142,7 @@ export class EventStore extends DurableObject<AppBindings> {
       outcome: body.actionType === "decision" ? body.outcome : null,
       speakers: body.speakers,
       participations: body.participations,
-      session: body.actionType === "decision" ? body.session : body.session,
+      session: body.session,
       tasks: body.tasks,
       portalAccess: body.portalAccess,
       now,
@@ -5714,11 +6173,11 @@ export class EventStore extends DurableObject<AppBindings> {
     proposalId: string | null;
     proposalRevision: number | null;
     outcome: ProgramOutcome | null;
-    speakers: CourseCheckPlanBody["speakers"];
-    participations: CourseCheckPlanBody["participations"];
-    session: CourseCheckPlanBody["session"] | null;
-    tasks: CourseCheckPlanBody["tasks"];
-    portalAccess: CourseCheckPlanBody["portalAccess"];
+    speakers: PlannedSpeaker[];
+    participations: PlannedParticipation[];
+    session: PlannedSession | null;
+    tasks: PlannedTask[];
+    portalAccess: PlannedPortalAccess[];
     now: string;
   }): void {
     const speakerIdByPlanned = new Map<string, string>();

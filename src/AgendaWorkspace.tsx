@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { FormEvent, useMemo, useState } from "react";
 
 import type {
@@ -7,7 +8,13 @@ import type {
   ScheduleConflict,
   SessionPlacementPatch,
 } from "../shared/events";
-import { ApiError, fetchAgenda, updateSessionPlacement } from "./api";
+import {
+  ApiError,
+  createPublicationCourseCheck,
+  fetchAgenda,
+  updateSessionPlacement,
+} from "./api";
+import { createClientId } from "./id";
 
 const SLOT_MINUTES = 30;
 const DAY_START_HOUR = 9;
@@ -98,6 +105,7 @@ function actionLabel(action: ScheduleConflict["actions"][number]): string {
 
 export function AgendaWorkspace({ event }: { event: EventRecord }) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const agendaQuery = useQuery({
     queryKey: ["agenda", event.id],
     queryFn: () => fetchAgenda(event.id),
@@ -125,6 +133,27 @@ export function AgendaWorkspace({ event }: { event: EventRecord }) {
     onError: (error) => {
       setStatusMessage(
         error instanceof ApiError ? error.message : "Unable to save placement.",
+      );
+    },
+  });
+
+  const publishMutation = useMutation({
+    mutationFn: () =>
+      createPublicationCourseCheck(event.id, {
+        operation: "publish",
+        idempotencyKey: `ui-publish-${event.id}-${createClientId()}`,
+      }),
+    onSuccess: (plan) => {
+      void navigate({
+        to: "/e/$eventId/course-checks/$planId",
+        params: { eventId: event.id, planId: plan.id },
+      });
+    },
+    onError: (error) => {
+      setStatusMessage(
+        error instanceof ApiError
+          ? error.message
+          : "Unable to open Program Publication Course Check.",
       );
     },
   });
@@ -298,6 +327,17 @@ export function AgendaWorkspace({ event }: { event: EventRecord }) {
             </button>
           ))}
         </div>
+        <button
+          type="button"
+          className="btn btn-primary btn-sm"
+          disabled={publishMutation.isPending}
+          onClick={() => {
+            setStatusMessage(null);
+            publishMutation.mutate();
+          }}
+        >
+          {publishMutation.isPending ? "Opening…" : "Publish program"}
+        </button>
       </div>
 
       {statusMessage ? (

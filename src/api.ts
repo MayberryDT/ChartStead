@@ -1,6 +1,7 @@
 import type {
   CourseCheckPlan,
   ProgramOutcome,
+  PublicationOperation,
 } from "../shared/course-check";
 import type { AirtablePullResult, AirtableSyncState } from "../shared/airtable";
 import type {
@@ -906,6 +907,33 @@ export async function deferCourseCheckItems(
           : body.error
         : "Unable to defer Course Check items";
     throw new ApiError(message, response.status, body);
+  }
+  return body;
+}
+
+export async function createPublicationCourseCheck(
+  eventId: string,
+  input: {
+    operation: PublicationOperation;
+    restoreRevisionId?: string;
+    idempotencyKey: string;
+  },
+): Promise<CourseCheckPlan> {
+  const response = await fetch(`/api/events/${eventId}/course-checks/publications`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": input.idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<CourseCheckPlan | { error: string }>(response);
+  if (!response.ok || !("id" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to create Publication Course Check",
+      response.status,
+      body,
+    );
   }
   return body;
 }

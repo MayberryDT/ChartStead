@@ -3,6 +3,82 @@ import type {
   PublicProgramSession,
   PublicProgramSpeaker,
 } from "./events";
+import { placementStatus } from "./schedule-conflicts";
+
+export type PublishabilityReason =
+  | "unplaced"
+  | "missing_title"
+  | "missing_description"
+  | "missing_speaker"
+  | "private";
+
+export interface PublishabilityResult {
+  publishable: boolean;
+  reasons: PublishabilityReason[];
+  placement: ReturnType<typeof placementStatus>;
+}
+
+/** Valid public subset rules for Program Publication Course Check. */
+export function assessSessionPublishability(
+  session: Pick<
+    PublicProgramSession,
+    "title" | "description" | "roomId" | "startsAt" | "endsAt" | "speakers"
+  > & { private?: boolean },
+): PublishabilityResult {
+  const placement = placementStatus(session);
+  const reasons: PublishabilityReason[] = [];
+  if (session.private) reasons.push("private");
+  if (placement === "unplaced") reasons.push("unplaced");
+  if (!session.title.trim()) reasons.push("missing_title");
+  if (!session.description.trim()) reasons.push("missing_description");
+  if (!session.speakers.some((speaker) => speaker.name.trim().length > 0)) {
+    reasons.push("missing_speaker");
+  }
+  return {
+    publishable: reasons.length === 0,
+    reasons,
+    placement,
+  };
+}
+
+export function selectValidPublicSubset(
+  sessions: PublicProgramSession[],
+  speakers: PublicProgramSpeaker[],
+): { sessions: PublicProgramSession[]; speakers: PublicProgramSpeaker[] } {
+  const included = sessions.filter(
+    (session) => assessSessionPublishability(session).publishable,
+  );
+  const ids = new Set(included.map((session) => session.id));
+  return {
+    sessions: included,
+    speakers: speakers
+      .map((speaker) => ({
+        ...speaker,
+        sessionIds: speaker.sessionIds.filter((id) => ids.has(id)),
+      }))
+      .filter((speaker) => speaker.sessionIds.length > 0),
+  };
+}
+
+export function sessionPublicFingerprint(
+  session: PublicProgramSession,
+): Record<string, unknown> {
+  return {
+    id: session.id,
+    title: session.title,
+    description: session.description,
+    format: session.format,
+    trackId: session.trackId,
+    roomId: session.roomId,
+    startsAt: session.startsAt,
+    endsAt: session.endsAt,
+    calendarUid: session.calendarUid,
+    calendarSequence: session.calendarSequence,
+    speakers: session.speakers
+      .map((speaker) => ({ id: speaker.id, name: speaker.name, role: speaker.role }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+  };
+}
 
 export function filterPublicSessions(
   sessions: PublicProgramSession[],

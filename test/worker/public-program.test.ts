@@ -226,7 +226,10 @@ describe("Ticket 09 public program", () => {
       startsAt: "2026-10-07T15:00:00.000Z",
       endsAt: "2026-10-07T15:45:00.000Z",
     });
-    // Leave sessionB unplaced / TBD
+    // Partial placement (room only) remains publishable with TBD time.
+    await placeSession(sessionB.id, {
+      roomId: "harbor-hall",
+    });
 
     const store = env.EVENT_STORE.getByName(eventId);
     const speakerId = sessionA.speakers[0]?.id;
@@ -243,7 +246,7 @@ describe("Ticket 09 public program", () => {
     expect(published.event.themeAccent).toMatch(/^#[0-9a-f]{6}$/);
 
     const placed = published.sessions.find((item) => item.id === sessionA.id);
-    const unplaced = published.sessions.find((item) => item.id === sessionB.id);
+    const partial = published.sessions.find((item) => item.id === sessionB.id);
     expect(placed).toMatchObject({
       id: sessionA.id,
       title: sessionA.title,
@@ -254,9 +257,9 @@ describe("Ticket 09 public program", () => {
       calendarUid: sessionA.calendarUid || `cal_${sessionA.id}`,
     });
     expect(placed?.description.length).toBeGreaterThan(0);
-    expect(unplaced?.startsAt).toBeNull();
-    expect(unplaced?.roomId).toBeNull();
-    expect(unplaced?.roomPending).toBe(true);
+    expect(partial?.startsAt).toBeNull();
+    expect(partial?.roomId).toBe("harbor-hall");
+    expect(partial?.roomPending).toBe(false);
 
     const speaker = published.speakers.find((item) => item.id === speakerId);
     expect(speaker?.biography).toBe("Public-approved biography for Ada.");

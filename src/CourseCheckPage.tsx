@@ -7,6 +7,7 @@ import type {
   CourseCheckFinding,
   CourseCheckPlan,
   DecisionPlanBody,
+  PublicationPlanBody,
 } from "../shared/course-check";
 import {
   ApiError,
@@ -264,6 +265,143 @@ function GuaranteedBody({ plan }: { plan: CourseCheckPlan }) {
   );
 }
 
+function PublicationBody({
+  plan,
+  overrideReasons,
+  onOverrideReason,
+}: {
+  plan: CourseCheckPlan;
+  overrideReasons: Record<string, string>;
+  onOverrideReason: (findingId: string, reason: string) => void;
+}) {
+  const body = plan.body as PublicationPlanBody;
+  if (body.actionType !== "publication") return null;
+  const materialWarnings = body.findings.filter(
+    (finding) => finding.severity === "warning" && finding.materialExternal,
+  );
+  return (
+    <div className="course-check-sections">
+      <section className="panel">
+        <h2>Program publication</h2>
+        <dl className="course-check-meta">
+          <div>
+            <dt>State</dt>
+            <dd>{plan.state}</dd>
+          </div>
+          <div>
+            <dt>Operation</dt>
+            <dd>{body.operation}</dd>
+          </div>
+          <div>
+            <dt>Public baseline</dt>
+            <dd>
+              {body.publicRevisionId
+                ? `${body.publicRevisionId} (v${body.publicRevisionVersion})`
+                : "None"}
+            </dd>
+          </div>
+          <div>
+            <dt>Included sessions</dt>
+            <dd>{body.includedSessionIds.length}</dd>
+          </div>
+          <div>
+            <dt>Excluded sessions</dt>
+            <dd>{body.excludedSessions.length}</dd>
+          </div>
+        </dl>
+      </section>
+
+      {body.sessionDeltas.length > 0 ? (
+        <section className="panel">
+          <h2>Public delta</h2>
+          <ul className="course-check-deltas">
+            {body.sessionDeltas.map((delta) => (
+              <li key={delta.sessionId}>
+                <span className="course-check-delta-type">
+                  {delta.changes.join(", ")} · {delta.sessionId}
+                </span>
+                <p>{delta.title}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {body.excludedSessions.length > 0 ? (
+        <section className="panel">
+          <h2>Kept internal</h2>
+          <ul>
+            {body.excludedSessions.map((row) => (
+              <li key={row.sessionId}>
+                <strong>{row.title}</strong> — {row.reasons.join("; ")}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {materialWarnings.length > 0 ? (
+        <section className="panel">
+          <h2>Material override reasons</h2>
+          <p className="muted">
+            Publishing known material conflicts or an empty subset requires a short reason
+            for each warning.
+          </p>
+          <ul className="course-check-overrides">
+            {materialWarnings.map((finding) => (
+              <li key={finding.id}>
+                <p>{finding.message}</p>
+                <label>
+                  Override reason
+                  <input
+                    type="text"
+                    value={overrideReasons[finding.id] ?? ""}
+                    onChange={(event) =>
+                      onOverrideReason(finding.id, event.target.value)
+                    }
+                    placeholder="Why publish with this known issue?"
+                  />
+                </label>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {body.linkedPlanIds.length > 0 ? (
+        <section className="panel">
+          <h2>Linked communication</h2>
+          <ul>
+            {body.linkedPlanIds.map((id) => (
+              <li key={id}>
+                <Link
+                  to="/e/$eventId/course-checks/$planId"
+                  params={{ eventId: plan.eventId, planId: id }}
+                >
+                  {id.slice(0, 8)}
+                </Link>{" "}
+                — no delivery inherited
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : (
+        <section className="panel">
+          <h2>Linked communication</h2>
+          <p>
+            Calendar and speaker notifications are not sent by Publish program. Linked
+            Communication Course Checks appear after apply when calendar consequences exist.
+          </p>
+        </section>
+      )}
+
+      {(body.evidenceSections ?? []).map((section) => (
+        <EvidenceSectionView key={section.kind} section={section} plan={plan} />
+      ))}
+    </div>
+  );
+}
+
 export function CourseCheckPage() {
   const { eventId, planId } = useParams({
     from: "/e/$eventId/course-checks/$planId",
@@ -272,6 +410,7 @@ export function CourseCheckPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [deferReason, setDeferReason] = useState("");
+  const [overrideReasons, setOverrideReasons] = useState<Record<string, string>>({});
   const applyKey = useMemo(
     () => `ui-apply-${planId}-${createClientId()}`,
     [planId],
@@ -287,20 +426,37 @@ export function CourseCheckPage() {
   });
 
   const applyMutation = useMutation({
-    mutationFn: (plan: CourseCheckPlan) =>
-      applyCourseCheckPlan(eventId, plan.id, {
+    mutationFn: (plan: CourseCheckPlan) => {
+      const stageId = plan.body.stages[0]?.id ?? "apply-decision";
+      const materialIds = plan.body.findings
+        .filter((finding) => finding.severity === "warning" && finding.materialExternal)
+        .map((finding) => finding.id);
+      const softWarningOverrides =
+        plan.body.actionType === "publication"
+          ? materialIds.map((findingId) => ({
+              findingId,
+              reason: overrideReasons[findingId] ?? "",
+            }))
+          : undefined;
+      return applyCourseCheckPlan(eventId, plan.id, {
         planVersion: plan.version,
         digest: plan.digest,
-        stageId: "apply-decision",
+        stageId,
         idempotencyKey: applyKey,
-      }),
+        softWarningOverrides,
+      });
+    },
     onSuccess: (plan) => {
       queryClient.setQueryData(["course-check", eventId, planId], plan);
       void queryClient.invalidateQueries({ queryKey: ["proposals", eventId] });
+      void queryClient.invalidateQueries({ queryKey: ["agenda", eventId] });
+      void queryClient.invalidateQueries({ queryKey: ["public-program", eventId] });
       setMessage(
         plan.state === "Partially complete"
           ? "Remaining batch applied. Deferred items stay in the follow-up queue."
-          : "Decision applied. Internal records updated; no speaker email was sent.",
+          : plan.body.actionType === "publication"
+            ? "Program published as a new immutable public revision. No speaker messages were sent."
+            : "Decision applied. Internal records updated; no speaker email was sent.",
       );
     },
   });
@@ -351,29 +507,54 @@ export function CourseCheckPage() {
 
   const plan = planQuery.data;
   const stage = plan.body.stages[0];
-  const blocked = plan.body.findings.some((finding) => finding.severity === "blocker");
+  const blocked =
+    plan.body.findings.some((finding) => finding.severity === "blocker") ||
+    plan.state === "Out of date";
   const complete = plan.state === "Complete" || plan.state === "Partially complete";
   const isDecision = plan.body.actionType === "decision";
+  const isPublication = plan.body.actionType === "publication";
+  const materialReady =
+    !isPublication ||
+    plan.body.findings
+      .filter((finding) => finding.severity === "warning" && finding.materialExternal)
+      .every((finding) => (overrideReasons[finding.id] ?? "").trim().length > 0);
+  const backTo =
+    isPublication
+      ? ({ to: "/e/$eventId/agenda" as const, label: "Back to agenda" })
+      : ({
+          to: "/e/$eventId/submissions" as const,
+          label: "Back to submissions",
+        });
 
   return (
     <main className="app course-check-page">
       <header className="course-check-header">
         <div>
           <p className="eyebrow">Course Check</p>
-          <h1>Shared decision workspace</h1>
+          <h1>
+            {isPublication
+              ? "Program publication workspace"
+              : "Shared decision workspace"}
+          </h1>
           <p className="lede">
             Resumable event resource. Another authorized administrator can inspect and
-            continue this exact versioned batch.
+            continue this exact versioned plan.
           </p>
         </div>
-        <Link
-          className="btn btn-secondary btn-sm"
-          to="/e/$eventId/submissions"
-          params={{ eventId }}
-          search={{ q: undefined, status: undefined, track: undefined, sort: undefined }}
-        >
-          Back to submissions
-        </Link>
+        {isPublication ? (
+          <Link className="btn btn-secondary btn-sm" to="/e/$eventId/agenda" params={{ eventId }}>
+            {backTo.label}
+          </Link>
+        ) : (
+          <Link
+            className="btn btn-secondary btn-sm"
+            to="/e/$eventId/submissions"
+            params={{ eventId }}
+            search={{ q: undefined, status: undefined, track: undefined, sort: undefined }}
+          >
+            {backTo.label}
+          </Link>
+        )}
       </header>
 
       {isDecision ? (
@@ -389,6 +570,14 @@ export function CourseCheckPage() {
             });
           }}
         />
+      ) : isPublication ? (
+        <PublicationBody
+          plan={plan}
+          overrideReasons={overrideReasons}
+          onOverrideReason={(findingId, reason) =>
+            setOverrideReasons((current) => ({ ...current, [findingId]: reason }))
+          }
+        />
       ) : (
         <GuaranteedBody plan={plan} />
       )}
@@ -399,6 +588,9 @@ export function CourseCheckPage() {
             {plan.state}
             {plan.receipt?.appliedAt ? ` at ${plan.receipt.appliedAt}` : ""}. Receipt{" "}
             <span className="mono">{plan.receipt?.id.slice(0, 8)}</span>
+            {isPublication && plan.body.actionType === "publication" && plan.body.linkedPlanIds.length > 0
+              ? ` · ${plan.body.linkedPlanIds.length} linked communication plan(s)`
+              : ""}
           </p>
         ) : (
           <>
@@ -433,7 +625,12 @@ export function CourseCheckPage() {
             <button
               type="button"
               className="btn btn-primary"
-              disabled={blocked || applyMutation.isPending || !stage}
+              disabled={
+                blocked ||
+                applyMutation.isPending ||
+                !stage ||
+                !materialReady
+              }
               onClick={() => {
                 setMessage(null);
                 applyMutation.mutate(plan);
