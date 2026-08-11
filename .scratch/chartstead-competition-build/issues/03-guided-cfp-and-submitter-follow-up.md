@@ -1,10 +1,12 @@
 # 03 — Guided CFP publishing and submitter follow-up
 
+> **Read first:** [Ticket 03 recovery handoff](../TICKET-03-RECOVERY.md). Ticket 02 acceptance is the start gate; the existing Ticket 03 worktree is quarantined WIP.
+
 **What to build:** A guided organizer workflow for configuring and publishing multiple CFP forms, with draft-versus-published safety, basic conditional behavior, uploads, real confirmation email, and secure signed-link editing for submitters.
 
 **Blocked by:** 02 — First proposal end to end.
 
-**Status:** ready-for-agent
+**Status:** blocked
 
 - [ ] An organizer can create, name, preview, publish, close, and reopen more than one CFP form for an event.
 - [ ] The guided builder covers welcome content, proposal fields, track choices, speaker and repeatable co-speaker information, supporting links, and files.
