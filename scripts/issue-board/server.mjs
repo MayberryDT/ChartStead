@@ -14,6 +14,8 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "../..");
 const PAGE_PATH = join(__dirname, "page.html");
+const FAVICON_SVG = join(REPO_ROOT, "favicon.svg");
+const FAVICON_PNG = join(REPO_ROOT, "design/assets/brand/chartstead-favicon.png");
 
 const args = process.argv.slice(2);
 function flag(name, fallback) {
@@ -178,6 +180,24 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/health") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    if (url.pathname === "/favicon.svg" || url.pathname === "/favicon.ico") {
+      const svg = await readFile(FAVICON_SVG);
+      res.writeHead(200, {
+        "content-type": "image/svg+xml",
+        "cache-control": "public, max-age=86400",
+      });
+      res.end(svg);
+      return;
+    }
+    if (url.pathname === "/favicon.png") {
+      const png = await readFile(FAVICON_PNG);
+      res.writeHead(200, {
+        "content-type": "image/png",
+        "cache-control": "public, max-age=86400",
+      });
+      res.end(png);
       return;
     }
     res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
