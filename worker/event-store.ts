@@ -6,6 +6,8 @@ import {
   type UploadedAssetAnswer,
 } from "../shared/cfp-definition";
 import type {
+  CommunicationPlanBody,
+  CommunicationTemplateKind,
   CourseCheckActionType,
   CourseCheckActor,
   CourseCheckPlan,
@@ -14,12 +16,14 @@ import type {
   CourseCheckPlanVersion,
   CourseCheckReceipt,
   DecisionPlanBody,
+  FrozenCommunicationDraft,
   PlannedParticipation,
   PlannedPortalAccess,
   PlannedSession,
   PlannedSpeaker,
   PlannedTask,
   PlanMutationRecord,
+  PriorCommunicationEvidence,
   ProgramOutcome,
   PublicationOperation,
   PublicationPlanBody,
@@ -77,6 +81,15 @@ import {
 } from "../shared/schedule-conflicts";
 import type { AssetClaimInput } from "./cfp-submissions";
 import {
+  communicationBodyDigestPayload,
+  defaultCommunicationContent,
+  freezeCommunicationDrafts,
+  hasCommunicationBlockers,
+  planCommunicationCascade,
+  redactCommunicationBody,
+  type CommunicationGroupInput,
+} from "./course-check/communication-planner";
+import {
   decisionBodyDigestPayload,
   deferDecisionItems,
   hasBlockerFindings,
@@ -90,10 +103,10 @@ import {
 import { digestPayload, stableStringify } from "./course-check/digest";
 import { computeAgeWarning } from "./course-check/evidence";
 import {
-  communicationBodyDigestPayload,
   planCommunicationStub,
   planPublication,
   publicationBodyDigestPayload,
+  publicationCommunicationDigestPayload,
 } from "./course-check/publication-planner";
 import { createStableProposalId } from "./proposals";
 import type { AppBindings } from "./types";
@@ -591,14 +604,42 @@ function normalizeCourseCheckBody(body: CourseCheckPlanBody): CourseCheckPlanBod
   if (body.actionType === "communication") {
     return {
       ...body,
+      recipientGroups: body.recipientGroups ?? [],
       drafts: body.drafts ?? [],
       recipients: body.recipients ?? [],
       calendarOps: body.calendarOps ?? [],
       evidenceSections: body.evidenceSections ?? [],
       softWarningOverrides: body.softWarningOverrides ?? [],
       linkedPlanIds: body.linkedPlanIds ?? [],
+      parentPlanId: body.parentPlanId ?? null,
+      batchGroupId: body.batchGroupId ?? null,
+      splitExplanation: body.splitExplanation ?? null,
       ageWarningHours: body.ageWarningHours ?? DEFAULT_AGE_WARNING_HOURS,
       ageWarning: body.ageWarning ?? null,
+      stageVisibility: body.stageVisibility ?? {
+        decision: "not_started",
+        draft: "ready",
+        send: "not_started",
+        delivery: "not_started",
+      },
+      relevantRevisions: body.relevantRevisions ?? {
+        proposalIds: [],
+        proposalRevisions: {},
+        speakerEmails: [],
+        contentFingerprint: "",
+      },
+      purpose: body.purpose ?? "custom",
+      templateKind: body.templateKind ?? "custom",
+      subject: body.subject ?? "",
+      bodyText: body.bodyText ?? "",
+      bodyHtml: body.bodyHtml ?? "",
+      source: body.source ?? {
+        kind: "selection",
+        decisionPlanId: null,
+        decisionPlanVersion: null,
+        decisionPlanDigest: null,
+        selection: null,
+      },
     };
   }
   const decision = body as DecisionPlanBody;
@@ -1071,6 +1112,31 @@ export class EventStore extends DurableObject<AppBindings> {
           deferred_by_name TEXT NOT NULL,
           status TEXT NOT NULL
         )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS communication_drafts (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT NOT NULL,
+          plan_version INTEGER NOT NULL,
+          group_id TEXT NOT NULL,
+          proposal_id TEXT,
+          session_id TEXT,
+          to_email TEXT NOT NULL,
+          recipient_name TEXT NOT NULL,
+          subject TEXT NOT NULL,
+          body_text TEXT NOT NULL,
+          body_html TEXT NOT NULL,
+          attachment_refs_json TEXT NOT NULL DEFAULT '[]',
+          calendar_intent_json TEXT,
+          status TEXT NOT NULL,
+          frozen_at TEXT,
+          frozen_payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS communication_drafts_plan_idx
+        ON communication_drafts (plan_id, plan_version)
       `);
 
       this.ensureColumn("events", "submission_count", "INTEGER NOT NULL DEFAULT 0");
@@ -5101,6 +5167,38 @@ export class EventStore extends DurableObject<AppBindings> {
             ],
           };
         }
+      } else if (nextBody.actionType === "communication") {
+        const changed = this.detectCommunicationStaleInputs(nextBody);
+        if (changed.length > 0) {
+          state = "Out of date";
+          nextBody = {
+            ...nextBody,
+            stages: nextBody.stages.map((stage) =>
+              stage.id === "create-drafts" || stage.id === "send-messages"
+                ? { ...stage, status: "out_of_date" as const }
+                : stage,
+            ),
+            stageVisibility: {
+              ...nextBody.stageVisibility,
+              draft:
+                nextBody.stageVisibility.draft === "complete"
+                  ? "out_of_date"
+                  : nextBody.stageVisibility.draft,
+              send: "out_of_date",
+            },
+            findings: [
+              ...nextBody.findings.filter((f) => f.code !== "relevant_input_changed"),
+              {
+                id: "relevant-input-changed",
+                severity: "blocker",
+                code: "relevant_input_changed",
+                message: `Relevant communication inputs changed: ${changed.join(", ")}.`,
+                recoveryGuidance:
+                  "Revise this Communication Course Check from current recipients and content.",
+              },
+            ],
+          };
+        }
       }
     }
 
@@ -5582,6 +5680,872 @@ export class EventStore extends DurableObject<AppBindings> {
     return { plan, created: true };
   }
 
+  private detectCommunicationStaleInputs(body: CommunicationPlanBody): string[] {
+    const changed: string[] = [];
+    for (const proposalId of body.relevantRevisions.proposalIds) {
+      const proposal = this.getProposal(proposalId);
+      if (!proposal) {
+        changed.push(`${proposalId}:missing`);
+        continue;
+      }
+      const expected = body.relevantRevisions.proposalRevisions[proposalId];
+      if (typeof expected === "number" && proposal.reviewVersion !== expected) {
+        changed.push(`${proposalId}:reviewVersion`);
+      }
+      const liveEmails = [
+        proposal.speakerEmail.trim().toLowerCase(),
+        ...proposal.coSpeakers.map((speaker) => speaker.email.trim().toLowerCase()),
+      ].filter(Boolean);
+      const planned = body.recipientGroups
+        .filter((group) => group.proposalId === proposalId)
+        .flatMap((group) =>
+          group.recipients.map((recipient) => recipient.address.trim().toLowerCase()),
+        )
+        .filter(Boolean)
+        .sort();
+      const liveSorted = [...liveEmails].sort();
+      if (JSON.stringify(planned) !== JSON.stringify(liveSorted)) {
+        // Only flag when planned included emails differ from live speaker emails for that proposal.
+        const plannedSet = new Set(planned);
+        const liveSet = new Set(liveSorted);
+        const missingLive = liveSorted.some((email) => !plannedSet.has(email));
+        const extraPlanned = planned.some((email) => !liveSet.has(email));
+        if (missingLive || extraPlanned) {
+          changed.push(`${proposalId}:recipients`);
+        }
+      }
+    }
+    return changed;
+  }
+
+  private listPriorCommunicationsForProposal(
+    proposalId: string | null,
+  ): PriorCommunicationEvidence[] {
+    if (!proposalId) return [];
+    return this.listOutboxMessages(proposalId).map((message) => ({
+      id: message.id,
+      kind: message.kind,
+      status: message.status,
+      toEmail: message.toEmail,
+      subject: message.subject,
+      createdAt: message.createdAt,
+      sentAt: message.sentAt,
+      proposalId: message.proposalId,
+    }));
+  }
+
+  private resolveCommunicationGroups(input: {
+    decisionPlanId?: string | null;
+    proposalIds?: string[];
+    sessionIds?: string[];
+    speakerIds?: string[];
+    taskIds?: string[];
+  }): {
+    groups: CommunicationGroupInput[];
+    templateKind: CommunicationTemplateKind;
+    label: string;
+    outcome: ProgramOutcome | null;
+    linkedDecision: {
+      planId: string;
+      version: number;
+      digest: string;
+    } | null;
+  } {
+    const proposalIds = new Set<string>(input.proposalIds ?? []);
+    let linkedDecision: {
+      planId: string;
+      version: number;
+      digest: string;
+    } | null = null;
+
+    if (input.decisionPlanId) {
+      const decision = this.getCourseCheckPlan(input.decisionPlanId);
+      if (!decision) {
+        throw new Error("Decision Course Check not found.");
+      }
+      if (decision.body.actionType !== "decision") {
+        throw new Error("Only Decision Course Checks can link into Communication Course Checks.");
+      }
+      if (decision.state !== "Complete" && decision.state !== "Partially complete") {
+        throw new Error(
+          "Communication Course Check can only link from a completed Decision Course Check.",
+        );
+      }
+      linkedDecision = {
+        planId: decision.id,
+        version: decision.version,
+        digest: decision.digest,
+      };
+      for (const item of decision.body.items) {
+        if (item.status === "applied") {
+          proposalIds.add(item.proposalId);
+        }
+      }
+      if (proposalIds.size === 0) {
+        proposalIds.add(decision.body.proposalId);
+      }
+    }
+
+    for (const sessionId of input.sessionIds ?? []) {
+      const row = this.ctx.storage.sql
+        .exec<{ id: string; proposal_id: string | null; title: string }>(
+          `SELECT id, proposal_id, title FROM sessions WHERE id = ?`,
+          sessionId,
+        )
+        .toArray()[0];
+      if (row?.proposal_id) proposalIds.add(row.proposal_id);
+    }
+
+    for (const taskId of input.taskIds ?? []) {
+      const row = this.ctx.storage.sql
+        .exec<{ id: string; proposal_id: string | null; speaker_id: string }>(
+          `SELECT id, proposal_id, speaker_id FROM onboarding_tasks WHERE id = ?`,
+          taskId,
+        )
+        .toArray()[0];
+      if (row?.proposal_id) proposalIds.add(row.proposal_id);
+      else if (row?.speaker_id && (input.speakerIds ?? []).length === 0) {
+        (input.speakerIds ??= []).push(row.speaker_id);
+      }
+    }
+
+    for (const speakerId of input.speakerIds ?? []) {
+      const rows = this.ctx.storage.sql
+        .exec<{ proposal_id: string | null }>(
+          `SELECT proposal_id FROM event_participations WHERE speaker_id = ?`,
+          speakerId,
+        )
+        .toArray();
+      for (const row of rows) {
+        if (row.proposal_id) proposalIds.add(row.proposal_id);
+      }
+    }
+
+    const groups: CommunicationGroupInput[] = [];
+    let accepted = 0;
+    let declined = 0;
+
+    for (const proposalId of proposalIds) {
+      const proposal = this.getProposal(proposalId);
+      if (!proposal) continue;
+      const cascade = this.getAcceptanceCascade(proposalId);
+      const session = cascade.sessions[0] ?? null;
+      const speakers =
+        cascade.speakers.length > 0
+          ? cascade.speakers.map((speaker, index) => {
+              const participation = cascade.participations.find(
+                (row) => row.speakerId === speaker.id,
+              );
+              return {
+                speakerId: speaker.id,
+                name: speaker.name,
+                email: speaker.email,
+                role:
+                  participation?.role === "co"
+                    ? ("co" as const)
+                    : index === 0
+                      ? ("primary" as const)
+                      : ("co" as const),
+              };
+            })
+          : [
+              {
+                speakerId: null,
+                name: proposal.speakerName,
+                email: proposal.speakerEmail,
+                role: "primary" as const,
+              },
+              ...proposal.coSpeakers.map((speaker) => ({
+                speakerId: null as string | null,
+                name: speaker.name,
+                email: speaker.email,
+                role: "co" as const,
+              })),
+            ];
+
+      if (proposal.programOutcome === "accepted") accepted += 1;
+      if (proposal.programOutcome === "declined") declined += 1;
+
+      groups.push({
+        proposalId,
+        sessionId: session?.id ?? null,
+        label: proposal.title,
+        outcome: proposal.programOutcome,
+        speakers,
+        priorCommunications: this.listPriorCommunicationsForProposal(proposalId),
+      });
+    }
+
+    // Speaker-only selections without proposal linkage
+    if (groups.length === 0 && (input.speakerIds ?? []).length > 0) {
+      for (const speakerId of input.speakerIds ?? []) {
+        const speaker = this.ctx.storage.sql
+          .exec<{ id: string; name: string; email: string }>(
+            `SELECT id, name, email FROM speakers WHERE id = ?`,
+            speakerId,
+          )
+          .toArray()[0];
+        if (!speaker) continue;
+        groups.push({
+          proposalId: null,
+          sessionId: null,
+          label: speaker.name,
+          outcome: null,
+          speakers: [
+            {
+              speakerId: speaker.id,
+              name: speaker.name,
+              email: speaker.email,
+              role: "speaker",
+            },
+          ],
+          priorCommunications: [],
+        });
+      }
+    }
+
+    const templateKind: CommunicationTemplateKind =
+      accepted > 0 && declined === 0
+        ? "acceptance"
+        : declined > 0 && accepted === 0
+          ? "decline"
+          : "custom";
+    const label = groups[0]?.label ?? "selected speakers";
+    const outcome =
+      templateKind === "acceptance"
+        ? "accepted"
+        : templateKind === "decline"
+          ? "declined"
+          : null;
+
+    return { groups, templateKind, label, outcome, linkedDecision };
+  }
+
+  async createCommunicationCourseCheck(input: {
+    decisionPlanId?: string;
+    proposalIds?: string[];
+    sessionIds?: string[];
+    speakerIds?: string[];
+    taskIds?: string[];
+    templateKind?: CommunicationTemplateKind;
+    subject?: string;
+    bodyText?: string;
+    bodyHtml?: string;
+    idempotencyKey: string;
+    actor: CourseCheckActor;
+  }): Promise<{ plan: CourseCheckPlan; created: boolean }> {
+    const existing = this.readIdempotency("create-communication", input.idempotencyKey);
+    if (existing) {
+      const plan = this.getCourseCheckPlan(existing.planId);
+      if (!plan) throw new Error("Idempotent communication plan is missing.");
+      return { plan, created: false };
+    }
+
+    const resolved = this.resolveCommunicationGroups({
+      decisionPlanId: input.decisionPlanId,
+      proposalIds: input.proposalIds,
+      sessionIds: input.sessionIds,
+      speakerIds: input.speakerIds,
+      taskIds: input.taskIds,
+    });
+    if (resolved.groups.length === 0) {
+      throw new Error(
+        "No proposals, sessions, speakers, or tasks resolved into a communication scope.",
+      );
+    }
+
+    const content = defaultCommunicationContent({
+      templateKind: input.templateKind ?? resolved.templateKind,
+      outcome: resolved.outcome,
+      label: resolved.label,
+      subject: input.subject,
+      bodyText: input.bodyText,
+      bodyHtml: input.bodyHtml,
+    });
+
+    const planId = crypto.randomUUID();
+    const settings = this.courseCheckSettings();
+    const source: CommunicationPlanBody["source"] = resolved.linkedDecision
+      ? {
+          kind: "linked_decision",
+          decisionPlanId: resolved.linkedDecision.planId,
+          decisionPlanVersion: resolved.linkedDecision.version,
+          decisionPlanDigest: resolved.linkedDecision.digest,
+          selection: null,
+        }
+      : {
+          kind: "selection",
+          decisionPlanId: null,
+          decisionPlanVersion: null,
+          decisionPlanDigest: null,
+          selection: {
+            proposalIds: input.proposalIds ?? [],
+            sessionIds: input.sessionIds ?? [],
+            speakerIds: input.speakerIds ?? [],
+            taskIds: input.taskIds ?? [],
+          },
+        };
+
+    const body = planCommunicationCascade({
+      planId,
+      source,
+      templateKind: input.templateKind ?? resolved.templateKind,
+      subject: content.subject,
+      bodyText: content.bodyText,
+      bodyHtml: content.bodyHtml,
+      groups: resolved.groups,
+      linkedPlanIds: resolved.linkedDecision ? [resolved.linkedDecision.planId] : [],
+      parentPlanId: resolved.linkedDecision?.planId ?? null,
+      ageWarningHours: settings.ageWarningHours,
+    });
+
+    // Capture proposal revisions for stale detection.
+    for (const proposalId of body.relevantRevisions.proposalIds) {
+      const proposal = this.getProposal(proposalId);
+      if (proposal) {
+        body.relevantRevisions.proposalRevisions[proposalId] = proposal.reviewVersion;
+      }
+    }
+
+    const digest = await digestPayload(communicationBodyDigestPayload(body));
+    const now = new Date().toISOString();
+    const state: CourseCheckPlanState = hasCommunicationBlockers(body.findings)
+      ? "Needs attention"
+      : "Ready";
+
+    this.ctx.storage.sql.exec(
+      `INSERT INTO course_check_plans
+        (id, action_type, state, version, digest, body_json, created_at, updated_at,
+         created_by_id, created_by_name, approval_json, receipt_id)
+       VALUES (?, 'communication', ?, 1, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+      planId,
+      state,
+      digest,
+      JSON.stringify(body),
+      now,
+      now,
+      input.actor.id,
+      input.actor.displayName,
+    );
+    this.recordPlanVersion({
+      planId,
+      version: 1,
+      digest,
+      state,
+      body,
+      actor: input.actor,
+      at: now,
+      mutationKind: "create",
+      summary: resolved.linkedDecision
+        ? `Created Communication Course Check linked from decision ${resolved.linkedDecision.planId} (no approval transfer).`
+        : `Created Communication Course Check from selection (${resolved.groups.length} group(s)).`,
+      fromVersion: 0,
+    });
+
+    // Bidirectional link without transferring approval/receipt.
+    if (resolved.linkedDecision) {
+      const decisionRow = this.loadCourseCheckPlanRow(resolved.linkedDecision.planId);
+      if (decisionRow) {
+        const decisionPlan = mapCourseCheckPlan(decisionRow, this.eventIdOrThrow());
+        if (decisionPlan.body.actionType === "decision") {
+          const linkedIds = new Set([
+            ...(decisionPlan.body.linkedPlanIds ?? []),
+            planId,
+          ]);
+          const nextDecisionBody: DecisionPlanBody = {
+            ...decisionPlan.body,
+            linkedPlanIds: [...linkedIds],
+          };
+          // Keep decision digest/approval intact — body link metadata only.
+          this.ctx.storage.sql.exec(
+            `UPDATE course_check_plans SET body_json = ?, updated_at = ? WHERE id = ?`,
+            JSON.stringify(nextDecisionBody),
+            now,
+            decisionPlan.id,
+          );
+        }
+      }
+    }
+
+    const plan = this.getCourseCheckPlan(planId);
+    if (!plan) throw new Error("Communication Course Check was not persisted.");
+    this.writeIdempotency({
+      command: "create-communication",
+      key: input.idempotencyKey,
+      planId,
+      response: plan,
+    });
+    return { plan, created: true };
+  }
+
+  async reviseCommunicationCourseCheck(input: {
+    planId: string;
+    planVersion: number;
+    digest: string;
+    subject?: string;
+    bodyText?: string;
+    bodyHtml?: string;
+    recipientSelection?: Array<{ recipientId: string; selected: boolean }>;
+    idempotencyKey: string;
+    actor: CourseCheckActor;
+  }): Promise<
+    | { ok: true; plan: CourseCheckPlan; created: boolean }
+    | {
+        ok: false;
+        status: 400 | 409;
+        code: string;
+        error: string;
+        recoveryGuidance: string;
+      }
+  > {
+    const existing = this.readIdempotency("revise-communication", input.idempotencyKey);
+    if (existing) {
+      const plan = this.getCourseCheckPlan(existing.planId);
+      if (!plan) throw new Error("Idempotent revise plan is missing.");
+      return { ok: true, plan, created: false };
+    }
+
+    const row = this.loadCourseCheckPlanRow(input.planId);
+    if (!row) {
+      return {
+        ok: false,
+        status: 400,
+        code: "plan_not_found",
+        error: "Course Check plan not found.",
+        recoveryGuidance: "Create a new Communication Course Check.",
+      };
+    }
+    const plan = mapCourseCheckPlan(row, this.eventIdOrThrow());
+    if (plan.body.actionType !== "communication") {
+      return {
+        ok: false,
+        status: 400,
+        code: "unsupported_action",
+        error: "Only Communication Course Checks support content revision.",
+        recoveryGuidance: "Open a Communication Course Check to edit drafts.",
+      };
+    }
+    if (plan.version !== input.planVersion || plan.digest !== input.digest) {
+      return {
+        ok: false,
+        status: 409,
+        code: "plan_version_mismatch",
+        error: "This Course Check changed since you loaded it.",
+        recoveryGuidance: "Reload the Course Check and revise the latest plan version.",
+      };
+    }
+
+    const selection = new Map(
+      (input.recipientSelection ?? []).map((row) => [row.recipientId, row.selected]),
+    );
+    const excludedRecipientIds: string[] = [];
+    for (const group of plan.body.recipientGroups) {
+      for (const recipient of group.recipients) {
+        const selected = selection.has(recipient.recipientId)
+          ? selection.get(recipient.recipientId)!
+          : recipient.selected;
+        if (!selected) excludedRecipientIds.push(recipient.recipientId);
+      }
+    }
+
+    const subject = input.subject ?? plan.body.subject;
+    const bodyText = input.bodyText ?? plan.body.bodyText;
+    const bodyHtml = input.bodyHtml ?? plan.body.bodyHtml;
+
+    // Rebuild groups from current plan speaker rows (preserve structure) then re-plan.
+    const groups: CommunicationGroupInput[] = plan.body.recipientGroups.map((group) => ({
+      proposalId: group.proposalId,
+      sessionId: group.sessionId,
+      label: group.label,
+      outcome: group.outcome,
+      speakers: group.recipients.map((recipient) => ({
+        speakerId: recipient.speakerId,
+        name: recipient.name,
+        email: recipient.address,
+        role: recipient.role,
+      })),
+      priorCommunications: group.recipients.flatMap((recipient) => recipient.priorCommunications),
+    }));
+
+    const nextBody = planCommunicationCascade({
+      planId: plan.id,
+      source: plan.body.source,
+      templateKind: plan.body.templateKind,
+      subject,
+      bodyText,
+      bodyHtml,
+      groups,
+      excludedRecipientIds,
+      linkedPlanIds: plan.body.linkedPlanIds,
+      parentPlanId: plan.body.parentPlanId,
+      ageWarningHours: plan.body.ageWarningHours,
+      // Edits invalidate frozen drafts — staff must Create drafts again.
+      drafts: [],
+      draftStageComplete: false,
+    });
+    for (const proposalId of nextBody.relevantRevisions.proposalIds) {
+      const proposal = this.getProposal(proposalId);
+      if (proposal) {
+        nextBody.relevantRevisions.proposalRevisions[proposalId] = proposal.reviewVersion;
+      }
+    }
+
+    const nextVersion = plan.version + 1;
+    const digest = await digestPayload(communicationBodyDigestPayload(nextBody));
+    const now = new Date().toISOString();
+    const state: CourseCheckPlanState = hasCommunicationBlockers(nextBody.findings)
+      ? "Needs attention"
+      : "Ready";
+
+    this.recordPlanVersion({
+      planId: plan.id,
+      version: plan.version,
+      digest: plan.digest,
+      state: plan.state,
+      body: plan.body,
+      actor: plan.createdBy,
+      at: plan.updatedAt,
+      mutationKind: "create",
+      summary: `Historical snapshot of version ${plan.version}.`,
+      fromVersion: Math.max(0, plan.version - 1),
+    });
+
+    // Clear only draft/send approval — never touches linked decision approval.
+    this.ctx.storage.sql.exec(
+      `UPDATE course_check_plans
+       SET version = ?, digest = ?, body_json = ?, state = ?, updated_at = ?,
+           approval_json = NULL, receipt_id = NULL
+       WHERE id = ?`,
+      nextVersion,
+      digest,
+      JSON.stringify(nextBody),
+      state,
+      now,
+      plan.id,
+    );
+    this.recordPlanVersion({
+      planId: plan.id,
+      version: nextVersion,
+      digest,
+      state,
+      body: nextBody,
+      actor: input.actor,
+      at: now,
+      mutationKind: "revise",
+      summary: "Revised communication content or recipient selection; draft approval cleared.",
+      fromVersion: plan.version,
+    });
+
+    const updated = this.getCourseCheckPlan(plan.id);
+    if (!updated) throw new Error("Revised Communication Course Check is missing.");
+    this.writeIdempotency({
+      command: "revise-communication",
+      key: input.idempotencyKey,
+      planId: plan.id,
+      response: updated,
+    });
+    return { ok: true, plan: updated, created: true };
+  }
+
+  async createCommunicationDrafts(input: {
+    planId: string;
+    planVersion: number;
+    digest: string;
+    stageId: string;
+    idempotencyKey: string;
+    actor: CourseCheckActor;
+    softWarningOverrides?: Array<{ findingId: string; reason?: string | null }>;
+  }): Promise<
+    | { ok: true; plan: CourseCheckPlan; created: boolean }
+    | {
+        ok: false;
+        status: 400 | 409;
+        code: string;
+        error: string;
+        recoveryGuidance: string;
+        findings?: CourseCheckPlanBody["findings"];
+        changedInputs?: string[];
+      }
+  > {
+    const existing = this.readIdempotency("create-drafts", input.idempotencyKey);
+    if (existing) {
+      const plan = this.getCourseCheckPlan(existing.planId);
+      if (!plan) throw new Error("Idempotent create-drafts plan is missing.");
+      return { ok: true, plan, created: false };
+    }
+
+    const row = this.loadCourseCheckPlanRow(input.planId);
+    if (!row) {
+      return {
+        ok: false,
+        status: 400,
+        code: "plan_not_found",
+        error: "Course Check plan not found.",
+        recoveryGuidance: "Create a new Communication Course Check.",
+      };
+    }
+    const plan = this.attachReceipt(
+      mapCourseCheckPlan(row, this.eventIdOrThrow()),
+      row.receipt_id,
+    );
+    if (plan.body.actionType !== "communication") {
+      return {
+        ok: false,
+        status: 400,
+        code: "unsupported_action",
+        error: "Create drafts is only valid for Communication Course Checks.",
+        recoveryGuidance: "Open a Communication Course Check.",
+      };
+    }
+    if (input.stageId !== "create-drafts") {
+      return {
+        ok: false,
+        status: 400,
+        code: "unknown_stage",
+        error: "Unknown Course Check stage.",
+        recoveryGuidance: "Use the Create drafts stage for this plan.",
+      };
+    }
+    if (plan.version !== input.planVersion || plan.digest !== input.digest) {
+      return {
+        ok: false,
+        status: 409,
+        code: "plan_version_mismatch",
+        error: "This Course Check changed since you loaded it.",
+        recoveryGuidance: "Reload the Course Check and review the latest plan version.",
+      };
+    }
+    if (plan.body.stageVisibility.draft === "complete" && plan.body.drafts.length > 0) {
+      return { ok: true, plan: this.enrichPlan(plan), created: false };
+    }
+
+    const changed = this.detectCommunicationStaleInputs(plan.body);
+    if (changed.length > 0) {
+      return {
+        ok: false,
+        status: 409,
+        code: "relevant_input_changed",
+        error: "Relevant recipient or proposal inputs changed after this plan was created.",
+        recoveryGuidance: "Revise this Communication Course Check from current records.",
+        changedInputs: changed,
+      };
+    }
+
+    const overrides = input.softWarningOverrides ?? [];
+    for (const override of overrides) {
+      const finding = plan.body.findings.find((row) => row.id === override.findingId);
+      if (!finding || finding.severity !== "warning") continue;
+      if (finding.materialExternal && !override.reason?.trim()) {
+        return {
+          ok: false,
+          status: 400,
+          code: "override_reason_required",
+          error: `A short reason is required to override material warning "${finding.message}".`,
+          recoveryGuidance:
+            "Provide a reason when overriding material external-boundary warnings.",
+          findings: plan.body.findings,
+        };
+      }
+    }
+
+    if (hasCommunicationBlockers(plan.body.findings)) {
+      const blocker = plan.body.findings.find((finding) => finding.severity === "blocker");
+      return {
+        ok: false,
+        status: 409,
+        code: blocker?.code ?? "blocked",
+        error: blocker?.message ?? "This Course Check has blocking findings.",
+        recoveryGuidance:
+          blocker?.recoveryGuidance ?? "Resolve blocking findings before creating drafts.",
+        findings: plan.body.findings,
+      };
+    }
+
+    const receiptId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const approval = {
+      stageId: input.stageId,
+      planVersion: plan.version,
+      digest: plan.digest,
+      actor: input.actor,
+      approvedAt: now,
+    };
+
+    let appliedPlan: CourseCheckPlan | null = null;
+    try {
+      this.ctx.storage.transactionSync(() => {
+        const communicationBody = plan.body as CommunicationPlanBody;
+        const frozen = freezeCommunicationDrafts({
+          body: communicationBody,
+          planVersion: plan.version,
+          at: now,
+        });
+        let nextBody = frozen.body;
+        if (overrides.length > 0) {
+          nextBody = {
+            ...nextBody,
+            softWarningOverrides: [
+              ...nextBody.softWarningOverrides,
+              ...overrides.map((override) => ({
+                findingId: override.findingId,
+                reason: override.reason?.trim() || null,
+                actor: input.actor,
+                at: now,
+              })),
+            ],
+          };
+        }
+
+        for (const draft of frozen.drafts) {
+          this.ctx.storage.sql.exec(
+            `INSERT INTO communication_drafts
+              (id, plan_id, plan_version, group_id, proposal_id, session_id, to_email,
+               recipient_name, subject, body_text, body_html, attachment_refs_json,
+               calendar_intent_json, status, frozen_at, frozen_payload_json, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'frozen', ?, ?, ?)`,
+            draft.draftId,
+            plan.id,
+            plan.version,
+            draft.groupId,
+            draft.proposalId,
+            draft.sessionId,
+            draft.toEmail,
+            draft.recipientName,
+            draft.subject,
+            draft.bodyText,
+            draft.bodyHtml,
+            JSON.stringify(draft.attachmentRefs),
+            draft.calendarIntent ? JSON.stringify(draft.calendarIntent) : null,
+            now,
+            JSON.stringify(draft),
+            now,
+          );
+        }
+
+        this.ctx.storage.sql.exec(
+          `INSERT INTO course_check_receipts
+            (id, plan_id, plan_version, digest, stage_id, applied_at, actor_id, actor_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          receiptId,
+          plan.id,
+          plan.version,
+          plan.digest,
+          input.stageId,
+          now,
+          input.actor.id,
+          input.actor.displayName,
+        );
+
+        // Draft creation completes the draft stage only — send/delivery remain independent.
+        const finalState: CourseCheckPlanState = "Partially complete";
+        this.ctx.storage.sql.exec(
+          `UPDATE course_check_plans
+           SET state = ?,
+               body_json = ?,
+               updated_at = ?,
+               approval_json = ?,
+               receipt_id = ?
+           WHERE id = ?`,
+          finalState,
+          JSON.stringify(nextBody),
+          now,
+          JSON.stringify(approval),
+          receiptId,
+          plan.id,
+        );
+        this.recordPlanVersion({
+          planId: plan.id,
+          version: plan.version,
+          digest: plan.digest,
+          state: finalState,
+          body: nextBody,
+          actor: input.actor,
+          at: now,
+          mutationKind: "create_drafts",
+          summary: `Created ${frozen.drafts.length} frozen draft(s) without sending.`,
+          fromVersion: plan.version,
+        });
+        this.ctx.storage.sql.exec(
+          `INSERT INTO audit_events
+            (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+             committee_note_changed, created_at)
+           VALUES (?, ?, 'course_check.communication.drafts_created', ?, ?, ?, ?, 0, ?)`,
+          crypto.randomUUID(),
+          communicationBody.recipientGroups[0]?.proposalId || plan.id,
+          input.actor.id,
+          input.actor.displayName,
+          plan.state,
+          `${frozen.drafts.length} drafts frozen`,
+          now,
+        );
+        appliedPlan = this.attachReceipt(
+          mapCourseCheckPlan(
+            {
+              ...row,
+              state: finalState,
+              body_json: JSON.stringify(nextBody),
+              updated_at: now,
+              approval_json: JSON.stringify(approval),
+              receipt_id: receiptId,
+            },
+            this.eventIdOrThrow(),
+          ),
+          receiptId,
+        );
+        this.writeIdempotency({
+          command: "create-drafts",
+          key: input.idempotencyKey,
+          planId: plan.id,
+          receiptId,
+          response: appliedPlan,
+        });
+      });
+    } catch (error) {
+      return {
+        ok: false,
+        status: 409,
+        code: "durable_integrity",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Creating communication drafts violated durable integrity.",
+        recoveryGuidance:
+          "Resolve the conflicting records, then create a new Communication Course Check.",
+      };
+    }
+
+    const applied = appliedPlan ?? this.getCourseCheckPlan(plan.id);
+    if (!applied) throw new Error("Communication drafts plan is missing.");
+    return { ok: true, plan: this.enrichPlan(applied), created: true };
+  }
+
+  listCommunicationDrafts(planId: string): FrozenCommunicationDraft[] {
+    return this.ctx.storage.sql
+      .exec<{ frozen_payload_json: string }>(
+        `SELECT frozen_payload_json FROM communication_drafts
+         WHERE plan_id = ? ORDER BY created_at ASC`,
+        planId,
+      )
+      .toArray()
+      .map((row) => JSON.parse(row.frozen_payload_json) as FrozenCommunicationDraft);
+  }
+
+  projectCourseCheckPlan(
+    plan: CourseCheckPlan,
+    options: { canViewCommunicationEvidence: boolean },
+  ): CourseCheckPlan {
+    if (
+      plan.body.actionType === "communication" &&
+      !options.canViewCommunicationEvidence
+    ) {
+      return {
+        ...plan,
+        body: redactCommunicationBody(plan.body),
+      };
+    }
+    return plan;
+  }
+
   async createPublicationCourseCheck(input: {
     operation: PublicationOperation;
     restoreRevisionId?: string;
@@ -5896,7 +6860,7 @@ export class EventStore extends DurableObject<AppBindings> {
       });
       linkedCommunication = {
         planId: commPlanId,
-        digest: await digestPayload(communicationBodyDigestPayload(commBody)),
+        digest: await digestPayload(publicationCommunicationDigestPayload(commBody)),
         body: commBody,
       };
     }

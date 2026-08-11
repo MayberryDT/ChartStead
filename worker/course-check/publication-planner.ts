@@ -397,7 +397,7 @@ export function planCommunicationStub(input: {
       severity: "info",
       code: "no_implicit_delivery",
       message:
-        "This linked Communication Course Check is a stub. Drafts and send are owned by Communication Course Check (ticket 03). Nothing was delivered.",
+        "This linked Communication Course Check holds calendar consequences from publication. Create drafts and send remain separate; nothing was delivered.",
     },
   ];
   const deltas: CourseCheckDelta[] = input.calendarOps.map((op) => ({
@@ -410,12 +410,25 @@ export function planCommunicationStub(input: {
   }));
   return {
     actionType: "communication",
-    source: "publication",
+    source: {
+      kind: "publication",
+      decisionPlanId: null,
+      decisionPlanVersion: null,
+      decisionPlanDigest: null,
+      selection: null,
+    },
     purpose: "calendar_update",
+    templateKind: "custom",
+    subject: "Program calendar update",
+    bodyText:
+      "Calendar delivery for published program changes will be prepared here. Nothing has been sent.",
+    bodyHtml:
+      "<p>Calendar delivery for published program changes will be prepared here. Nothing has been sent.</p>",
     parentPlanId: input.parentPlanId,
     calendarOps: input.calendarOps,
     drafts: [],
     recipients: [],
+    recipientGroups: [],
     deltas,
     findings,
     stages: [
@@ -426,16 +439,40 @@ export function planCommunicationStub(input: {
         verb: "Create drafts",
         external: false,
       },
+      {
+        id: "send-messages",
+        label: "Send messages",
+        status: "pending",
+        verb: "Send messages",
+        external: true,
+      },
     ],
     evidenceSections: buildEvidenceSections({ findings, deltas }),
     softWarningOverrides: [],
+    stageVisibility: {
+      decision: "not_started",
+      draft: "ready",
+      send: "not_started",
+      delivery: "not_started",
+    },
     linkedPlanIds: [input.parentPlanId],
+    batchGroupId: null,
+    splitExplanation: null,
+    relevantRevisions: {
+      proposalIds: [],
+      proposalRevisions: {},
+      speakerEmails: [],
+      contentFingerprint: `publication-calendar:${input.calendarOps.length}`,
+    },
     ageWarningHours: input.ageWarningHours ?? DEFAULT_AGE_WARNING_HOURS,
     ageWarning: null,
   };
 }
 
-export function communicationBodyDigestPayload(body: CommunicationPlanBody): unknown {
+/** Digest for publication-linked communication stubs (full drafts use communication-planner). */
+export function publicationCommunicationDigestPayload(
+  body: CommunicationPlanBody,
+): unknown {
   return {
     actionType: body.actionType,
     source: body.source,
@@ -443,8 +480,8 @@ export function communicationBodyDigestPayload(body: CommunicationPlanBody): unk
     parentPlanId: body.parentPlanId,
     calendarOps: body.calendarOps,
     drafts: body.drafts,
-    recipients: body.recipients,
-    stages: body.stages,
+    recipientGroups: body.recipientGroups,
+    stages: body.stages.map((stage) => ({ id: stage.id, status: stage.status })),
     linkedPlanIds: body.linkedPlanIds,
   };
 }

@@ -1,4 +1,4 @@
-/** Course Check v1 contract — decision cascade + publication + batch workspace. */
+/** Course Check v1 contract — decision, publication, communication drafts, batch workspace. */
 
 export type ProgramOutcome = "accepted" | "declined";
 
@@ -62,8 +62,18 @@ export interface CourseCheckDelta {
     | "portal_access"
     | "public_revision"
     | "public_session"
-    | "communication_plan";
-  action: "create" | "update" | "reuse" | "none" | "remove";
+    | "communication_plan"
+    | "message_draft"
+    | "recipient";
+  action:
+    | "create"
+    | "update"
+    | "reuse"
+    | "none"
+    | "remove"
+    | "include"
+    | "exclude"
+    | "freeze";
   summary: string;
   before?: Record<string, unknown> | null;
   after?: Record<string, unknown> | null;
@@ -173,7 +183,16 @@ export interface PlanMutationRecord {
   planId: string;
   fromVersion: number;
   toVersion: number;
-  kind: "create" | "defer" | "refresh" | "split" | "override" | "apply";
+  kind:
+    | "create"
+    | "defer"
+    | "refresh"
+    | "split"
+    | "override"
+    | "apply"
+    | "revise"
+    | "create_drafts"
+    | "link";
   actor: CourseCheckActor;
   at: string;
   summary: string;
@@ -314,32 +333,147 @@ export interface PublicationPlanBody {
   } | null;
 }
 
-/** Stub communication plan created by publication (no delivery; CC-03 owns drafts/send). */
+export type CommunicationTemplateKind = "acceptance" | "decline" | "custom";
+
+export type RecipientInclusion =
+  | "include"
+  | "exclude"
+  | "missing"
+  | "duplicate"
+  | "shared";
+
+export type RecipientDeliverability = "ok" | "missing" | "invalid";
+
+export type CommunicationDraftStatus = "planned" | "frozen";
+
+export type CommunicationStageState =
+  | "not_started"
+  | "ready"
+  | "complete"
+  | "out_of_date";
+
+export type CommunicationPurpose =
+  | "calendar_update"
+  | "speaker_notification"
+  | "decision"
+  | "custom";
+
+export interface PriorCommunicationEvidence {
+  id: string;
+  kind: string;
+  status: string;
+  toEmail: string;
+  subject: string;
+  createdAt: string;
+  sentAt: string | null;
+  proposalId: string | null;
+}
+
+export interface CommunicationRecipient {
+  recipientId: string;
+  address: string;
+  name: string;
+  role: "primary" | "co" | "speaker";
+  speakerId: string | null;
+  inclusion: RecipientInclusion;
+  inclusionReason: string;
+  deliverability: RecipientDeliverability;
+  selected: boolean;
+  priorCommunications: PriorCommunicationEvidence[];
+}
+
+export interface CommunicationRecipientGroup {
+  groupId: string;
+  proposalId: string | null;
+  sessionId: string | null;
+  label: string;
+  outcome: ProgramOutcome | null;
+  recipients: CommunicationRecipient[];
+}
+
+export interface FrozenCommunicationDraft {
+  draftId: string;
+  groupId: string;
+  proposalId: string | null;
+  sessionId: string | null;
+  toEmail: string;
+  recipientName: string;
+  subject: string;
+  bodyText: string;
+  bodyHtml: string;
+  attachmentRefs: string[];
+  calendarIntent: {
+    uid: string | null;
+    sequence: number | null;
+    operation: "none" | "create" | "update" | "cancel";
+  } | null;
+  status: CommunicationDraftStatus;
+  frozenAt: string | null;
+  frozenPlanVersion: number | null;
+}
+
+export interface CommunicationPlanSource {
+  kind: "linked_decision" | "selection" | "publication";
+  decisionPlanId: string | null;
+  decisionPlanVersion: number | null;
+  decisionPlanDigest: string | null;
+  selection: {
+    proposalIds: string[];
+    sessionIds: string[];
+    speakerIds: string[];
+    taskIds: string[];
+  } | null;
+}
+
+/** Full communication plan (CC-03). Publication may create a linked stub with empty groups. */
 export interface CommunicationPlanBody {
   actionType: "communication";
-  source: "publication" | "decision";
-  purpose: "calendar_update" | "speaker_notification";
-  parentPlanId: string | null;
+  source: CommunicationPlanSource;
+  purpose: CommunicationPurpose;
+  templateKind: CommunicationTemplateKind;
+  subject: string;
+  bodyText: string;
+  bodyHtml: string;
+  recipientGroups: CommunicationRecipientGroup[];
+  /** @deprecated Prefer recipientGroups; kept empty for older stub readers. */
+  recipients: CommunicationRecipient[];
+  drafts: FrozenCommunicationDraft[];
   calendarOps: Array<{
     sessionId: string;
     kind: "create" | "update" | "cancel";
     uid: string;
     sequence: number;
   }>;
-  drafts: [];
-  recipients: [];
   deltas: CourseCheckDelta[];
   findings: CourseCheckFinding[];
   stages: CourseCheckStage[];
   evidenceSections: CourseCheckEvidenceSection[];
   softWarningOverrides: SoftWarningOverride[];
+  /** Independent stage visibility — never inherits decision/publication approval. */
+  stageVisibility: {
+    decision: CommunicationStageState;
+    draft: CommunicationStageState;
+    send: CommunicationStageState;
+    delivery: CommunicationStageState;
+  };
   linkedPlanIds: string[];
+  parentPlanId: string | null;
+  batchGroupId: string | null;
+  splitExplanation: string | null;
+  relevantRevisions: {
+    proposalIds: string[];
+    proposalRevisions: Record<string, number>;
+    speakerEmails: string[];
+    contentFingerprint: string;
+  };
   ageWarningHours: number;
   ageWarning?: {
     active: boolean;
     ageHours: number;
     message: string;
   } | null;
+  /** True when private recipient/draft fields were redacted for the caller. */
+  redacted?: boolean;
 }
 
 export type CourseCheckPlanBody =
@@ -432,6 +566,46 @@ export interface CreatePublicationCourseCheckRequest {
   /** Required when operation is restore. */
   restoreRevisionId?: string;
   idempotencyKey: string;
+}
+
+export interface CreateCommunicationCourseCheckRequest {
+  /** Create from a completed Decision Course Check (no approval transfer). */
+  decisionPlanId?: string;
+  /** Direct selection entry points. */
+  proposalIds?: string[];
+  sessionIds?: string[];
+  speakerIds?: string[];
+  taskIds?: string[];
+  templateKind?: CommunicationTemplateKind;
+  subject?: string;
+  bodyText?: string;
+  bodyHtml?: string;
+  idempotencyKey: string;
+}
+
+export interface ReviseCommunicationCourseCheckRequest {
+  planVersion: number;
+  digest: string;
+  subject?: string;
+  bodyText?: string;
+  bodyHtml?: string;
+  /** Toggle recipient selection by recipientId. */
+  recipientSelection?: Array<{
+    recipientId: string;
+    selected: boolean;
+  }>;
+  idempotencyKey: string;
+}
+
+export interface CreateCommunicationDraftsRequest {
+  planVersion: number;
+  digest: string;
+  stageId: "create-drafts";
+  idempotencyKey: string;
+  softWarningOverrides?: Array<{
+    findingId: string;
+    reason?: string | null;
+  }>;
 }
 
 export interface ApplyCourseCheckRequest {

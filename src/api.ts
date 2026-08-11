@@ -911,6 +911,122 @@ export async function deferCourseCheckItems(
   return body;
 }
 
+export async function createCommunicationCourseCheck(
+  eventId: string,
+  input: {
+    decisionPlanId?: string;
+    proposalIds?: string[];
+    sessionIds?: string[];
+    speakerIds?: string[];
+    taskIds?: string[];
+    templateKind?: "acceptance" | "decline" | "custom";
+    subject?: string;
+    bodyText?: string;
+    bodyHtml?: string;
+    idempotencyKey: string;
+  },
+): Promise<CourseCheckPlan> {
+  const response = await fetch(
+    `/api/events/${eventId}/course-checks/communications`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": input.idempotencyKey,
+      },
+      body: JSON.stringify(input),
+    },
+  );
+  const body = await readJson<CourseCheckPlan | { error: string }>(response);
+  if (!response.ok || !("id" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to create Communication Course Check",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function reviseCommunicationCourseCheck(
+  eventId: string,
+  planId: string,
+  input: {
+    planVersion: number;
+    digest: string;
+    subject?: string;
+    bodyText?: string;
+    bodyHtml?: string;
+    recipientSelection?: Array<{ recipientId: string; selected: boolean }>;
+    idempotencyKey: string;
+  },
+): Promise<CourseCheckPlan> {
+  const response = await fetch(
+    `/api/events/${eventId}/course-checks/${planId}/revise`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": input.idempotencyKey,
+      },
+      body: JSON.stringify(input),
+    },
+  );
+  const body = await readJson<
+    CourseCheckPlan | { error: string; recoveryGuidance?: string }
+  >(response);
+  if (!response.ok || !("id" in body)) {
+    const message =
+      "error" in body
+        ? body.recoveryGuidance
+          ? `${body.error} ${body.recoveryGuidance}`
+          : body.error
+        : "Unable to revise Communication Course Check";
+    throw new ApiError(message, response.status, body);
+  }
+  return body;
+}
+
+export async function createCommunicationDrafts(
+  eventId: string,
+  planId: string,
+  input: {
+    planVersion: number;
+    digest: string;
+    stageId?: "create-drafts";
+    idempotencyKey: string;
+    softWarningOverrides?: Array<{ findingId: string; reason?: string | null }>;
+  },
+): Promise<CourseCheckPlan> {
+  const response = await fetch(
+    `/api/events/${eventId}/course-checks/${planId}/create-drafts`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": input.idempotencyKey,
+      },
+      body: JSON.stringify({
+        ...input,
+        stageId: input.stageId ?? "create-drafts",
+      }),
+    },
+  );
+  const body = await readJson<
+    CourseCheckPlan | { error: string; recoveryGuidance?: string }
+  >(response);
+  if (!response.ok || !("id" in body)) {
+    const message =
+      "error" in body
+        ? body.recoveryGuidance
+          ? `${body.error} ${body.recoveryGuidance}`
+          : body.error
+        : "Unable to create communication drafts";
+    throw new ApiError(message, response.status, body);
+  }
+  return body;
+}
+
 export async function createPublicationCourseCheck(
   eventId: string,
   input: {

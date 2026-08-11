@@ -57,6 +57,7 @@ import {
   assignedTrackIds,
   canAccessEvent,
   canReviewProposal,
+  eventRole,
   isEventAdmin,
   scopeEventForPrincipal,
 } from "./authz";
@@ -2344,15 +2345,368 @@ export function createApp(options: AppOptions = {}) {
     if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
-    if (!isEventAdmin(principal, eventId)) {
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const role = eventRole(principal, eventId);
+    // Reviewers may list plans but communication private evidence is redacted.
+    if (role !== "admin" && role !== "reviewer") {
       return c.json({ error: "Administrator access required" }, 403);
+    }
+    const canViewCommunicationEvidence = role === "admin";
+    const listed = (await store.listCourseCheckPlans()) as import("../shared/course-check").CourseCheckPlan[];
+    const plans = await Promise.all(
+      listed.map((plan) =>
+        store.projectCourseCheckPlan(plan, { canViewCommunicationEvidence }),
+      ),
+    );
+    return c.json({ plans });
+  });
+
+  app.post("/api/events/:eventId/course-checks/communications", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json(
+        {
+          error: "Administrator access is required to create a Communication Course Check.",
+          code: "missing_authority",
+          recoveryGuidance:
+            "Ask an event administrator to create this Communication Course Check.",
+        },
+        403,
+      );
     }
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
     await loadEvent(c.env, seed);
-    const plans = await c.env.EVENT_STORE.getByName(eventId).listCourseCheckPlans();
-    return c.json({ plans });
+    const body = (await c.req.json().catch(() => null)) as {
+      decisionPlanId?: unknown;
+      proposalIds?: unknown;
+      sessionIds?: unknown;
+      speakerIds?: unknown;
+      taskIds?: unknown;
+      templateKind?: unknown;
+      subject?: unknown;
+      bodyText?: unknown;
+      bodyHtml?: unknown;
+      idempotencyKey?: unknown;
+    } | null;
+    const headerKey = c.req.header("idempotency-key");
+    const idempotencyKey =
+      (typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim()) ||
+      (typeof headerKey === "string" && headerKey.trim()) ||
+      "";
+    if (!idempotencyKey) {
+      return c.json({ error: "idempotencyKey is required" }, 400);
+    }
+    const asStringArray = (value: unknown): string[] =>
+      Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        : [];
+    try {
+      const result = (await c.env.EVENT_STORE.getByName(eventId).createCommunicationCourseCheck({
+        decisionPlanId:
+          typeof body?.decisionPlanId === "string" ? body.decisionPlanId.trim() : undefined,
+        proposalIds: asStringArray(body?.proposalIds),
+        sessionIds: asStringArray(body?.sessionIds),
+        speakerIds: asStringArray(body?.speakerIds),
+        taskIds: asStringArray(body?.taskIds),
+        templateKind:
+          body?.templateKind === "acceptance" ||
+          body?.templateKind === "decline" ||
+          body?.templateKind === "custom"
+            ? body.templateKind
+            : undefined,
+        subject: typeof body?.subject === "string" ? body.subject : undefined,
+        bodyText: typeof body?.bodyText === "string" ? body.bodyText : undefined,
+        bodyHtml: typeof body?.bodyHtml === "string" ? body.bodyHtml : undefined,
+        idempotencyKey,
+        actor: { id: principal.id, displayName: principal.displayName },
+      })) as { plan: import("../shared/course-check").CourseCheckPlan; created: boolean };
+      return c.json(result.plan, result.created ? 201 : 200);
+    } catch (error) {
+      return c.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unable to create Communication Course Check",
+        },
+        400,
+      );
+    }
   });
+
+  app.post("/api/events/:eventId/course-checks/:planId/revise", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    const planId = c.req.param("planId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json(
+        {
+          error: "Administrator access is required to revise a Communication Course Check.",
+          code: "missing_authority",
+          recoveryGuidance:
+            "Ask an event administrator to revise this Communication Course Check.",
+        },
+        403,
+      );
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const body = (await c.req.json().catch(() => null)) as {
+      planVersion?: unknown;
+      digest?: unknown;
+      subject?: unknown;
+      bodyText?: unknown;
+      bodyHtml?: unknown;
+      recipientSelection?: unknown;
+      idempotencyKey?: unknown;
+    } | null;
+    const headerKey = c.req.header("idempotency-key");
+    const idempotencyKey =
+      (typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim()) ||
+      (typeof headerKey === "string" && headerKey.trim()) ||
+      "";
+    if (
+      !body ||
+      !Number.isInteger(body.planVersion) ||
+      typeof body.digest !== "string" ||
+      !idempotencyKey
+    ) {
+      return c.json(
+        {
+          error: "planVersion, digest, and idempotencyKey are required to revise a Course Check.",
+        },
+        400,
+      );
+    }
+    const recipientSelection = Array.isArray(body.recipientSelection)
+      ? body.recipientSelection
+          .map((row) => {
+            const item = row as { recipientId?: unknown; selected?: unknown };
+            if (typeof item.recipientId !== "string") return null;
+            return {
+              recipientId: item.recipientId,
+              selected: Boolean(item.selected),
+            };
+          })
+          .filter((row): row is { recipientId: string; selected: boolean } => Boolean(row))
+      : undefined;
+    const result = (await c.env.EVENT_STORE.getByName(eventId).reviseCommunicationCourseCheck({
+      planId,
+      planVersion: body.planVersion as number,
+      digest: body.digest,
+      subject: typeof body.subject === "string" ? body.subject : undefined,
+      bodyText: typeof body.bodyText === "string" ? body.bodyText : undefined,
+      bodyHtml: typeof body.bodyHtml === "string" ? body.bodyHtml : undefined,
+      recipientSelection,
+      idempotencyKey,
+      actor: { id: principal.id, displayName: principal.displayName },
+    })) as
+      | { ok: true; plan: import("../shared/course-check").CourseCheckPlan; created: boolean }
+      | {
+          ok: false;
+          status: 400 | 409;
+          code: string;
+          error: string;
+          recoveryGuidance: string;
+        };
+    if (!result.ok) {
+      return c.json(
+        {
+          error: result.error,
+          code: result.code,
+          recoveryGuidance: result.recoveryGuidance,
+        },
+        result.status,
+      );
+    }
+    return c.json(result.plan, result.created ? 201 : 200);
+  });
+
+  app.post("/api/events/:eventId/course-checks/:planId/create-drafts", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    const planId = c.req.param("planId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json(
+        {
+          error: "Administrator access is required to create communication drafts.",
+          code: "missing_authority",
+          recoveryGuidance:
+            "Ask an event administrator to create drafts for this Course Check.",
+        },
+        403,
+      );
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const body = (await c.req.json().catch(() => null)) as {
+      planVersion?: unknown;
+      digest?: unknown;
+      stageId?: unknown;
+      idempotencyKey?: unknown;
+      softWarningOverrides?: unknown;
+    } | null;
+    const headerKey = c.req.header("idempotency-key");
+    const idempotencyKey =
+      (typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim()) ||
+      (typeof headerKey === "string" && headerKey.trim()) ||
+      "";
+    if (
+      !body ||
+      !Number.isInteger(body.planVersion) ||
+      typeof body.digest !== "string" ||
+      !idempotencyKey
+    ) {
+      return c.json(
+        {
+          error:
+            "planVersion, digest, and idempotencyKey are required to create communication drafts.",
+        },
+        400,
+      );
+    }
+    const softWarningOverrides = Array.isArray(body.softWarningOverrides)
+      ? body.softWarningOverrides
+          .map((row) => {
+            const item = row as { findingId?: unknown; reason?: unknown };
+            if (typeof item.findingId !== "string") return null;
+            return {
+              findingId: item.findingId,
+              reason: typeof item.reason === "string" ? item.reason : null,
+            };
+          })
+          .filter((row): row is { findingId: string; reason: string | null } => Boolean(row))
+      : undefined;
+    const result = (await c.env.EVENT_STORE.getByName(eventId).createCommunicationDrafts({
+      planId,
+      planVersion: body.planVersion as number,
+      digest: body.digest,
+      stageId: typeof body.stageId === "string" ? body.stageId : "create-drafts",
+      idempotencyKey,
+      actor: { id: principal.id, displayName: principal.displayName },
+      softWarningOverrides,
+    })) as
+      | { ok: true; plan: import("../shared/course-check").CourseCheckPlan; created: boolean }
+      | {
+          ok: false;
+          status: 400 | 409;
+          code: string;
+          error: string;
+          recoveryGuidance: string;
+          findings?: import("../shared/course-check").CourseCheckFinding[];
+          changedInputs?: string[];
+        };
+    if (!result.ok) {
+      return c.json(
+        {
+          error: result.error,
+          code: result.code,
+          recoveryGuidance: result.recoveryGuidance,
+          findings: result.findings,
+          changedInputs: result.changedInputs,
+        },
+        result.status,
+      );
+    }
+    return c.json(result.plan, result.created ? 201 : 200);
+  });
+
+  app.post("/api/events/:eventId/course-checks/:planId/defer", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    const planId = c.req.param("planId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json(
+        {
+          error: "Administrator access is required to defer Course Check items.",
+          code: "missing_authority",
+          recoveryGuidance:
+            "Ask an event administrator to continue this Course Check.",
+        },
+        403,
+      );
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const body = (await c.req.json().catch(() => null)) as {
+      planVersion?: unknown;
+      digest?: unknown;
+      itemIds?: unknown;
+      reason?: unknown;
+      idempotencyKey?: unknown;
+    } | null;
+    const headerKey = c.req.header("idempotency-key");
+    const idempotencyKey =
+      (typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim()) ||
+      (typeof headerKey === "string" && headerKey.trim()) ||
+      "";
+    if (
+      !body ||
+      !Number.isInteger(body.planVersion) ||
+      typeof body.digest !== "string" ||
+      !Array.isArray(body.itemIds) ||
+      typeof body.reason !== "string" ||
+      !idempotencyKey
+    ) {
+      return c.json(
+        {
+          error:
+            "planVersion, digest, itemIds, reason, and idempotencyKey are required to defer items.",
+        },
+        400,
+      );
+    }
+    const itemIds = body.itemIds.filter((id): id is string => typeof id === "string");
+    const result = (await c.env.EVENT_STORE.getByName(eventId).deferCourseCheckItems({
+      planId,
+      planVersion: body.planVersion as number,
+      digest: body.digest,
+      itemIds,
+      reason: body.reason,
+      idempotencyKey,
+      actor: { id: principal.id, displayName: principal.displayName },
+    })) as
+      | { ok: true; plan: import("../shared/course-check").CourseCheckPlan; created: boolean }
+      | {
+          ok: false;
+          status: 400 | 409;
+          code: string;
+          error: string;
+          recoveryGuidance: string;
+        };
+    if (!result.ok) {
+      return c.json(
+        {
+          error: result.error,
+          code: result.code,
+          recoveryGuidance: result.recoveryGuidance,
+        },
+        result.status,
+      );
+    }
+    return c.json(result.plan, result.created ? 201 : 200);
+  });
+
 
   app.post("/api/events/:eventId/course-checks/:planId/defer", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
@@ -2520,15 +2874,20 @@ export function createApp(options: AppOptions = {}) {
     if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
-    if (!isEventAdmin(principal, eventId)) {
+    const role = eventRole(principal, eventId);
+    if (role !== "admin" && role !== "reviewer") {
       return c.json({ error: "Administrator access required" }, 403);
     }
+    const canViewCommunicationEvidence = role === "admin";
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
     await loadEvent(c.env, seed);
-    const plan = await c.env.EVENT_STORE.getByName(eventId).getCourseCheckPlan(planId);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const plan = await store.getCourseCheckPlan(planId);
     if (!plan) return c.json({ error: "Course Check not found" }, 404);
-    return c.json(plan);
+    return c.json(
+      await store.projectCourseCheckPlan(plan, { canViewCommunicationEvidence }),
+    );
   });
 
   app.post("/api/events/:eventId/course-checks/:planId/apply", async (c) => {

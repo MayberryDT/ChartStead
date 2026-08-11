@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Batch decisions and shared workspace.
 
-**Status:** in-review
+**Status:** done
 
 - [x] A completed Decision Course Check can create a linked Communication Course Check without transferring approval.
 - [x] Staff can also start a Communication Course Check directly from an authorized selection of proposals, sessions, speakers, or tasks.
@@ -22,8 +22,6 @@
 
 ## Comments
 
-Blocked by Course Check 02 — Batch decisions and shared workspace.
-
 - 2026-08-11 — frontier-reconcile: All blockers done → ready-for-agent.
-- 2026-08-11 — claimed in worktree `.worktrees/course-check-03-communication-drafts` (branch `course-check-03-communication-drafts`); implementing Communication Course Check drafts + recipient reasoning.
-- 2026-08-11 — implementation complete for human QA. Branch `course-check-03-communication-drafts`. Worker communication tests 7/7; Course Check suite 29/29; typecheck pass. Demo: http://100.105.117.93:5183/ (CLOUDFLARE_ENV=demo). Send messages left for Course Check 04.
+- 2026-08-11 — claimed in worktree `.worktrees/course-check-03-communication-drafts`.
+- 2026-08-11 — implementation complete; merged to main after rebase onto CC06 publication.

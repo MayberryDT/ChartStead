@@ -29,6 +29,14 @@ function classifyFinding(finding: CourseCheckFinding): CourseCheckEvidenceKind {
     return "irreversible";
   }
   if (
+    finding.code.startsWith("recipient_") ||
+    finding.code === "prior_related_communication" ||
+    finding.code === "no_deliverable_recipients" ||
+    finding.code === "empty_communication_scope"
+  ) {
+    return "people";
+  }
+  if (
     finding.code.startsWith("identity") ||
     finding.message.toLowerCase().includes("speaker")
   ) {
@@ -57,11 +65,16 @@ function classifyFinding(finding: CourseCheckFinding): CourseCheckEvidenceKind {
 function classifyDelta(delta: CourseCheckDelta): CourseCheckEvidenceKind {
   if (
     delta.entityType === "public_revision" ||
+    delta.entityType === "message_draft" ||
     (delta.entityType === "proposal" && delta.action === "update")
   ) {
     return "irreversible";
   }
-  if (delta.entityType === "speaker" || delta.entityType === "participation") {
+  if (
+    delta.entityType === "speaker" ||
+    delta.entityType === "participation" ||
+    delta.entityType === "recipient"
+  ) {
     return "people";
   }
   if (

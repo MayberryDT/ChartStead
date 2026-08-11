@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type {
+  CommunicationPlanBody,
   CourseCheckEvidenceSection,
   CourseCheckFinding,
   CourseCheckPlan,
@@ -12,8 +13,11 @@ import type {
 import {
   ApiError,
   applyCourseCheckPlan,
+  createCommunicationCourseCheck,
+  createCommunicationDrafts,
   deferCourseCheckItems,
   fetchCourseCheckPlan,
+  reviseCommunicationCourseCheck,
 } from "./api";
 import { createClientId } from "./id";
 
@@ -402,6 +406,180 @@ function PublicationBody({
   );
 }
 
+function CommunicationBody({
+  plan,
+  subject,
+  bodyText,
+  selectedRecipientIds,
+  onSubjectChange,
+  onBodyTextChange,
+  onToggleRecipient,
+}: {
+  plan: CourseCheckPlan;
+  subject: string;
+  bodyText: string;
+  selectedRecipientIds: Set<string>;
+  onSubjectChange: (value: string) => void;
+  onBodyTextChange: (value: string) => void;
+  onToggleRecipient: (recipientId: string) => void;
+}) {
+  const body = plan.body as CommunicationPlanBody;
+  const draftsFrozen = body.stageVisibility.draft === "complete";
+  return (
+    <div className="course-check-sections">
+      <section className="panel">
+        <h2>Communication plan</h2>
+        <dl className="course-check-meta">
+          <div>
+            <dt>State</dt>
+            <dd>{plan.state}</dd>
+          </div>
+          <div>
+            <dt>Version</dt>
+            <dd>{plan.version}</dd>
+          </div>
+          <div>
+            <dt>Source</dt>
+            <dd>
+              {body.source.kind === "linked_decision"
+                ? `Linked decision ${body.source.decisionPlanId?.slice(0, 8) ?? ""}`
+                : "Direct selection"}
+            </dd>
+          </div>
+          <div>
+            <dt>Stage visibility</dt>
+            <dd>
+              decision {body.stageVisibility.decision} · draft {body.stageVisibility.draft}{" "}
+              · send {body.stageVisibility.send} · delivery {body.stageVisibility.delivery}
+            </dd>
+          </div>
+        </dl>
+        <p className="muted">
+          Creating drafts never sends email. Send messages is a separate later action.
+        </p>
+      </section>
+
+      <section className="panel">
+        <h2>Message content</h2>
+        <label className="stack-field">
+          Subject
+          <input
+            type="text"
+            value={subject}
+            disabled={draftsFrozen || Boolean(body.redacted)}
+            onChange={(event) => onSubjectChange(event.target.value)}
+          />
+        </label>
+        <label className="stack-field">
+          Body
+          <textarea
+            rows={8}
+            value={bodyText}
+            disabled={draftsFrozen || Boolean(body.redacted)}
+            onChange={(event) => onBodyTextChange(event.target.value)}
+          />
+        </label>
+      </section>
+
+      <section className="panel">
+        <h2>Recipient groups</h2>
+        {body.recipientGroups.map((group) => (
+          <div key={group.groupId} className="course-check-recipient-group">
+            <h3>
+              {group.label}
+              {group.outcome ? ` · ${group.outcome}` : ""}
+              {group.sessionId ? ` · session ${group.sessionId.slice(0, 8)}` : ""}
+            </h3>
+            <ul className="course-check-recipients">
+              {group.recipients.map((recipient) => (
+                <li key={recipient.recipientId} data-inclusion={recipient.inclusion}>
+                  <label className="course-check-batch-item">
+                    <input
+                      type="checkbox"
+                      checked={selectedRecipientIds.has(recipient.recipientId)}
+                      disabled={
+                        draftsFrozen ||
+                        Boolean(body.redacted) ||
+                        recipient.deliverability !== "ok"
+                      }
+                      onChange={() => onToggleRecipient(recipient.recipientId)}
+                    />
+                    <span>
+                      <strong>
+                        {recipient.name} &lt;{recipient.address || "no address"}&gt;
+                      </strong>{" "}
+                      · {recipient.role} · {recipient.inclusion} ·{" "}
+                      {recipient.deliverability}
+                      <br />
+                      <span className="muted">{recipient.inclusionReason}</span>
+                      {recipient.priorCommunications.length > 0 ? (
+                        <>
+                          <br />
+                          <span className="muted">
+                            Prior:{" "}
+                            {recipient.priorCommunications
+                              .map(
+                                (prior) =>
+                                  `${prior.status} “${prior.subject}” (${prior.createdAt.slice(0, 10)})`,
+                              )
+                              .join("; ")}
+                          </span>
+                        </>
+                      ) : null}
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </section>
+
+      {body.drafts.length > 0 ? (
+        <section className="panel">
+          <h2>Frozen drafts</h2>
+          <ul className="course-check-deltas">
+            {body.drafts.map((draft) => (
+              <li key={draft.draftId}>
+                <span className="course-check-delta-type">
+                  {draft.status} · {draft.toEmail}
+                </span>
+                <p>
+                  <strong>{draft.subject}</strong>
+                </p>
+                <p className="muted">{draft.bodyText}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      <section className="panel">
+        <h2>Evidence</h2>
+        <div className="course-check-evidence-list">
+          {(body.evidenceSections ?? []).map((section) => (
+            <EvidenceSectionView key={section.kind} section={section} plan={plan} />
+          ))}
+        </div>
+      </section>
+
+      {plan.mutations && plan.mutations.length > 0 ? (
+        <section className="panel">
+          <h2>Mutation history</h2>
+          <ul className="course-check-mutations">
+            {plan.mutations.map((mutation) => (
+              <li key={mutation.id}>
+                v{mutation.fromVersion}→v{mutation.toVersion} · {mutation.kind} ·{" "}
+                {mutation.actor.displayName}: {mutation.summary}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
 export function CourseCheckPage() {
   const { eventId, planId } = useParams({
     from: "/e/$eventId/course-checks/$planId",
@@ -410,7 +588,14 @@ export function CourseCheckPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [deferReason, setDeferReason] = useState("");
-  const [overrideReasons, setOverrideReasons] = useState<Record<string, string>>({});
+  const [subject, setSubject] = useState("");
+  const [bodyText, setBodyText] = useState("");
+  const [selectedRecipientIds, setSelectedRecipientIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [overrideReasons, setOverrideReasons] = useState<Record<string, string>>(
+    {},
+  );
   const applyKey = useMemo(
     () => `ui-apply-${planId}-${createClientId()}`,
     [planId],
@@ -419,62 +604,181 @@ export function CourseCheckPage() {
     () => `ui-defer-${planId}-${createClientId()}`,
     [planId],
   );
+  const draftsKey = useMemo(
+    () => `ui-drafts-${planId}-${createClientId()}`,
+    [planId],
+  );
+  const reviseKey = useMemo(
+    () => `ui-revise-${planId}-${createClientId()}`,
+    [planId],
+  );
+  const linkCommKey = useMemo(
+    () => `ui-link-comm-${planId}-${createClientId()}`,
+    [planId],
+  );
 
   const planQuery = useQuery({
     queryKey: ["course-check", eventId, planId],
     queryFn: () => fetchCourseCheckPlan(eventId, planId),
   });
 
+  useEffect(() => {
+    const next = planQuery.data;
+    if (!next || next.body.actionType !== "communication") return;
+    setSubject(next.body.subject);
+    setBodyText(next.body.bodyText);
+    setSelectedRecipientIds(
+      new Set(
+        next.body.recipientGroups.flatMap((group) =>
+          group.recipients.filter((r) => r.selected).map((r) => r.recipientId),
+        ),
+      ),
+    );
+  }, [planQuery.data?.id, planQuery.data?.version, planQuery.data?.digest]);
+
   const applyMutation = useMutation({
-    mutationFn: (plan: CourseCheckPlan) => {
-      const stageId = plan.body.stages[0]?.id ?? "apply-decision";
-      const materialIds = plan.body.findings
-        .filter((finding) => finding.severity === "warning" && finding.materialExternal)
-        .map((finding) => finding.id);
+    mutationFn: (current: CourseCheckPlan) => {
+      const stageId =
+        current.body.actionType === "publication"
+          ? current.body.stages.find((stage) => stage.status === "ready")?.id ??
+            current.body.stages[0]?.id ??
+            "publish-program"
+          : "apply-decision";
       const softWarningOverrides =
-        plan.body.actionType === "publication"
-          ? materialIds.map((findingId) => ({
-              findingId,
-              reason: overrideReasons[findingId] ?? "",
-            }))
+        current.body.actionType === "publication"
+          ? current.body.findings
+              .filter((finding) => finding.severity === "warning" && finding.materialExternal)
+              .map((finding) => ({
+                findingId: finding.id,
+                reason: overrideReasons[finding.id] ?? null,
+              }))
           : undefined;
-      return applyCourseCheckPlan(eventId, plan.id, {
-        planVersion: plan.version,
-        digest: plan.digest,
+      return applyCourseCheckPlan(eventId, current.id, {
+        planVersion: current.version,
+        digest: current.digest,
         stageId,
         idempotencyKey: applyKey,
         softWarningOverrides,
       });
     },
-    onSuccess: (plan) => {
-      queryClient.setQueryData(["course-check", eventId, planId], plan);
+    onSuccess: (next) => {
+      queryClient.setQueryData(["course-check", eventId, planId], next);
       void queryClient.invalidateQueries({ queryKey: ["proposals", eventId] });
-      void queryClient.invalidateQueries({ queryKey: ["agenda", eventId] });
       void queryClient.invalidateQueries({ queryKey: ["public-program", eventId] });
       setMessage(
-        plan.state === "Partially complete"
-          ? "Remaining batch applied. Deferred items stay in the follow-up queue."
-          : plan.body.actionType === "publication"
-            ? "Program published as a new immutable public revision. No speaker messages were sent."
+        next.body.actionType === "publication"
+          ? next.state === "Complete"
+            ? "Program publication applied. Linked communication plans stay separate."
+            : `Publication ${next.state}.`
+          : next.state === "Partially complete"
+            ? "Remaining batch applied. Deferred items stay in the follow-up queue."
             : "Decision applied. Internal records updated; no speaker email was sent.",
       );
     },
   });
 
   const deferMutation = useMutation({
-    mutationFn: (plan: CourseCheckPlan) =>
-      deferCourseCheckItems(eventId, plan.id, {
-        planVersion: plan.version,
-        digest: plan.digest,
+    mutationFn: (current: CourseCheckPlan) =>
+      deferCourseCheckItems(eventId, current.id, {
+        planVersion: current.version,
+        digest: current.digest,
         itemIds: [...selectedItemIds],
         reason: deferReason.trim(),
         idempotencyKey: `${deferKey}-${[...selectedItemIds].join(",")}`,
       }),
-    onSuccess: (plan) => {
-      queryClient.setQueryData(["course-check", eventId, planId], plan);
+    onSuccess: (next) => {
+      queryClient.setQueryData(["course-check", eventId, planId], next);
       setSelectedItemIds(new Set());
       setDeferReason("");
       setMessage("Deferred items moved to the follow-up queue as a new plan version.");
+    },
+  });
+
+  const reviseMutation = useMutation({
+    mutationFn: (current: CourseCheckPlan) => {
+      if (current.body.actionType !== "communication") {
+        throw new Error("Not a communication plan");
+      }
+      const recipientSelection = current.body.recipientGroups.flatMap((group) =>
+        group.recipients.map((recipient) => ({
+          recipientId: recipient.recipientId,
+          selected: selectedRecipientIds.has(recipient.recipientId),
+        })),
+      );
+      return reviseCommunicationCourseCheck(eventId, current.id, {
+        planVersion: current.version,
+        digest: current.digest,
+        subject,
+        bodyText,
+        recipientSelection,
+        idempotencyKey: `${reviseKey}-${current.version}`,
+      });
+    },
+    onSuccess: (next) => {
+      queryClient.setQueryData(["course-check", eventId, planId], next);
+      setMessage("Saved a new immutable communication plan version. Draft approval cleared.");
+    },
+  });
+
+  const draftsMutation = useMutation({
+    mutationFn: async (current: CourseCheckPlan) => {
+      if (current.body.actionType !== "communication") {
+        throw new Error("Not a communication plan");
+      }
+      let working = current;
+      const contentChanged =
+        subject !== current.body.subject || bodyText !== current.body.bodyText;
+      const selectionChanged = current.body.recipientGroups.some((group) =>
+        group.recipients.some(
+          (recipient) =>
+            selectedRecipientIds.has(recipient.recipientId) !== recipient.selected,
+        ),
+      );
+      if (contentChanged || selectionChanged) {
+        working = await reviseCommunicationCourseCheck(eventId, current.id, {
+          planVersion: current.version,
+          digest: current.digest,
+          subject,
+          bodyText,
+          recipientSelection: current.body.recipientGroups.flatMap((group) =>
+            group.recipients.map((recipient) => ({
+              recipientId: recipient.recipientId,
+              selected: selectedRecipientIds.has(recipient.recipientId),
+            })),
+          ),
+          idempotencyKey: `${reviseKey}-pre-draft-${current.version}`,
+        });
+      }
+      const materialWarnings = working.body.findings.filter(
+        (finding) => finding.severity === "warning" && finding.materialExternal,
+      );
+      return createCommunicationDrafts(eventId, working.id, {
+        planVersion: working.version,
+        digest: working.digest,
+        stageId: "create-drafts",
+        idempotencyKey: draftsKey,
+        softWarningOverrides: materialWarnings.map((finding) => ({
+          findingId: finding.id,
+          reason: "Reviewed prior communication; proceeding with draft freeze.",
+        })),
+      });
+    },
+    onSuccess: (next) => {
+      queryClient.setQueryData(["course-check", eventId, planId], next);
+      setMessage(
+        "Drafts frozen with exact subject, body, and recipients. Nothing was sent.",
+      );
+    },
+  });
+
+  const linkCommunicationMutation = useMutation({
+    mutationFn: (current: CourseCheckPlan) =>
+      createCommunicationCourseCheck(eventId, {
+        decisionPlanId: current.id,
+        idempotencyKey: linkCommKey,
+      }),
+    onSuccess: (next) => {
+      window.location.assign(`/e/${eventId}/course-checks/${next.id}`);
     },
   });
 
@@ -505,26 +809,31 @@ export function CourseCheckPage() {
     );
   }
 
-  const plan = planQuery.data;
-  const stage = plan.body.stages[0];
-  const blocked =
-    plan.body.findings.some((finding) => finding.severity === "blocker") ||
-    plan.state === "Out of date";
-  const complete = plan.state === "Complete" || plan.state === "Partially complete";
-  const isDecision = plan.body.actionType === "decision";
-  const isPublication = plan.body.actionType === "publication";
-  const materialReady =
-    !isPublication ||
-    plan.body.findings
-      .filter((finding) => finding.severity === "warning" && finding.materialExternal)
-      .every((finding) => (overrideReasons[finding.id] ?? "").trim().length > 0);
-  const backTo =
-    isPublication
-      ? ({ to: "/e/$eventId/agenda" as const, label: "Back to agenda" })
-      : ({
-          to: "/e/$eventId/submissions" as const,
-          label: "Back to submissions",
-        });
+  const currentPlan = planQuery.data;
+  const isDecision = currentPlan.body.actionType === "decision";
+  const isCommunication = currentPlan.body.actionType === "communication";
+  const isPublication = currentPlan.body.actionType === "publication";
+  const communicationBody = isCommunication
+    ? (currentPlan.body as CommunicationPlanBody)
+    : null;
+  const publicationBody = isPublication
+    ? (currentPlan.body as PublicationPlanBody)
+    : null;
+  const blocked = currentPlan.body.findings.some(
+    (finding) => finding.severity === "blocker",
+  );
+  const decisionComplete =
+    currentPlan.state === "Complete" || currentPlan.state === "Partially complete";
+  const draftsComplete =
+    Boolean(communicationBody) &&
+    communicationBody!.stageVisibility.draft === "complete" &&
+    communicationBody!.drafts.length > 0;
+  const createDraftsStage = currentPlan.body.stages.find(
+    (stage) => stage.id === "create-drafts",
+  );
+  const applyStage = currentPlan.body.stages.find(
+    (stage) => stage.id === "apply-decision",
+  );
 
   return (
     <main className="app course-check-page">
@@ -532,34 +841,35 @@ export function CourseCheckPage() {
         <div>
           <p className="eyebrow">Course Check</p>
           <h1>
-            {isPublication
-              ? "Program publication workspace"
-              : "Shared decision workspace"}
+            {isCommunication
+              ? "Communication workspace"
+              : isPublication
+                ? "Program publication workspace"
+                : isDecision
+                  ? "Shared decision workspace"
+                  : "Course Check workspace"}
           </h1>
           <p className="lede">
-            Resumable event resource. Another authorized administrator can inspect and
-            continue this exact versioned plan.
+            {isCommunication
+              ? "Review recipients and freeze message drafts. Sending remains a separate approved action."
+              : isPublication
+                ? "Inspect the public program delta before publish, unpublish, or restore. Communication stays separate."
+                : "Resumable event resource. Another authorized administrator can inspect and continue this exact versioned batch."}
           </p>
         </div>
-        {isPublication ? (
-          <Link className="btn btn-secondary btn-sm" to="/e/$eventId/agenda" params={{ eventId }}>
-            {backTo.label}
-          </Link>
-        ) : (
-          <Link
-            className="btn btn-secondary btn-sm"
-            to="/e/$eventId/submissions"
-            params={{ eventId }}
-            search={{ q: undefined, status: undefined, track: undefined, sort: undefined }}
-          >
-            {backTo.label}
-          </Link>
-        )}
+        <Link
+          className="btn btn-secondary btn-sm"
+          to="/e/$eventId/submissions"
+          params={{ eventId }}
+          search={{ q: undefined, status: undefined, track: undefined, sort: undefined }}
+        >
+          Back to submissions
+        </Link>
       </header>
 
       {isDecision ? (
         <DecisionBatchBody
-          plan={plan}
+          plan={currentPlan}
           selectedItemIds={selectedItemIds}
           onToggleItem={(itemId) => {
             setSelectedItemIds((current) => {
@@ -570,80 +880,218 @@ export function CourseCheckPage() {
             });
           }}
         />
+      ) : isCommunication ? (
+        <CommunicationBody
+          plan={currentPlan}
+          subject={subject}
+          bodyText={bodyText}
+          selectedRecipientIds={selectedRecipientIds}
+          onSubjectChange={setSubject}
+          onBodyTextChange={setBodyText}
+          onToggleRecipient={(recipientId) => {
+            setSelectedRecipientIds((current) => {
+              const next = new Set(current);
+              if (next.has(recipientId)) next.delete(recipientId);
+              else next.add(recipientId);
+              return next;
+            });
+          }}
+        />
       ) : isPublication ? (
         <PublicationBody
-          plan={plan}
+          plan={currentPlan}
           overrideReasons={overrideReasons}
-          onOverrideReason={(findingId, reason) =>
-            setOverrideReasons((current) => ({ ...current, [findingId]: reason }))
-          }
+          onOverrideReason={(findingId, reason) => {
+            setOverrideReasons((current) => ({ ...current, [findingId]: reason }));
+          }}
         />
       ) : (
-        <GuaranteedBody plan={plan} />
+        <GuaranteedBody plan={currentPlan} />
       )}
 
       <footer className="course-check-actions">
-        {complete ? (
-          <p className="form-message" data-tone="success" role="status">
-            {plan.state}
-            {plan.receipt?.appliedAt ? ` at ${plan.receipt.appliedAt}` : ""}. Receipt{" "}
-            <span className="mono">{plan.receipt?.id.slice(0, 8)}</span>
-            {isPublication && plan.body.actionType === "publication" && plan.body.linkedPlanIds.length > 0
-              ? ` · ${plan.body.linkedPlanIds.length} linked communication plan(s)`
-              : ""}
-          </p>
-        ) : (
+        {isDecision && decisionComplete ? (
           <>
-            {isDecision ? (
-              <div className="course-check-defer">
-                <label>
-                  Defer selected blocked items
-                  <input
-                    type="text"
-                    value={deferReason}
-                    onChange={(event) => setDeferReason(event.target.value)}
-                    placeholder="Why defer these items?"
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled={
-                    selectedItemIds.size === 0 ||
-                    !deferReason.trim() ||
-                    deferMutation.isPending
-                  }
-                  onClick={() => {
-                    setMessage(null);
-                    deferMutation.mutate(plan);
-                  }}
-                >
-                  Defer to follow-up
-                </button>
-              </div>
-            ) : null}
+            <p className="form-message" data-tone="success" role="status">
+              {currentPlan.state}
+              {currentPlan.receipt?.appliedAt ? ` at ${currentPlan.receipt.appliedAt}` : ""}
+              . Receipt <span className="mono">{currentPlan.receipt?.id.slice(0, 8)}</span>
+            </p>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={linkCommunicationMutation.isPending}
+              onClick={() => {
+                setMessage(null);
+                linkCommunicationMutation.mutate(currentPlan);
+              }}
+            >
+              Open communication Course Check
+            </button>
+          </>
+        ) : null}
+
+        {isDecision && !decisionComplete ? (
+          <>
+            <div className="course-check-defer">
+              <label>
+                Defer selected blocked items
+                <input
+                  type="text"
+                  value={deferReason}
+                  onChange={(event) => setDeferReason(event.target.value)}
+                  placeholder="Why defer these items?"
+                />
+              </label>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={
+                  selectedItemIds.size === 0 ||
+                  !deferReason.trim() ||
+                  deferMutation.isPending
+                }
+                onClick={() => {
+                  setMessage(null);
+                  deferMutation.mutate(currentPlan);
+                }}
+              >
+                Defer to follow-up
+              </button>
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={blocked || applyMutation.isPending || !applyStage}
+              onClick={() => {
+                setMessage(null);
+                applyMutation.mutate(currentPlan);
+              }}
+            >
+              {applyStage?.verb ?? "Apply decision"}
+            </button>
+          </>
+        ) : null}
+
+        {isCommunication && !draftsComplete ? (
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={
+                reviseMutation.isPending || Boolean(communicationBody?.redacted)
+              }
+              onClick={() => {
+                setMessage(null);
+                reviseMutation.mutate(currentPlan);
+              }}
+            >
+              Save content revision
+            </button>
             <button
               type="button"
               className="btn btn-primary"
               disabled={
                 blocked ||
-                applyMutation.isPending ||
-                !stage ||
-                !materialReady
+                draftsMutation.isPending ||
+                !createDraftsStage ||
+                Boolean(communicationBody?.redacted)
               }
               onClick={() => {
                 setMessage(null);
-                applyMutation.mutate(plan);
+                draftsMutation.mutate(currentPlan);
               }}
             >
-              {stage?.verb ?? "Apply decision"}
+              {createDraftsStage?.verb ?? "Create drafts"}
             </button>
           </>
-        )}
-        {applyMutation.isError || deferMutation.isError ? (
+        ) : null}
+
+        {isCommunication && draftsComplete ? (
+          <p className="form-message" data-tone="success" role="status">
+            Drafts frozen
+            {currentPlan.receipt?.appliedAt ? ` at ${currentPlan.receipt.appliedAt}` : ""}
+            . Send messages remains a separate stage.
+          </p>
+        ) : null}
+
+        {isPublication && decisionComplete ? (
+          <p className="form-message" data-tone="success" role="status">
+            {currentPlan.state}
+            {currentPlan.receipt?.appliedAt ? ` at ${currentPlan.receipt.appliedAt}` : ""}
+            . Receipt <span className="mono">{currentPlan.receipt?.id.slice(0, 8)}</span>
+            {publicationBody && publicationBody.linkedPlanIds.length > 0
+              ? ` · ${publicationBody.linkedPlanIds.length} linked communication plan(s)`
+              : ""}
+          </p>
+        ) : null}
+
+        {isPublication && !decisionComplete ? (
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={
+              blocked ||
+              applyMutation.isPending ||
+              !(
+                currentPlan.body.stages.find((s) => s.status === "ready") ??
+                currentPlan.body.stages[0]
+              )
+            }
+            onClick={() => {
+              setMessage(null);
+              applyMutation.mutate(currentPlan);
+            }}
+          >
+            {(
+              currentPlan.body.stages.find((s) => s.status === "ready") ??
+              currentPlan.body.stages[0]
+            )?.verb ?? "Publish program"}
+          </button>
+        ) : null}
+
+        {!isDecision && !isCommunication && !isPublication && decisionComplete ? (
+          <p className="form-message" data-tone="success" role="status">
+            {currentPlan.state}
+            {currentPlan.receipt?.appliedAt ? ` at ${currentPlan.receipt.appliedAt}` : ""}
+            . Receipt <span className="mono">{currentPlan.receipt?.id.slice(0, 8)}</span>
+          </p>
+        ) : null}
+
+        {!isDecision && !isCommunication && !isPublication && !decisionComplete ? (
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={blocked || applyMutation.isPending || !applyStage}
+            onClick={() => {
+              setMessage(null);
+              applyMutation.mutate(currentPlan);
+            }}
+          >
+            {applyStage?.verb ?? "Apply decision"}
+          </button>
+        ) : null}
+
+        {applyMutation.isError ||
+        deferMutation.isError ||
+        reviseMutation.isError ||
+        draftsMutation.isError ||
+        linkCommunicationMutation.isError ? (
           <p className="form-message" data-tone="error" role="alert">
-            {(applyMutation.error ?? deferMutation.error) instanceof ApiError
-              ? ((applyMutation.error ?? deferMutation.error) as ApiError).message
+            {(
+              applyMutation.error ??
+              deferMutation.error ??
+              reviseMutation.error ??
+              draftsMutation.error ??
+              linkCommunicationMutation.error
+            ) instanceof ApiError
+              ? (
+                  (applyMutation.error ??
+                    deferMutation.error ??
+                    reviseMutation.error ??
+                    draftsMutation.error ??
+                    linkCommunicationMutation.error) as ApiError
+                ).message
               : "Unable to update Course Check."}
           </p>
         ) : null}
@@ -652,7 +1100,7 @@ export function CourseCheckPage() {
             {message}
           </p>
         ) : null}
-        {plan.body.findings
+        {currentPlan.body.findings
           .filter((finding) => finding.severity === "blocker")
           .map((finding) => (
             <p
