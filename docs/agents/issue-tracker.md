@@ -11,6 +11,21 @@ Issues and specs for this repo live as Markdown files in `.scratch/`.
 - Triage state is recorded as a `Status:` line near the top of each issue file
 - Comments and conversation history append under a `## Comments` heading
 
+## Live board (local)
+
+Simple status board that re-reads the Markdown files every few seconds:
+
+```bash
+npm run issues:board
+```
+
+- Board: `http://100.105.117.93:3939/` (Tailscale) or `http://127.0.0.1:3939/` on Halla
+- JSON: `/api/board`
+- Source: `scripts/issue-board/server.mjs`
+- Tracks: competition build + Course Check issue folders
+
+This is a mirror only. Edit the Markdown files; the board follows.
+
 ## Publishing and fetching
 
 When a skill says to publish to the issue tracker, create the relevant file under `.scratch/<feature-slug>/`.
