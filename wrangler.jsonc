@@ -30,6 +30,15 @@
       "migrations_dir": "migrations"
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "chartstead-assets"
+    }
+  ],
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
   "vars": {
     "BETTER_AUTH_URL": "https://chartstead.mayberrydt.workers.dev"
   },
@@ -37,6 +46,9 @@
     "demo": {
       "name": "chartstead-demo",
       "main": "./worker/demo.ts",
+      "triggers": {
+        "crons": ["*/5 * * * *"]
+      },
       "durable_objects": {
         "bindings": [
           {
@@ -51,6 +63,12 @@
           "database_name": "chartstead-auth-demo",
           "database_id": "16b64284-0f9f-4270-a282-3db87667dbb8",
           "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "ASSETS",
+          "bucket_name": "chartstead-assets-demo"
         }
       ],
       "vars": {

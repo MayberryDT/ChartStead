@@ -8,6 +8,7 @@ export const seedEvents: EventRecord[] = [
     endsOn: "2026-10-08",
     submissionCount: 47,
     unreviewedCount: 18,
+    themeAccent: "#2f5d98",
     tracks: [
       { id: "platform", name: "Platform", proposalCount: 14 },
       { id: "program-ops", name: "Program Ops", proposalCount: 12 },
@@ -27,6 +28,7 @@ export const seedEvents: EventRecord[] = [
     endsOn: "2026-06-27",
     submissionCount: 32,
     unreviewedCount: 9,
+    themeAccent: "#081d3a",
     tracks: [
       { id: "agents", name: "Agents", proposalCount: 12 },
       { id: "models", name: "Models", proposalCount: 8 },

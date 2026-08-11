@@ -319,6 +319,7 @@ function EventDesk({
   }
 
   const cfpHref = `/e/${event.id}/cfp`;
+  const formsHref = `/e/${event.id}/forms`;
   const topbarTitle = activeNav === "Submissions" ? "Submissions" : event.name;
   const topbarMeta =
     activeNav === "Submissions"
@@ -390,10 +391,15 @@ function EventDesk({
           </div>
           <div className="topbar-spacer" />
           <div className="topbar-actions">
-            {activeNav === "Submissions" ? (
-              <a className="btn btn-primary" href={cfpHref}>
-                Open CFP form
-              </a>
+            {activeNav === "Submissions" || activeNav === "Overview" ? (
+              <>
+                <a className="btn btn-secondary" href={formsHref}>
+                  Manage CFP forms
+                </a>
+                <a className="btn btn-primary" href={cfpHref}>
+                  Open CFP form
+                </a>
+              </>
             ) : null}
             <div className="operator">
               <span className="operator-avatar" aria-hidden="true">

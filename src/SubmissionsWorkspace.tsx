@@ -221,7 +221,14 @@ export function SubmissionsWorkspace({
   );
 }
 
+function formatSessionFormat(value: string) {
+  if (!value) return "Not specified";
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
 function ProposalInspector({ proposal }: { proposal: OrganizerProposal }) {
+  const supportingFile = proposal.supportingFile ?? null;
+  const coSpeakers = proposal.coSpeakers ?? [];
   return (
     <>
       <div className="inspector-header">
@@ -242,6 +249,30 @@ function ProposalInspector({ proposal }: { proposal: OrganizerProposal }) {
       </div>
       <div className="inspector-body">
         <section className="panel">
+          <h3>Session</h3>
+          <dl className="inspector-meta">
+            <div>
+              <dt>Track</dt>
+              <dd>
+                <span className={`track ${trackClass(proposal.trackId)}`}>
+                  {proposal.trackName}
+                </span>
+              </dd>
+            </div>
+            <div>
+              <dt>Session format</dt>
+              <dd>{formatSessionFormat(proposal.sessionFormat)}</dd>
+            </div>
+            {proposal.sessionFormat === "workshop" ||
+            proposal.workshopDuration ? (
+              <div>
+                <dt>Workshop duration</dt>
+                <dd>{proposal.workshopDuration || "Not specified"}</dd>
+              </div>
+            ) : null}
+          </dl>
+        </section>
+        <section className="panel">
           <h3>Abstract</h3>
           <p>{proposal.abstract}</p>
         </section>
@@ -249,6 +280,19 @@ function ProposalInspector({ proposal }: { proposal: OrganizerProposal }) {
           <h3>Biography</h3>
           <p>{proposal.biography}</p>
         </section>
+        {coSpeakers.length > 0 ? (
+          <section className="panel">
+            <h3>Co-speakers</h3>
+            <ul className="inspector-list">
+              {coSpeakers.map((speaker) => (
+                <li key={`${speaker.email}-${speaker.name}`}>
+                  <strong>{speaker.name}</strong>
+                  <span className="talk-sub"> · {speaker.email}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
         <section className="panel">
           <h3>Supporting link</h3>
           <p>
@@ -260,6 +304,21 @@ function ProposalInspector({ proposal }: { proposal: OrganizerProposal }) {
               "None provided"
             )}
           </p>
+        </section>
+        <section className="panel">
+          <h3>Supporting file</h3>
+          {supportingFile?.status === "complete" ? (
+            <p>
+              <strong>{supportingFile.name}</strong>
+              <span className="talk-sub">
+                {" "}
+                · {(supportingFile.size / 1024).toFixed(1)} KB ·{" "}
+                {supportingFile.mime}
+              </span>
+            </p>
+          ) : (
+            <p>None provided</p>
+          )}
         </section>
         <section className="panel">
           <h3>Committee note</h3>

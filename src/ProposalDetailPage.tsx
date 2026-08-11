@@ -27,7 +27,12 @@ export function ProposalDetailPage() {
         <section className="error-panel" role="alert">
           <h1>Proposal not found</h1>
           <p>{query.error.message}</p>
-          <Link className="primary-action" to="/e/$eventId/cfp" params={{ eventId }}>
+          <Link
+            className="primary-action"
+            to="/e/$eventId/cfp"
+            params={{ eventId }}
+            search={{}}
+          >
             Back to CFP
           </Link>
         </section>
@@ -42,9 +47,10 @@ export function ProposalDetailPage() {
       <section className="cfp-panel confirmation-panel" aria-labelledby="confirm-title">
         <img src={markOnLightUrl} width="40" height="40" alt="" />
         <p className="eyebrow">Submission received</p>
-        <h1 id="confirm-title">Thanks — your proposal is in.</h1>
+        <h1 id="confirm-title">Thanks - your proposal is in.</h1>
         <p>
-          Keep this permanent page for your records. Organizers can find the
+          Keep this permanent page for your records. A branded confirmation
+          email with a secure edit link is on its way. Organizers can find the
           proposal by title, speaker, or stable ID.
         </p>
         <dl className="confirm-meta">
@@ -68,7 +74,12 @@ export function ProposalDetailPage() {
           </div>
         </dl>
         <div className="confirm-actions">
-          <Link className="primary-action" to="/e/$eventId/cfp" params={{ eventId }}>
+          <Link
+            className="primary-action"
+            to="/e/$eventId/cfp"
+            params={{ eventId }}
+            search={{}}
+          >
             Submit another proposal
           </Link>
           <Link className="text-link" to="/">

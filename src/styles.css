@@ -1,5 +1,17 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 :root {
   --primary: #081d3a;
   --on-primary: #ffffff;
@@ -665,8 +677,9 @@ img { display: block; max-width: 100%; }
   padding: 36px;
   background: var(--surface);
   border: 1px solid var(--outline);
-  border-top: 3px solid var(--primary);
+  border-top: 3px solid var(--cfp-accent, var(--primary));
   box-shadow: var(--shadow-2);
+  overflow: visible;
 }
 
 .cfp-panel h1 {
@@ -682,6 +695,7 @@ img { display: block; max-width: 100%; }
 }
 
 .cfp-survey {
+  /* ChartStead interactive tokens. Event accent only tints the panel bar via --cfp-accent. */
   --sjs-primary-backcolor: var(--secondary);
   --sjs-primary-backcolor-dark: var(--secondary-hover);
   --sjs-primary-backcolor-light: var(--selection);
@@ -693,12 +707,57 @@ img { display: block; max-width: 100%; }
   --sjs-border-default: var(--outline);
   --sjs-border-light: var(--surface-muted);
   --sjs-corner-radius: var(--r-control);
-  margin-top: 22px;
+  --sjs-special-red: var(--error);
+  --sjs-special-red-light: var(--error-container);
+  margin-top: 12px;
+  /* Room for focus rings that SurveyJS draws outside the field box. */
+  overflow: visible;
+  padding-inline: 4px;
+}
+
+/* Welcome HTML sits inside the survey — keep it tight under the event intro. */
+.cfp-survey .cfp-welcome {
+  margin: 0;
+  padding: 0;
+}
+
+.cfp-survey .cfp-welcome h2 {
+  margin: 0 0 8px;
+  font-size: 22px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--on-surface);
+}
+
+.cfp-survey .cfp-welcome p {
+  margin: 0;
+  color: var(--on-surface-variant);
+  line-height: 1.5;
+  font-size: 14px;
+}
+
+.cfp-survey .sd-row:first-child {
+  border-bottom: none;
+  padding-top: 0;
+}
+
+.cfp-survey .sd-row:first-child .sd-question,
+.cfp-survey .sd-row:first-child .sd-element {
+  padding-top: 0;
+  padding-bottom: 8px;
 }
 
 .cfp-survey .sd-root-modern,
 .cfp-survey .sd-container-modern,
-.cfp-survey .sd-body {
+.cfp-survey .sd-body,
+.cfp-survey .sd-body__page,
+.cfp-survey .sd-page,
+.cfp-survey .sd-row,
+.cfp-survey .sd-element,
+.cfp-survey .sd-question,
+.cfp-survey .sd-paneldynamic,
+.cfp-survey .sd-paneldynamic__panel {
+  overflow: visible;
   background: transparent;
 }
 
@@ -710,23 +769,112 @@ img { display: block; max-width: 100%; }
 .cfp-survey .sd-row {
   box-shadow: none;
   border-bottom: 1px solid var(--surface-muted);
+  margin-inline: 0;
+  padding-inline: 2px;
 }
 
 .cfp-survey .sd-question {
-  padding: 16px 0;
+  padding: 16px 2px;
 }
 
 .cfp-survey .sd-input,
-.cfp-survey .sd-dropdown {
+.cfp-survey .sd-dropdown,
+.cfp-survey .sd-comment {
   border: 1px solid var(--outline);
   box-shadow: none;
 }
 
+.cfp-survey .sd-input:focus,
+.cfp-survey .sd-dropdown:focus-within,
+.cfp-survey .sd-comment:focus,
+.cfp-survey input.sd-input:focus,
+.cfp-survey textarea.sd-input:focus {
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 3px rgba(47, 93, 152, 0.18);
+  outline: none;
+}
+
+.cfp-survey .sd-question--error .sd-input,
+.cfp-survey .sd-question--error .sd-dropdown,
+.cfp-survey .sd-question--error .sd-comment {
+  border-color: var(--error);
+  background: var(--error-container);
+}
+
+/* SurveyJS framed questions pull error bars outside with negative margins, which
+   clips the first few characters against the panel. Keep errors in-flow. */
+.cfp-survey .sd-element--with-frame > .sd-element__erbox,
+.cfp-survey .sd-element--with-frame > .sd-question__erbox--below-question,
+.cfp-survey .sd-element--with-frame > .sd-question__erbox--above-question,
+.cfp-survey .sd-element--with-frame > .sd-element__erbox--above-element {
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  width: 100% !important;
+  max-width: 100%;
+  left: auto !important;
+  position: static !important;
+  box-sizing: border-box;
+}
+
+.cfp-survey .sd-question__erbox,
+.cfp-survey .sd-element__erbox,
+.cfp-survey .sd-error {
+  overflow: visible;
+  margin-inline: 0;
+  padding: 8px 10px;
+  color: var(--on-error-container);
+  background: var(--error-container);
+  border: 1px solid #f0c4bf;
+  border-radius: var(--r-control);
+  white-space: normal;
+  word-break: break-word;
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+.cfp-survey .sd-error__item {
+  overflow: visible;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.cfp-survey .sd-paneldynamic__panel-footer,
+.cfp-survey .sd-paneldynamic__footer,
+.cfp-survey .sd-paneldynamic__buttons-container {
+  overflow: visible;
+  padding-inline: 2px;
+}
+
+.cfp-survey .sd-paneldynamic__remove-btn,
+.cfp-survey .sd-paneldynamic__add-btn,
+.cfp-survey .sd-action,
 .cfp-survey .sd-btn {
+  overflow: visible;
   min-height: 44px;
   border-radius: var(--r-control);
   background-image: none;
   box-shadow: none;
+}
+
+.cfp-survey .sd-paneldynamic__remove-btn:focus-visible,
+.cfp-survey .sd-paneldynamic__add-btn:focus-visible,
+.cfp-survey .sd-btn:focus-visible,
+.cfp-survey .sd-action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.cfp-survey .sd-navigation__complete-btn,
+.cfp-survey .sd-btn--action {
+  background: var(--secondary) !important;
+  border-color: var(--secondary) !important;
+  color: var(--on-secondary) !important;
+}
+
+.cfp-survey .sd-navigation__complete-btn:hover,
+.cfp-survey .sd-btn--action:hover {
+  background: var(--secondary-hover) !important;
+  border-color: var(--secondary-hover) !important;
 }
 
 .cfp-foot {
@@ -781,8 +929,19 @@ img { display: block; max-width: 100%; }
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
+  align-items: flex-end;
+  margin-top: 22px;
+}
+
+.confirm-actions .primary-action {
+  margin-top: 0;
+}
+
+.confirm-actions .text-link {
+  display: inline-flex;
   align-items: center;
-  margin-top: 8px;
+  min-height: 44px;
+  padding: 0 2px;
 }
 
 /* —— Submissions master-detail (SOT) —— */
@@ -795,8 +954,9 @@ img { display: block; max-width: 100%; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 34px;
-  padding: 0 12px;
+  min-height: 44px;
+  height: auto;
+  padding: 0 14px;
   border: 1px solid var(--btn-bd);
   border-radius: var(--r-control);
   background: var(--btn-bg);
@@ -852,8 +1012,9 @@ img { display: block; max-width: 100%; }
 }
 
 .btn-sm {
-  height: 30px;
-  padding: 0 10px;
+  min-height: 44px;
+  height: auto;
+  padding: 0 12px;
   font-size: 12px;
 }
 
@@ -1106,6 +1267,36 @@ table.grid tbody tr[aria-selected="true"] td:first-child {
   flex-wrap: wrap;
 }
 
+.inspector-meta {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.inspector-meta > div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.inspector-meta dt {
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted, #6b7280);
+}
+
+.inspector-meta dd {
+  margin: 0;
+}
+
+.inspector-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
 .inspector-body {
   padding: 12px 16px;
   display: flex;
@@ -1178,5 +1369,310 @@ table.grid tbody tr[aria-selected="true"] td:first-child {
     border-left: 1px solid var(--outline);
     box-shadow: var(--shadow-2);
     z-index: 20;
+  }
+}
+
+/* —— Guided CFP builder —— */
+.builder-shell {
+  min-height: 100vh;
+  padding: 24px;
+  background: var(--surface-subtle);
+}
+
+.builder-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.builder-header h1 {
+  margin: 4px 0 0;
+  font-size: 28px;
+  letter-spacing: -0.02em;
+}
+
+.builder-meta {
+  margin: 6px 0 0;
+  color: var(--on-surface-variant);
+}
+
+.builder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.builder-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.builder-steps button {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--outline);
+  border-radius: var(--r-control);
+  background: var(--surface);
+  color: var(--on-surface-variant);
+  font-weight: 600;
+}
+
+.builder-steps button.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+}
+
+.builder-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.9fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.builder-editor,
+.builder-preview {
+  background: var(--surface);
+  border: 1px solid var(--outline);
+  border-radius: 8px;
+  padding: 18px;
+  box-shadow: var(--shadow-1);
+}
+
+.builder-preview-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.builder-preview-header p {
+  margin: 4px 0 12px;
+  color: var(--on-surface-variant);
+  font-size: 13px;
+}
+
+.builder-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.builder-stack label,
+.submitter-edit-form label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--on-surface);
+}
+
+.builder-stack input,
+.builder-stack textarea,
+.submitter-edit-form input,
+.submitter-edit-form textarea {
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--outline);
+  border-radius: var(--r-control);
+  background: var(--surface);
+  font-weight: 400;
+}
+
+.builder-stack textarea,
+.submitter-edit-form textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.checkbox-row {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500 !important;
+}
+
+.field-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--outline);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+}
+
+.field-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--on-surface-variant);
+  font-size: 12px;
+  text-transform: capitalize;
+}
+
+.condition-sentence {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--r-control);
+  background: var(--info-container);
+  color: var(--on-info-container);
+  font-size: 13px;
+}
+
+.builder-save-status {
+  font-weight: 700;
+  color: var(--on-surface);
+}
+
+.builder-add-field-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.field-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.condition-editor {
+  display: grid;
+  gap: 8px;
+}
+
+.condition-editor-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.form-card-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+  max-width: 720px;
+}
+
+.form-card {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--outline);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+.form-card:hover {
+  border-color: var(--secondary);
+}
+
+.status-pill {
+  display: inline-flex;
+  width: fit-content;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.status-draft {
+  background: var(--surface-muted);
+  color: var(--on-surface-variant);
+}
+
+.status-published {
+  background: var(--success-container);
+  color: var(--on-success-container);
+}
+
+.status-closed {
+  background: var(--warning-container);
+  color: var(--on-warning-container);
+}
+
+.submitter-edit-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.cfp-file-question {
+  display: grid;
+  gap: 10px;
+}
+
+.cfp-file-complete,
+.cfp-file-active {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--outline);
+  border-radius: var(--r-control);
+  background: var(--surface-subtle);
+}
+
+.cfp-file-complete span {
+  display: block;
+  color: var(--on-surface-variant);
+  font-size: 12.5px;
+}
+
+.cfp-file-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.cfp-file-progress {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.cfp-file-progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--secondary);
+}
+
+.cfp-file-error {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 10px 12px;
+  background: var(--error-container);
+  color: var(--on-error-container);
+  border: 1px solid #e8b4af;
+  border-radius: var(--r-control);
+}
+
+.cfp-file-error p {
+  margin: 0;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 960px) {
+  .builder-layout {
+    grid-template-columns: 1fr;
   }
 }

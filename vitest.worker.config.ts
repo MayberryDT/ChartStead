@@ -5,6 +5,11 @@ export default defineConfig({
   plugins: [
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
+      miniflare: {
+        bindings: {
+          BETTER_AUTH_SECRET: "test-worker-signing-secret-32chars!!",
+        },
+      },
     }),
   ],
   test: {
