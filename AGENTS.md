@@ -29,6 +29,8 @@ Keep this file **minimal**. It only points agents at the right sources. Do not d
 
 Specs and implementation tickets live as local Markdown under `.scratch/`. See [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
 
+**Live board:** `http://100.105.117.93:3939/` reads the **main checkout** `.scratch/` only. When working in a worktree, update ticket `Status:` + checklists there **and** copy the same issue file into `/home/halla/ChartStead/.scratch/...` so the board moves.
+
 ### Triage labels
 
 Use the five canonical Matt skill labels. See [docs/agents/triage-labels.md](docs/agents/triage-labels.md).

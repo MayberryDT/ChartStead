@@ -23,8 +23,21 @@ npm run issues:board
 - JSON: `/api/board`
 - Source: `scripts/issue-board/server.mjs`
 - Tracks: competition build + Course Check issue folders
+- **Reads the main checkout only:** `REPO_ROOT` is the repo that owns `scripts/issue-board/`, not a git worktree. Worktree-only edits are invisible until you copy/update the same path under the main checkout’s `.scratch/`.
 
 This is a mirror only. Edit the Markdown files; the board follows.
+
+### Agent duty (status + checklists)
+
+When you start, finish, or block a ticket:
+
+1. Update `**Status:**` and the `- [ ]` / `- [x]` checklist in the issue Markdown.
+2. Write those edits on **both** the worktree copy (if you implement in a worktree) **and** the main checkout path the board watches:
+   - `/home/halla/ChartStead/.scratch/chartstead-competition-build/issues/`
+   - `/home/halla/ChartStead/.scratch/chartstead-course-check/issues/`
+3. Use statuses the board understands: `ready-for-agent` / `open` → Open; `in-progress` → In progress; `done` / `complete` → Done; blocked variants → Other.
+
+Do not leave checklist progress only on a branch or worktree.
 
 ## Publishing and fetching
 
