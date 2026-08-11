@@ -67,6 +67,43 @@ export function createAuth(env: AppBindings) {
   });
 }
 
+export async function loadPrincipalForUser(
+  database: D1Database,
+  user: { id: string; name: string },
+): Promise<OrganizerPrincipal | null> {
+  const memberships = await database.prepare(
+    `SELECT m.event_id, m.role, r.track_id
+     FROM event_memberships AS m
+     LEFT JOIN reviewer_track_assignments AS r
+       ON r.event_id = m.event_id AND r.user_id = m.user_id
+     WHERE m.user_id = ?
+     ORDER BY m.event_id, r.track_id`,
+  )
+    .bind(user.id)
+    .all<{ event_id: string; role: "admin" | "reviewer"; track_id: string | null }>();
+  const eventIds = [...new Set(memberships.results.map((row) => row.event_id))];
+  if (eventIds.length === 0) return null;
+
+  const rolesByEvent: Record<string, "admin" | "reviewer"> = {};
+  const trackIdsByEvent: Record<string, string[]> = {};
+  for (const membership of memberships.results) {
+    rolesByEvent[membership.event_id] = membership.role;
+    trackIdsByEvent[membership.event_id] ??= [];
+    if (membership.track_id) {
+      trackIdsByEvent[membership.event_id]!.push(membership.track_id);
+    }
+  }
+
+  return {
+    id: user.id,
+    displayName: user.name,
+    role: rolesByEvent[eventIds[0]!] ?? "reviewer",
+    eventIds,
+    rolesByEvent,
+    trackIdsByEvent,
+  };
+}
+
 export async function resolveProductionPrincipal(
   request: Request,
   env: AppBindings,
@@ -81,24 +118,8 @@ export async function resolveProductionPrincipal(
     return null;
   }
 
-  const memberships = await env.AUTH_DB.prepare(
-    `SELECT event_id
-     FROM event_memberships
-     WHERE user_id = ? AND role = 'admin'
-     ORDER BY event_id`,
-  )
-    .bind(session.user.id)
-    .all<{ event_id: string }>();
-  const eventIds = memberships.results.map((membership) => membership.event_id);
-
-  if (eventIds.length === 0) {
-    return null;
-  }
-
-  return {
+  return loadPrincipalForUser(env.AUTH_DB, {
     id: session.user.id,
-    displayName: session.user.name,
-    role: "admin",
-    eventIds,
-  };
+    name: session.user.name,
+  });
 }

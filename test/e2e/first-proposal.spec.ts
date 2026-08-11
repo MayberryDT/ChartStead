@@ -120,6 +120,7 @@ test("guided CFP workshop path reaches organizer detail with full answers", asyn
   await page.goto(`/e/${eventId}/submissions`);
   await expect(page.getByRole("heading", { name: "Submissions" })).toBeVisible();
   await page.getByLabel("Search title, speaker, or ID").fill(proposalId);
+  await page.getByRole("link", { name: title }).click();
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
   await expect(page.locator(".inspector-kicker")).toHaveText(proposalId);
 
@@ -174,6 +175,7 @@ test("public CFP submit reaches organizer submissions and survives reload", asyn
   await page.goto(`/e/${eventId}/submissions`);
   await expect(page.getByRole("heading", { name: "Submissions" })).toBeVisible();
   await page.getByLabel("Search title, speaker, or ID").fill(proposalId);
+  await page.getByRole("link", { name: title }).click();
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
   await expect(page.locator(".inspector-kicker")).toHaveText(proposalId);
   await expect(page.getByText(speaker).first()).toBeVisible();
@@ -202,4 +204,54 @@ test("submissions event switch updates the permanent route", async ({ page }) =>
   await expect(
     page.getByRole("combobox", { name: "Event" }),
   ).toHaveValue("ai-engineer-worlds-fair-2026");
+});
+
+test("committee review stays internal, reversible, and durable", async ({ page }) => {
+  const proposalId = "SUB-PODS0001";
+  const note = `Committee comparison ${Date.now().toString(36)}`;
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/e/${eventId}/submissions`);
+  await page.getByLabel("Search title, speaker, or ID").fill(proposalId);
+  const row = page.getByRole("row", { name: new RegExp(proposalId) });
+  await row.getByRole("link", { name: proposalId }).click();
+  await expect(page).toHaveURL(
+    new RegExp(`submissions/${proposalId}\\?q=${proposalId}`),
+  );
+  await expect(page.locator(".inspector-kicker")).toHaveText(proposalId);
+
+  await expect(page.getByRole("button", { name: "Back to queue" })).toBeFocused();
+  await page.getByRole("button", { name: "Back to queue" }).click();
+  await expect(page).toHaveURL(new RegExp(`submissions\\?q=${proposalId}$`));
+  await expect(row).toBeFocused();
+  await row.getByRole("link", { name: proposalId }).click();
+  await expect(page.getByRole("button", { name: "Back to queue" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(new RegExp(`submissions\\?q=${proposalId}$`));
+  await expect(row).toBeFocused();
+  await row.getByRole("link", { name: proposalId }).click();
+
+  await page.getByLabel("Committee note").fill(note);
+  await page.getByRole("button", { name: "Save committee note" }).click();
+  await expect(page.getByText("Committee note saved.")).toBeVisible();
+
+  const decisions = page.getByLabel("Internal decision");
+  const maybe = decisions.getByRole("button", { name: "Maybe" });
+  const target = (await maybe.getAttribute("aria-pressed")) === "true" ? "Approve" : "Maybe";
+  await decisions.getByRole("button", { name: target }).click();
+  await expect(
+    page.getByText(`Internal decision changed to ${target}.`),
+  ).toBeVisible();
+  await expect(page.getByText(/No speaker email is sent/i)).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByLabel("Search title, speaker, or ID")).toHaveValue(
+    proposalId,
+  );
+  await expect(page.getByLabel("Committee note")).toHaveValue(note);
+  await expect(decisions.getByRole("button", { name: target })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByText("Review history")).toBeVisible();
 });

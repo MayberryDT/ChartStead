@@ -13,6 +13,7 @@ import type {
   OrganizerProposal,
   OutboxDeliveryStatus,
   OutboxMessage,
+  ProposalAuditEvent,
   ProposalInput,
   ProposalStatus,
   PublishedCfpForm,
@@ -66,6 +67,7 @@ interface ProposalRow {
   status: string;
   committee_note: string;
   private_note: string;
+  review_version: number;
   submitted_at: string;
   confirmation_email_status: string;
 }
@@ -146,6 +148,19 @@ interface ProposalCountRow {
   proposal_count: number;
 }
 
+interface AuditEventRow {
+  [key: string]: string | number;
+  id: string;
+  proposal_id: string;
+  type: string;
+  actor_id: string;
+  actor_name: string;
+  from_status: string;
+  to_status: string;
+  committee_note_changed: number;
+  created_at: string;
+}
+
 const SUBMISSION_LIMIT = 20;
 const UPLOAD_START_LIMIT = 40;
 const SUBMISSION_WINDOW_MS = 10 * 60 * 1_000;
@@ -220,6 +235,7 @@ function mapProposal(row: ProposalRow, eventId: string): OrganizerProposal {
     status: row.status as ProposalStatus,
     committeeNote: row.committee_note,
     privateNote: row.private_note,
+    reviewVersion: Number(row.review_version ?? 0),
     submittedAt: row.submitted_at,
     confirmationEmailStatus:
       emailStatus === "queued" ||
@@ -228,6 +244,20 @@ function mapProposal(row: ProposalRow, eventId: string): OrganizerProposal {
       emailStatus === "failed"
         ? emailStatus
         : null,
+  };
+}
+
+function mapAuditEvent(row: AuditEventRow): ProposalAuditEvent {
+  return {
+    id: row.id,
+    proposalId: row.proposal_id,
+    type: "proposal.review.changed",
+    actorId: row.actor_id,
+    actorName: row.actor_name,
+    fromStatus: row.from_status as ProposalStatus,
+    toStatus: row.to_status as ProposalStatus,
+    committeeNoteChanged: Boolean(row.committee_note_changed),
+    createdAt: row.created_at,
   };
 }
 
@@ -307,9 +337,29 @@ export class EventStore extends DurableObject<AppBindings> {
           status TEXT NOT NULL DEFAULT 'unreviewed',
           committee_note TEXT NOT NULL DEFAULT '',
           private_note TEXT NOT NULL DEFAULT '',
+          review_version INTEGER NOT NULL DEFAULT 0,
           submitted_at TEXT NOT NULL,
           confirmation_email_status TEXT NOT NULL DEFAULT ''
         )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS audit_events (
+          id TEXT PRIMARY KEY,
+          proposal_id TEXT NOT NULL,
+          type TEXT NOT NULL,
+          actor_id TEXT NOT NULL,
+          actor_name TEXT NOT NULL,
+          from_status TEXT NOT NULL,
+          to_status TEXT NOT NULL,
+          committee_note_changed INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS audit_events_proposal_created_idx
+        ON audit_events (proposal_id, created_at DESC)
       `);
 
       this.ctx.storage.sql.exec(`
@@ -418,6 +468,11 @@ export class EventStore extends DurableObject<AppBindings> {
         "proposals",
         "confirmation_email_status",
         "TEXT NOT NULL DEFAULT ''",
+      );
+      this.ensureColumn(
+        "proposals",
+        "review_version",
+        "INTEGER NOT NULL DEFAULT 0",
       );
       this.ensureColumn("assets", "form_id", "TEXT NOT NULL DEFAULT ''");
       this.ensureColumn(
@@ -662,8 +717,8 @@ export class EventStore extends DurableObject<AppBindings> {
             track_id, track_name, speaker_name, speaker_email,
             biography, supporting_link, session_format, workshop_duration,
             co_speakers_json, supporting_file_json, status, committee_note,
-            private_note, submitted_at, confirmation_email_status
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            private_note, review_version, submitted_at, confirmation_email_status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO NOTHING`,
           proposal.id,
           proposal.formId,
@@ -682,9 +737,10 @@ export class EventStore extends DurableObject<AppBindings> {
           JSON.stringify(proposal.coSpeakers ?? []),
           proposal.supportingFile ? JSON.stringify(proposal.supportingFile) : "",
           proposal.status,
-          proposal.committeeNote,
-          proposal.privateNote,
-          proposal.submittedAt,
+           proposal.committeeNote,
+           proposal.privateNote,
+           proposal.reviewVersion ?? 0,
+           proposal.submittedAt,
           proposal.confirmationEmailStatus ?? "",
         );
       }
@@ -1222,8 +1278,8 @@ export class EventStore extends DurableObject<AppBindings> {
           track_id, track_name, speaker_name, speaker_email,
           biography, supporting_link, session_format, workshop_duration,
           co_speakers_json, supporting_file_json, status, committee_note,
-          private_note, submitted_at, confirmation_email_status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unreviewed', '', '', ?, '')`,
+          private_note, review_version, submitted_at, confirmation_email_status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unreviewed', '', '', 0, ?, '')`,
         id,
         formId,
         formDefinitionVersion,
@@ -1354,7 +1410,7 @@ export class EventStore extends DurableObject<AppBindings> {
                 track_id, track_name, speaker_name, speaker_email,
                 biography, supporting_link, session_format, workshop_duration,
                 co_speakers_json, supporting_file_json, status, committee_note,
-                private_note, submitted_at, confirmation_email_status
+                private_note, review_version, submitted_at, confirmation_email_status
          FROM proposals
          WHERE id = ?`,
         proposalId,
@@ -1363,7 +1419,12 @@ export class EventStore extends DurableObject<AppBindings> {
     return row ? mapProposal(row, event.id) : null;
   }
 
-  listProposals(query = ""): OrganizerProposal[] {
+  listProposals(input: string | {
+    query?: string;
+    status?: ProposalStatus;
+    trackIds?: string[];
+    sort?: "newest" | "oldest" | "title-asc" | "speaker-asc";
+  } = ""): OrganizerProposal[] {
     const event = this.getEvent();
     if (!event) return [];
     const rows = this.ctx.storage.sql
@@ -1372,15 +1433,22 @@ export class EventStore extends DurableObject<AppBindings> {
                 track_id, track_name, speaker_name, speaker_email,
                 biography, supporting_link, session_format, workshop_duration,
                 co_speakers_json, supporting_file_json, status, committee_note,
-                private_note, submitted_at, confirmation_email_status
+                 private_note, review_version, submitted_at, confirmation_email_status
          FROM proposals
          ORDER BY submitted_at DESC, id DESC`,
       )
       .toArray();
-    const proposals = rows.map((row) => mapProposal(row, event.id));
-    const needle = query.trim().toLowerCase();
-    if (!needle) return proposals;
-    return proposals.filter((proposal) => {
+    const options = typeof input === "string" ? { query: input } : input;
+    const needle = (options.query ?? "").trim().toLowerCase();
+    let proposals = rows.map((row) => mapProposal(row, event.id));
+    if (options.trackIds) {
+      const allowedTracks = new Set(options.trackIds);
+      proposals = proposals.filter((proposal) => allowedTracks.has(proposal.trackId));
+    }
+    if (options.status) {
+      proposals = proposals.filter((proposal) => proposal.status === options.status);
+    }
+    if (needle) proposals = proposals.filter((proposal) => {
       const hay = [
         proposal.title,
         proposal.speakerName,
@@ -1392,6 +1460,116 @@ export class EventStore extends DurableObject<AppBindings> {
         .toLowerCase();
       return hay.includes(needle);
     });
+    if (options.sort === "oldest") {
+      proposals.sort((left, right) =>
+        left.submittedAt.localeCompare(right.submittedAt) || left.id.localeCompare(right.id),
+      );
+    } else if (options.sort === "title-asc") {
+      proposals.sort((left, right) =>
+        left.title.localeCompare(right.title) || left.id.localeCompare(right.id),
+      );
+    } else if (options.sort === "speaker-asc") {
+      proposals.sort((left, right) =>
+        left.speakerName.localeCompare(right.speakerName) || left.id.localeCompare(right.id),
+      );
+    }
+    return proposals;
+  }
+
+  updateProposalReview(input: {
+    proposalId: string;
+    expectedVersion: number;
+    status?: ProposalStatus;
+    committeeNote?: string;
+    actorId: string;
+    actorName: string;
+  }): OrganizerProposal | null {
+    const existing = this.getProposal(input.proposalId);
+    if (!existing) throw new Error(`Proposal ${input.proposalId} not found.`);
+    if (existing.reviewVersion !== input.expectedVersion) {
+      return null;
+    }
+
+    const nextStatus = input.status ?? existing.status;
+    const nextNote = input.committeeNote ?? existing.committeeNote;
+    const committeeNoteChanged = nextNote !== existing.committeeNote;
+    const statusChanged = nextStatus !== existing.status;
+    if (!committeeNoteChanged && !statusChanged) return existing;
+
+    const event = this.getEvent();
+    if (!event) throw new Error("Event is not initialized.");
+    const unreviewedDelta =
+      existing.status === "unreviewed" && nextStatus !== "unreviewed"
+        ? -1
+        : existing.status !== "unreviewed" && nextStatus === "unreviewed"
+          ? 1
+          : 0;
+    const now = new Date().toISOString();
+    const auditId = crypto.randomUUID();
+
+    let conflicted = false;
+    this.ctx.storage.transactionSync(() => {
+      const current = this.ctx.storage.sql
+        .exec<{ review_version: number }>(
+          "SELECT review_version FROM proposals WHERE id = ?",
+          input.proposalId,
+        )
+        .toArray()[0];
+      if (!current || current.review_version !== input.expectedVersion) {
+        conflicted = true;
+        return;
+      }
+      this.ctx.storage.sql.exec(
+        `UPDATE proposals
+         SET status = ?, committee_note = ?, review_version = review_version + 1
+         WHERE id = ?`,
+        nextStatus,
+        nextNote,
+        input.proposalId,
+      );
+      if (unreviewedDelta !== 0) {
+        this.ctx.storage.sql.exec(
+          `UPDATE events
+           SET unreviewed_count = MAX(0, unreviewed_count + ?)
+           WHERE id = ?`,
+          unreviewedDelta,
+          event.id,
+        );
+      }
+      this.ctx.storage.sql.exec(
+        `INSERT INTO audit_events
+          (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+           committee_note_changed, created_at)
+         VALUES (?, ?, 'proposal.review.changed', ?, ?, ?, ?, ?, ?)`,
+        auditId,
+        input.proposalId,
+        input.actorId,
+        input.actorName,
+        existing.status,
+        nextStatus,
+        committeeNoteChanged ? 1 : 0,
+        now,
+      );
+    });
+    if (conflicted) return null;
+
+    const updated = this.getProposal(input.proposalId);
+    if (!updated) throw new Error(`Proposal ${input.proposalId} was not updated.`);
+    return updated;
+  }
+
+  listProposalAuditEvents(proposalId: string): ProposalAuditEvent[] {
+    return this.ctx.storage.sql
+      .exec<AuditEventRow>(
+        `SELECT id, proposal_id, type, actor_id, actor_name, from_status,
+                to_status, committee_note_changed, created_at
+         FROM audit_events
+         WHERE proposal_id = ?
+         ORDER BY created_at DESC, id DESC`,
+        proposalId,
+      )
+      .toArray()
+      .map(mapAuditEvent);
   }
 
   queueOutboxMessage(input: {

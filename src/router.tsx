@@ -56,13 +56,24 @@ const submissionsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/e/$eventId/submissions",
   component: SubmissionsPage,
+  validateSearch: validateProposalQueueSearch,
 });
 
 const submissionDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/e/$eventId/submissions/$proposalId",
   component: SubmissionsPage,
+  validateSearch: validateProposalQueueSearch,
 });
+
+function validateProposalQueueSearch(search: Record<string, unknown>) {
+  return {
+    q: typeof search.q === "string" ? search.q : undefined,
+    status: typeof search.status === "string" ? search.status : undefined,
+    track: typeof search.track === "string" ? search.track : undefined,
+    sort: typeof search.sort === "string" ? search.sort : undefined,
+  };
+}
 
 const routeTree = rootRoute.addChildren([
   indexRoute,

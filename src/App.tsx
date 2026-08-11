@@ -8,7 +8,10 @@ import markOnLightUrl from "../design/assets/brand/chartstead-mark-on-light.png"
 import type { EventListResponse, EventRecord } from "../shared/events";
 import { ApiError, fetchEvents } from "./api";
 import { authClient } from "./auth-client";
-import { SubmissionsWorkspace } from "./SubmissionsWorkspace";
+import {
+  SubmissionsWorkspace,
+  type ProposalQueueState,
+} from "./SubmissionsWorkspace";
 import "./styles.css";
 
 const navItems = [
@@ -249,11 +252,13 @@ function EventDesk({
   initialNav = "Overview",
   initialEventId = null,
   initialProposalId = null,
+  initialQueue = { query: "", status: "all", track: "", sort: "newest" },
 }: {
   data: EventListResponse;
   initialNav?: NavItem;
   initialEventId?: string | null;
   initialProposalId?: string | null;
+  initialQueue?: ProposalQueueState;
 }) {
   const navigate = useNavigate();
   const [selectedEventId, setSelectedEventId] = useState(() => {
@@ -268,9 +273,6 @@ function EventDesk({
     return data.events[0]?.id ?? null;
   });
   const [activeNav, setActiveNav] = useState<NavItem>(initialNav);
-  const [selectedProposalId, setSelectedProposalId] = useState<string | null>(
-    initialProposalId,
-  );
   const event =
     data.events.find((candidate) => candidate.id === selectedEventId) ?? data.events[0];
 
@@ -287,11 +289,11 @@ function EventDesk({
   function selectEvent(eventId: string) {
     localStorage.setItem("chartstead:event", eventId);
     setSelectedEventId(eventId);
-    setSelectedProposalId(null);
     if (activeNav === "Submissions") {
       void navigate({
         to: "/e/$eventId/submissions",
         params: { eventId },
+        search: queueSearch(initialQueue),
       });
     }
   }
@@ -302,6 +304,7 @@ function EventDesk({
       void navigate({
         to: "/e/$eventId/submissions",
         params: { eventId: event.id },
+        search: queueSearch(initialQueue),
       });
       return;
     }
@@ -311,10 +314,38 @@ function EventDesk({
   }
 
   function selectProposal(proposalId: string) {
-    setSelectedProposalId(proposalId);
     void navigate({
       to: "/e/$eventId/submissions/$proposalId",
       params: { eventId: event.id, proposalId },
+      search: queueSearch(initialQueue),
+    });
+  }
+
+  async function closeProposal() {
+    const proposalId = initialProposalId;
+    await navigate({
+      to: "/e/$eventId/submissions",
+      params: { eventId: event.id },
+      search: queueSearch(initialQueue),
+    });
+    window.requestAnimationFrame(() => {
+      const row = Array.from(
+        document.querySelectorAll<HTMLTableRowElement>("tr[data-id]"),
+      ).find((candidate) => candidate.dataset.id === proposalId);
+      row?.focus();
+    });
+  }
+
+  function changeQueue(next: ProposalQueueState) {
+    void navigate({
+      to: initialProposalId
+        ? "/e/$eventId/submissions/$proposalId"
+        : "/e/$eventId/submissions",
+      params: initialProposalId
+        ? { eventId: event.id, proposalId: initialProposalId }
+        : { eventId: event.id },
+      search: queueSearch(next),
+      replace: true,
     });
   }
 
@@ -325,6 +356,7 @@ function EventDesk({
     activeNav === "Submissions"
       ? `${event.submissionCount} total · ${event.unreviewedCount} unreviewed · track routing on`
       : formatDateRange(event.startsOn, event.endsOn);
+  const currentRole = data.principal.rolesByEvent?.[event.id] ?? data.principal.role;
 
   return (
     <div className="app">
@@ -393,9 +425,11 @@ function EventDesk({
           <div className="topbar-actions">
             {activeNav === "Submissions" || activeNav === "Overview" ? (
               <>
-                <a className="btn btn-secondary" href={formsHref}>
-                  Manage CFP forms
-                </a>
+                {currentRole === "admin" ? (
+                  <a className="btn btn-secondary" href={formsHref}>
+                    Manage CFP forms
+                  </a>
+                ) : null}
                 <a className="btn btn-primary" href={cfpHref}>
                   Open CFP form
                 </a>
@@ -411,7 +445,7 @@ function EventDesk({
               </span>
               <span>
                 <strong>{data.principal.displayName}</strong>
-                <small>Event administrator</small>
+                <small>{currentRole === "admin" ? "Event administrator" : "Track reviewer"}</small>
               </span>
             </div>
           </div>
@@ -420,8 +454,12 @@ function EventDesk({
         {activeNav === "Submissions" ? (
           <SubmissionsWorkspace
             event={event}
-            selectedProposalId={selectedProposalId}
+            principal={data.principal}
+            selectedProposalId={initialProposalId}
             onSelectProposal={selectProposal}
+            onCloseProposal={closeProposal}
+            queue={initialQueue}
+            onQueueChange={changeQueue}
             cfpHref={cfpHref}
           />
         ) : activeNav === "Overview" ? (
@@ -474,7 +512,10 @@ export function SubmissionsPage() {
     eventId?: string;
     proposalId?: string;
   };
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const search = useRouterState({ select: (state) => state.location.search }) as Record<
+    string,
+    unknown
+  >;
 
   if (query.isPending) return <LoadingShell />;
   if (query.error instanceof ApiError && query.error.status === 401) return <SignIn />;
@@ -495,7 +536,35 @@ export function SubmissionsPage() {
       initialNav="Submissions"
       initialEventId={params.eventId ?? null}
       initialProposalId={params.proposalId ?? null}
-      key={`${pathname}:${params.eventId ?? ""}:${params.proposalId ?? ""}`}
+      initialQueue={parseQueueSearch(search)}
     />
   );
+}
+
+function parseQueueSearch(search: Record<string, unknown>): ProposalQueueState {
+  const status = ["unreviewed", "approve", "maybe", "deny", "all"].includes(
+    String(search.status ?? ""),
+  )
+    ? (search.status as ProposalQueueState["status"])
+    : "all";
+  const sort = ["newest", "oldest", "title-asc", "speaker-asc"].includes(
+    String(search.sort ?? ""),
+  )
+    ? (search.sort as ProposalQueueState["sort"])
+    : "newest";
+  return {
+    query: typeof search.q === "string" ? search.q : "",
+    status,
+    track: typeof search.track === "string" ? search.track : "",
+    sort,
+  };
+}
+
+function queueSearch(queue: ProposalQueueState) {
+  return {
+    q: queue.query || undefined,
+    status: queue.status === "all" ? undefined : queue.status,
+    track: queue.track || undefined,
+    sort: queue.sort === "newest" ? undefined : queue.sort,
+  };
 }

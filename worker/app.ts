@@ -10,7 +10,10 @@ import type {
   OrganizerCfpForm,
   OrganizerCfpFormSummary,
   OrganizerPrincipal,
+  OrganizerProposal,
+  ProposalStatus,
   PublishedCfpForm,
+  ReviewerAssignment,
 } from "../shared/events";
 import { createAuth, resolveProductionPrincipal } from "./auth";
 import {
@@ -234,6 +237,72 @@ function findSeed(eventId: string): EventRecord | undefined {
   return seedEvents.find((event) => event.id === eventId);
 }
 
+function eventRole(
+  principal: OrganizerPrincipal,
+  eventId: string,
+): "admin" | "reviewer" | null {
+  if (!principal.eventIds.includes(eventId)) return null;
+  return principal.rolesByEvent?.[eventId] ?? principal.role;
+}
+
+function assignedTrackIds(
+  principal: OrganizerPrincipal,
+  eventId: string,
+): string[] | null {
+  return eventRole(principal, eventId) === "admin"
+    ? null
+    : (principal.trackIdsByEvent?.[eventId] ?? []);
+}
+
+function canAccessEvent(
+  principal: OrganizerPrincipal | null,
+  eventId: string,
+): principal is OrganizerPrincipal {
+  return Boolean(principal && eventRole(principal, eventId));
+}
+
+function isEventAdmin(
+  principal: OrganizerPrincipal | null,
+  eventId: string,
+): principal is OrganizerPrincipal {
+  return Boolean(principal && eventRole(principal, eventId) === "admin");
+}
+
+function canReviewProposal(
+  principal: OrganizerPrincipal,
+  eventId: string,
+  proposal: Pick<OrganizerProposal, "trackId">,
+): boolean {
+  const tracks = assignedTrackIds(principal, eventId);
+  return tracks === null || tracks.includes(proposal.trackId);
+}
+
+async function scopeEventForPrincipal(
+  env: AppBindings,
+  event: EventRecord,
+  principal: OrganizerPrincipal,
+): Promise<EventRecord> {
+  const tracks = assignedTrackIds(principal, event.id);
+  if (tracks === null) return event;
+  const proposals = (await env.EVENT_STORE.getByName(event.id).listProposals({
+    trackIds: tracks,
+  })) as OrganizerProposal[];
+  const counts = new Map<string, number>();
+  let unreviewedCount = 0;
+  for (const proposal of proposals) {
+    counts.set(proposal.trackId, (counts.get(proposal.trackId) ?? 0) + 1);
+    if (proposal.status === "unreviewed") unreviewedCount += 1;
+  }
+  return {
+    ...event,
+    submissionCount: proposals.length,
+    unreviewedCount,
+    tracks: event.tracks
+      .filter((track) => tracks.includes(track.id))
+      .map((track) => ({ ...track, proposalCount: counts.get(track.id) ?? 0 })),
+  };
+}
+
 function publicBaseUrl(request: Request, env: AppBindings): string {
   return env.BETTER_AUTH_URL || new URL(request.url).origin;
 }
@@ -270,10 +339,12 @@ export function createApp(options: AppOptions = {}) {
     }
 
     const visibleSeeds = seedEvents.filter((event) =>
-      principal.eventIds.includes(event.id),
+      canAccessEvent(principal, event.id),
     );
     const events = await Promise.all(
-      visibleSeeds.map((event) => loadEvent(c.env, event)),
+      visibleSeeds.map(async (event) =>
+        scopeEventForPrincipal(c.env, await loadEvent(c.env, event), principal),
+      ),
     );
     return c.json({ events, principal });
   });
@@ -281,7 +352,7 @@ export function createApp(options: AppOptions = {}) {
   app.get("/api/events/:eventId", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
     const eventId = c.req.param("eventId");
-    if (!principal || !principal.eventIds.includes(eventId)) {
+    if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
@@ -290,7 +361,14 @@ export function createApp(options: AppOptions = {}) {
       return c.json({ error: "Event not found" }, 404);
     }
 
-    return c.json({ event: await loadEvent(c.env, seed), principal });
+    return c.json({
+      event: await scopeEventForPrincipal(
+        c.env,
+        await loadEvent(c.env, seed),
+        principal,
+      ),
+      principal,
+    });
   });
 
   app.get("/api/events/:eventId/cfp", async (c) => {
@@ -368,8 +446,11 @@ export function createApp(options: AppOptions = {}) {
   app.get("/api/events/:eventId/forms", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
     const eventId = c.req.param("eventId");
-    if (!principal || !principal.eventIds.includes(eventId)) {
+    if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
     }
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -381,8 +462,11 @@ export function createApp(options: AppOptions = {}) {
   app.post("/api/events/:eventId/forms", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
     const eventId = c.req.param("eventId");
-    if (!principal || !principal.eventIds.includes(eventId)) {
+    if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
     }
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -409,8 +493,11 @@ export function createApp(options: AppOptions = {}) {
     const principal = await resolvePrincipal(c.req.raw, c.env);
     const eventId = c.req.param("eventId");
     const formId = c.req.param("formId");
-    if (!principal || !principal.eventIds.includes(eventId)) {
+    if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
     }
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -443,8 +530,11 @@ export function createApp(options: AppOptions = {}) {
     const principal = await resolvePrincipal(c.req.raw, c.env);
     const eventId = c.req.param("eventId");
     const formId = c.req.param("formId");
-    if (!principal || !principal.eventIds.includes(eventId)) {
+    if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
     }
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -500,8 +590,11 @@ export function createApp(options: AppOptions = {}) {
     const principal = await resolvePrincipal(c.req.raw, c.env);
     const eventId = c.req.param("eventId");
     const formId = c.req.param("formId");
-    if (!principal || !principal.eventIds.includes(eventId)) {
+    if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
     }
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -558,8 +651,11 @@ export function createApp(options: AppOptions = {}) {
     const principal = await resolvePrincipal(c.req.raw, c.env);
     const eventId = c.req.param("eventId");
     const formId = c.req.param("formId");
-    if (!principal || !principal.eventIds.includes(eventId)) {
+    if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
     }
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -583,8 +679,11 @@ export function createApp(options: AppOptions = {}) {
     const principal = await resolvePrincipal(c.req.raw, c.env);
     const eventId = c.req.param("eventId");
     const formId = c.req.param("formId");
-    if (!principal || !principal.eventIds.includes(eventId)) {
+    if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
     }
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -602,6 +701,128 @@ export function createApp(options: AppOptions = {}) {
         400,
       );
     }
+  });
+
+  app.get("/api/events/:eventId/reviewers", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+
+    const rows = await c.env.AUTH_DB.prepare(
+      `SELECT u.id, u.name, u.email, r.track_id
+       FROM event_memberships AS m
+       JOIN "user" AS u ON u.id = m.user_id
+       LEFT JOIN reviewer_track_assignments AS r
+         ON r.event_id = m.event_id AND r.user_id = m.user_id
+       WHERE m.event_id = ? AND m.role = 'reviewer'
+       ORDER BY u.name COLLATE NOCASE, u.id, r.track_id`,
+    )
+      .bind(eventId)
+      .all<{ id: string; name: string; email: string; track_id: string | null }>();
+    const reviewers = new Map<string, ReviewerAssignment>();
+    for (const row of rows.results) {
+      const reviewer = reviewers.get(row.id) ?? {
+        id: row.id,
+        name: row.name,
+        email: row.email,
+        trackIds: [],
+      };
+      if (row.track_id) reviewer.trackIds.push(row.track_id);
+      reviewers.set(row.id, reviewer);
+    }
+    return c.json({ reviewers: [...reviewers.values()] });
+  });
+
+  app.post("/api/events/:eventId/reviewers", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    const body = (await c.req.json().catch(() => null)) as {
+      email?: unknown;
+      trackIds?: unknown;
+    } | null;
+    const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+    const trackIds = Array.isArray(body?.trackIds)
+      ? [...new Set(body.trackIds.filter((trackId): trackId is string => typeof trackId === "string"))]
+      : [];
+    if (!email || trackIds.length === 0) {
+      return c.json({ error: "Choose a reviewer and at least one track" }, 400);
+    }
+    if (trackIds.some((trackId) => !seed.tracks.some((track) => track.id === trackId))) {
+      return c.json({ error: "One or more tracks do not belong to this event" }, 400);
+    }
+
+    const user = await c.env.AUTH_DB.prepare(
+      `SELECT id, name, email FROM "user" WHERE lower(email) = ? LIMIT 1`,
+    )
+      .bind(email)
+      .first<{ id: string; name: string; email: string }>();
+    if (!user) {
+      return c.json(
+        { error: "That person must sign in to ChartStead before they can be assigned" },
+        404,
+      );
+    }
+    const membership = await c.env.AUTH_DB.prepare(
+      `SELECT role FROM event_memberships WHERE event_id = ? AND user_id = ? LIMIT 1`,
+    )
+      .bind(eventId, user.id)
+      .first<{ role: "admin" | "reviewer" }>();
+    if (membership?.role === "admin") {
+      return c.json({ error: "Event administrators already have access to every track" }, 409);
+    }
+
+    const existingAssignments = await c.env.AUTH_DB.prepare(
+      `SELECT track_id FROM reviewer_track_assignments
+       WHERE event_id = ? AND user_id = ?
+       ORDER BY track_id`,
+    )
+      .bind(eventId, user.id)
+      .all<{ track_id: string }>();
+    const grantedTrackIds = [
+      ...new Set([
+        ...existingAssignments.results.map((row) => row.track_id),
+        ...trackIds,
+      ]),
+    ];
+
+    await c.env.AUTH_DB.batch([
+      c.env.AUTH_DB.prepare(
+        `INSERT INTO event_memberships (event_id, user_id, role)
+         VALUES (?, ?, 'reviewer')
+         ON CONFLICT(event_id, user_id) DO UPDATE SET role = 'reviewer'`,
+      ).bind(eventId, user.id),
+      ...trackIds.map((trackId) =>
+        c.env.AUTH_DB.prepare(
+          `INSERT INTO reviewer_track_assignments (event_id, user_id, track_id)
+           VALUES (?, ?, ?)
+           ON CONFLICT(event_id, user_id, track_id) DO NOTHING`,
+        ).bind(eventId, user.id, trackId),
+      ),
+    ]);
+
+    return c.json({
+      reviewer: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        trackIds: grantedTrackIds,
+      } satisfies ReviewerAssignment,
+    });
   });
 
   app.post("/api/events/:eventId/uploads", async (c) => {
@@ -1033,7 +1254,7 @@ export function createApp(options: AppOptions = {}) {
   app.get("/api/events/:eventId/proposals", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
     const eventId = c.req.param("eventId");
-    if (!principal || !principal.eventIds.includes(eventId)) {
+    if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
@@ -1045,7 +1266,37 @@ export function createApp(options: AppOptions = {}) {
     await loadEvent(c.env, seed);
     const store = c.env.EVENT_STORE.getByName(eventId);
     const query = c.req.query("q") ?? "";
-    const proposals = await store.listProposals(query);
+    const requestedStatus = c.req.query("status") ?? "";
+    const status = ["unreviewed", "approve", "maybe", "deny"].includes(
+      requestedStatus,
+    )
+      ? (requestedStatus as ProposalStatus)
+      : undefined;
+    if (requestedStatus && requestedStatus !== "all" && !status) {
+      return c.json({ error: "Unknown review status" }, 400);
+    }
+    const requestedSort = c.req.query("sort") ?? "newest";
+    if (!["newest", "oldest", "title-asc", "speaker-asc"].includes(requestedSort)) {
+      return c.json({ error: "Unknown proposal sort" }, 400);
+    }
+    const requestedTrack = c.req.query("track") ?? "";
+    const allowedTracks = assignedTrackIds(principal, eventId);
+    if (
+      requestedTrack &&
+      allowedTracks !== null &&
+      !allowedTracks.includes(requestedTrack)
+    ) {
+      return c.json({ error: "That track is outside your review assignment" }, 403);
+    }
+    const trackIds = requestedTrack
+      ? [requestedTrack]
+      : (allowedTracks ?? undefined);
+    const proposals = await store.listProposals({
+      query,
+      status,
+      trackIds,
+      sort: requestedSort as "newest" | "oldest" | "title-asc" | "speaker-asc",
+    });
     return c.json({ proposals });
   });
 
@@ -1072,7 +1323,7 @@ export function createApp(options: AppOptions = {}) {
     const principal = await resolvePrincipal(c.req.raw, c.env);
     const eventId = c.req.param("eventId");
     const proposalId = c.req.param("proposalId");
-    if (!principal || !principal.eventIds.includes(eventId)) {
+    if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
@@ -1087,9 +1338,89 @@ export function createApp(options: AppOptions = {}) {
     if (!proposal) {
       return c.json({ error: "Proposal not found" }, 404);
     }
+    if (!canReviewProposal(principal, eventId, proposal)) {
+      return c.json({ error: "Proposal not found" }, 404);
+    }
 
-    return c.json({ proposal });
+    return c.json({
+      proposal,
+      auditEvents: await store.listProposalAuditEvents(proposalId),
+    });
   });
+
+  app.patch(
+    "/api/events/:eventId/organizer/proposals/:proposalId/review",
+    async (c) => {
+      const principal = await resolvePrincipal(c.req.raw, c.env);
+      const eventId = c.req.param("eventId");
+      const proposalId = c.req.param("proposalId");
+      if (!canAccessEvent(principal, eventId)) {
+        return c.json({ error: "Unauthorized" }, 401);
+      }
+      const seed = findSeed(eventId);
+      if (!seed) return c.json({ error: "Event not found" }, 404);
+      await loadEvent(c.env, seed);
+      const store = c.env.EVENT_STORE.getByName(eventId);
+      const existing = (await store.getProposal(proposalId)) as OrganizerProposal | null;
+      if (!existing || !canReviewProposal(principal, eventId, existing)) {
+        return c.json({ error: "Proposal not found" }, 404);
+      }
+
+      const body = (await c.req.json().catch(() => null)) as {
+        status?: unknown;
+        committeeNote?: unknown;
+        expectedVersion?: unknown;
+      } | null;
+      if (!body || !Number.isInteger(body.expectedVersion)) {
+        return c.json({ error: "An expected review version is required" }, 400);
+      }
+      const status = body.status;
+      if (
+        status !== undefined &&
+        (typeof status !== "string" ||
+          !["unreviewed", "approve", "maybe", "deny"].includes(status))
+      ) {
+        return c.json({ error: "Unknown review status" }, 400);
+      }
+      if (
+        body.committeeNote !== undefined &&
+        typeof body.committeeNote !== "string"
+      ) {
+        return c.json({ error: "Committee note must be text" }, 400);
+      }
+      if (
+        typeof body.committeeNote === "string" &&
+        body.committeeNote.length > 10_000
+      ) {
+        return c.json({ error: "Committee note must be 10000 characters or fewer" }, 400);
+      }
+      if (status === undefined && body.committeeNote === undefined) {
+        return c.json({ error: "A review change is required" }, 400);
+      }
+
+      const proposal = await store.updateProposalReview({
+        proposalId,
+        expectedVersion: body.expectedVersion as number,
+        status: status as ProposalStatus | undefined,
+        committeeNote:
+          typeof body.committeeNote === "string"
+            ? body.committeeNote.trim()
+            : undefined,
+        actorId: principal.id,
+        actorName: principal.displayName,
+      });
+      if (!proposal) {
+        return c.json(
+          { error: "This proposal changed since you opened it. Reload and try again." },
+          409,
+        );
+      }
+      return c.json({
+        proposal,
+        auditEvents: await store.listProposalAuditEvents(proposalId),
+      });
+    },
+  );
 
   app.get("/api/events/:eventId/submitter/edit", async (c) => {
     const eventId = c.req.param("eventId");
@@ -1234,8 +1565,11 @@ export function createApp(options: AppOptions = {}) {
       const principal = await resolvePrincipal(c.req.raw, c.env);
       const eventId = c.req.param("eventId");
       const tokenId = c.req.param("tokenId");
-      if (!principal || !principal.eventIds.includes(eventId)) {
+      if (!canAccessEvent(principal, eventId)) {
         return c.json({ error: "Unauthorized" }, 401);
+      }
+      if (!isEventAdmin(principal, eventId)) {
+        return c.json({ error: "Administrator access required" }, 403);
       }
       const seed = findSeed(eventId);
       if (!seed) return c.json({ error: "Event not found" }, 404);

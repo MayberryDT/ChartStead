@@ -59,11 +59,13 @@ function renderAt(path: string) {
     getParentRoute: () => rootRoute,
     path: "/e/$eventId/submissions",
     component: SubmissionsPage,
+    validateSearch: (search: Record<string, unknown>) => search,
   });
   const submissionDetailRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/e/$eventId/submissions/$proposalId",
     component: SubmissionsPage,
+    validateSearch: (search: Record<string, unknown>) => search,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([
@@ -474,6 +476,31 @@ describe("organizer application", () => {
   });
 
   it("renders organizer submissions master-detail with search", async () => {
+    const proposal = {
+      id: "SUB-ABCD12",
+      eventId: "pacific-open-data-summit-2026",
+      formId: "main-cfp",
+      formDefinitionVersion: 1,
+      answers: {},
+      title: "Open charts for harbor operations",
+      abstract: "Abstract text",
+      trackId: "platform",
+      trackName: "Platform",
+      speakerName: "Ada Harbor",
+      speakerEmail: "ada@example.com",
+      biography: "Bio",
+      supportingLink: "https://example.com",
+      sessionFormat: "talk",
+      workshopDuration: "",
+      coSpeakers: [],
+      supportingFile: null,
+      status: "unreviewed",
+      committeeNote: "Committee only",
+      privateNote: "",
+      reviewVersion: 0,
+      confirmationEmailStatus: null,
+      submittedAt: "2026-08-10T12:00:00.000Z",
+    };
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
       if (url.endsWith("/api/events")) {
@@ -481,28 +508,14 @@ describe("organizer application", () => {
           headers: { "content-type": "application/json" },
         });
       }
+      if (url.includes("/organizer/proposals/")) {
+        return new Response(JSON.stringify({ proposal, auditEvents: [] }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
       if (url.includes("/proposals")) {
         return new Response(
-          JSON.stringify({
-            proposals: [
-              {
-                id: "SUB-ABCD12",
-                eventId: "pacific-open-data-summit-2026",
-                title: "Open charts for harbor operations",
-                abstract: "Abstract text",
-                trackId: "platform",
-                trackName: "Platform",
-                speakerName: "Ada Harbor",
-                speakerEmail: "ada@example.com",
-                biography: "Bio",
-                supportingLink: "https://example.com",
-                status: "unreviewed",
-                committeeNote: "Committee only",
-                privateNote: "",
-                submittedAt: "2026-08-10T12:00:00.000Z",
-              },
-            ],
-          }),
+          JSON.stringify({ proposals: [proposal] }),
           { headers: { "content-type": "application/json" } },
         );
       }
@@ -512,12 +525,8 @@ describe("organizer application", () => {
     renderAt("/e/pacific-open-data-summit-2026/submissions");
 
     expect(await screen.findByRole("heading", { name: "Submissions" })).toBeVisible();
-    expect(
-      await screen.findAllByText("Open charts for harbor operations"),
-    ).not.toHaveLength(0);
+    expect(await screen.findByText("Open charts for harbor operations")).toBeVisible();
     expect(screen.getByLabelText("Proposal detail")).toBeVisible();
-    expect(screen.getByText("Committee only")).toBeVisible();
-    expect(screen.getAllByText("SUB-ABCD12")).toHaveLength(2);
     expect(
       screen.getByLabelText("Search title, speaker, or ID"),
     ).toBeVisible();
@@ -539,7 +548,7 @@ describe("organizer application", () => {
       screen.getByRole("row", {
         name: /Open charts for harbor operations/,
       }),
-    ).not.toHaveAttribute("tabindex");
+    ).toHaveAttribute("tabindex", "0");
     const proposalLink = screen.getByRole("link", {
       name: "Open charts for harbor operations",
     });
@@ -554,6 +563,229 @@ describe("organizer application", () => {
     );
     fireEvent.click(proposalLink, { ctrlKey: true });
     expect(defaultPreventedByComponent).toBe(false);
+    await userEvent.click(proposalLink);
+    expect(await screen.findByText("Committee only")).toBeVisible();
+    expect(screen.getAllByText("SUB-ABCD12")).toHaveLength(2);
+  });
+
+  it("preserves review queue context while saving notes and reversible decisions", async () => {
+    const user = userEvent.setup();
+    const reviewWrites: Array<Record<string, unknown>> = [];
+    let reviewVersion = 2;
+    let status = "unreviewed";
+    let committeeNote = "Committee only";
+    const proposal = () => ({
+      id: "SUB-ABCD12",
+      eventId: "pacific-open-data-summit-2026",
+      formId: "main-cfp",
+      formDefinitionVersion: 1,
+      answers: {
+        title: "Open charts for harbor operations",
+        abstract: "Abstract text",
+        trackId: "platform",
+        audienceTakeaway: "A repeatable harbor data checklist.",
+        speakers: [
+          {
+            name: "Ada Harbor",
+            email: "ada@example.com",
+            biography: "Bio",
+            pronouns: "she/her",
+            headshot: {
+              assetId: "asset-headshot",
+              objectKey: "headshots/ada.jpg",
+              name: "ada-headshot.jpg",
+              mime: "image/jpeg",
+              size: 2048,
+              status: "complete",
+            },
+          },
+        ],
+      },
+      title: "Open charts for harbor operations",
+      abstract: "Abstract text",
+      trackId: "platform",
+      trackName: "Platform",
+      speakerName: "Ada Harbor",
+      speakerEmail: "ada@example.com",
+      biography: "Bio",
+      supportingLink: "https://example.com",
+      sessionFormat: "talk",
+      workshopDuration: "",
+      coSpeakers: [],
+      supportingFile: null,
+      status,
+      committeeNote,
+      privateNote: "",
+      reviewVersion,
+      confirmationEmailStatus: null,
+      submittedAt: "2026-08-10T12:00:00.000Z",
+    });
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/api/events")) {
+        return new Response(JSON.stringify(eventsPayload), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("/organizer/proposals/") && init?.method === "PATCH") {
+        const body = JSON.parse(String(init.body)) as {
+          status?: string;
+          committeeNote?: string;
+          expectedVersion: number;
+        };
+        reviewWrites.push(body);
+        expect(body.expectedVersion).toBe(reviewVersion);
+        status = body.status ?? status;
+        committeeNote = body.committeeNote ?? committeeNote;
+        reviewVersion += 1;
+        return new Response(
+          JSON.stringify({
+            proposal: proposal(),
+            auditEvents: [
+              {
+                id: `audit-${reviewVersion}`,
+                proposalId: "SUB-ABCD12",
+                type: "proposal.review.changed",
+                actorId: "demo-admin",
+                actorName: "Demo Administrator",
+                fromStatus: "unreviewed",
+                toStatus: status,
+                committeeNoteChanged: body.committeeNote !== undefined,
+                createdAt: "2026-08-11T12:00:00.000Z",
+              },
+            ],
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("/organizer/proposals/")) {
+        return new Response(
+          JSON.stringify({ proposal: proposal(), auditEvents: [] }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("/proposals")) {
+        expect(url).toContain("q=harbor");
+        expect(url).toContain("status=unreviewed");
+        expect(url).toContain("track=platform");
+        expect(url).toContain("sort=title-asc");
+        return new Response(JSON.stringify({ proposals: [proposal()] }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderAt(
+      "/e/pacific-open-data-summit-2026/submissions/SUB-ABCD12?q=harbor&status=unreviewed&track=platform&sort=title-asc",
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Open charts for harbor operations" }),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Search title, speaker, or ID")).toHaveValue(
+      "harbor",
+    );
+    expect(
+      within(screen.getByRole("group", { name: "Status filter" })).getByRole(
+        "button",
+        { name: "Unreviewed" },
+      ),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("combobox", { name: "Track filter" })).toHaveValue(
+      "platform",
+    );
+    expect(screen.getByRole("combobox", { name: "Sort submissions" })).toHaveValue(
+      "title-asc",
+    );
+    expect(screen.getByText("A repeatable harbor data checklist.")).toBeVisible();
+    expect(screen.getByText("ada-headshot.jpg")).toBeVisible();
+    expect(screen.getByText("she/her")).toBeVisible();
+    expect(screen.getByText(/No speaker email is sent/i)).toBeVisible();
+
+    const stableLink = screen.getByRole("link", {
+      name: "Open charts for harbor operations",
+    });
+    expect(stableLink.getAttribute("href")).toContain(
+      "/e/pacific-open-data-summit-2026/submissions/SUB-ABCD12",
+    );
+    expect(stableLink.getAttribute("href")).toContain("q=harbor");
+
+    const note = screen.getByRole("textbox", { name: "Committee note" });
+    await user.clear(note);
+    await user.type(note, "Compare against the second platform slot.");
+    await user.click(screen.getByRole("button", { name: "Save committee note" }));
+    expect(await screen.findByText("Committee note saved.")).toBeVisible();
+
+    await user.click(
+      within(screen.getByLabelText("Internal decision")).getByRole("button", {
+        name: "Maybe",
+      }),
+    );
+    expect(await screen.findByText("Internal decision changed to Maybe.")).toBeVisible();
+    expect(reviewWrites).toEqual([
+      {
+        committeeNote: "Compare against the second platform slot.",
+        expectedVersion: 2,
+      },
+      { status: "maybe", expectedVersion: 3 },
+    ]);
+    const history = screen.getByText("Review history").closest(".panel");
+    expect(history).toBeTruthy();
+    expect(within(history as HTMLElement).getByText(/Demo Administrator/)).toBeVisible();
+  });
+
+  it("lets administrators route signed-in reviewers to event tracks", async () => {
+    const user = userEvent.setup();
+    const writes: unknown[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/api/events")) {
+        return new Response(JSON.stringify(eventsPayload), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/reviewers") && init?.method === "POST") {
+        writes.push(JSON.parse(String(init.body)));
+        return new Response(
+          JSON.stringify({
+            reviewer: {
+              id: "reviewer-1",
+              name: "Rae Viewer",
+              email: "rae@example.com",
+              trackIds: ["platform"],
+            },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.endsWith("/reviewers")) {
+        return new Response(JSON.stringify({ reviewers: [] }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("/proposals")) {
+        return new Response(JSON.stringify({ proposals: [] }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderAt("/e/pacific-open-data-summit-2026/submissions");
+    await user.click(await screen.findByRole("button", { name: "Reviewer routing" }));
+    expect(screen.getByRole("heading", { name: "Reviewer routing" })).toBeVisible();
+    await user.type(screen.getByLabelText("Reviewer email"), "rae@example.com");
+    await user.click(screen.getByRole("checkbox", { name: "Platform" }));
+    await user.click(screen.getByRole("button", { name: "Grant review access" }));
+
+    expect(
+      await screen.findByText("Rae Viewer can now review 1 track."),
+    ).toBeVisible();
+    expect(writes).toEqual([
+      { email: "rae@example.com", trackIds: ["platform"] },
+    ]);
   });
 
   it("edits every published answer through the submitter edit runtime", async () => {

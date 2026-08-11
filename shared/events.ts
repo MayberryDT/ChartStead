@@ -41,8 +41,10 @@ export interface EventRecord {
 export interface OrganizerPrincipal {
   id: string;
   displayName: string;
-  role: "admin";
+  role: "admin" | "reviewer";
   eventIds: string[];
+  rolesByEvent?: Record<string, "admin" | "reviewer">;
+  trackIdsByEvent?: Record<string, string[]>;
 }
 
 export interface EventListResponse {
@@ -125,7 +127,32 @@ export interface OrganizerProposal extends PublicProposal {
   status: ProposalStatus;
   committeeNote: string;
   privateNote: string;
+  reviewVersion: number;
   confirmationEmailStatus: OutboxDeliveryStatus | null;
+}
+
+export interface ProposalAuditEvent {
+  id: string;
+  proposalId: string;
+  type: "proposal.review.changed";
+  actorId: string;
+  actorName: string;
+  fromStatus: ProposalStatus;
+  toStatus: ProposalStatus;
+  committeeNoteChanged: boolean;
+  createdAt: string;
+}
+
+export interface ProposalReviewResponse {
+  proposal: OrganizerProposal;
+  auditEvents: ProposalAuditEvent[];
+}
+
+export interface ReviewerAssignment {
+  id: string;
+  name: string;
+  email: string;
+  trackIds: string[];
 }
 
 export type OutboxDeliveryStatus =

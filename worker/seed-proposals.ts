@@ -56,6 +56,7 @@ export function createSeedProposals(event: EventRecord): OrganizerProposal[] {
         status,
         committeeNote: "",
         privateNote: "",
+        reviewVersion: 0,
         submittedAt: `2026-07-${String((proposalIndex % 28) + 1).padStart(2, "0")}T12:00:00.000Z`,
         confirmationEmailStatus: null,
       } satisfies OrganizerProposal;

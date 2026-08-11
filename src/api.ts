@@ -6,9 +6,12 @@ import type {
   OrganizerCfpForm,
   OrganizerCfpFormSummary,
   OrganizerProposal,
+  ProposalReviewResponse,
+  ProposalStatus,
   ProposalListResponse,
   ProposalValidationError,
   PublicProposal,
+  ReviewerAssignment,
   SubmissionAnswers,
   SubmitterEditSession,
   UploadedAssetAnswer,
@@ -304,10 +307,20 @@ export async function fetchPublicProposal(
 
 export async function fetchProposals(
   eventId: string,
-  query = "",
+  options: {
+    query?: string;
+    status?: ProposalStatus | "all";
+    track?: string;
+    sort?: "newest" | "oldest" | "title-asc" | "speaker-asc";
+  } = {},
 ): Promise<OrganizerProposal[]> {
   const params = new URLSearchParams();
-  if (query.trim()) params.set("q", query.trim());
+  if (options.query?.trim()) params.set("q", options.query.trim());
+  if (options.status && options.status !== "all") {
+    params.set("status", options.status);
+  }
+  if (options.track) params.set("track", options.track);
+  if (options.sort && options.sort !== "newest") params.set("sort", options.sort);
   const suffix = params.size ? `?${params}` : "";
   const response = await fetch(`/api/events/${eventId}/proposals${suffix}`);
   const body = await readJson<ProposalListResponse | { error: string }>(
@@ -321,6 +334,91 @@ export async function fetchProposals(
     );
   }
   return body.proposals;
+}
+
+export async function fetchOrganizerProposal(
+  eventId: string,
+  proposalId: string,
+): Promise<ProposalReviewResponse> {
+  const response = await fetch(
+    `/api/events/${eventId}/organizer/proposals/${proposalId}`,
+  );
+  const body = await readJson<ProposalReviewResponse | { error: string }>(response);
+  if (!response.ok || !("proposal" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to load proposal",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function updateProposalReview(
+  eventId: string,
+  proposalId: string,
+  input: {
+    expectedVersion: number;
+    status?: ProposalStatus;
+    committeeNote?: string;
+  },
+): Promise<ProposalReviewResponse> {
+  const response = await fetch(
+    `/api/events/${eventId}/organizer/proposals/${proposalId}/review`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  const body = await readJson<ProposalReviewResponse | { error: string }>(response);
+  if (!response.ok || !("proposal" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to save review",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function fetchReviewerAssignments(
+  eventId: string,
+): Promise<ReviewerAssignment[]> {
+  const response = await fetch(`/api/events/${eventId}/reviewers`);
+  const body = await readJson<{ reviewers: ReviewerAssignment[] } | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("reviewers" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to load reviewer routing",
+      response.status,
+      body,
+    );
+  }
+  return body.reviewers;
+}
+
+export async function grantReviewerTracks(
+  eventId: string,
+  input: { email: string; trackIds: string[] },
+): Promise<ReviewerAssignment> {
+  const response = await fetch(`/api/events/${eventId}/reviewers`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<{ reviewer: ReviewerAssignment } | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("reviewer" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to save reviewer routing",
+      response.status,
+      body,
+    );
+  }
+  return body.reviewer;
 }
 
 export async function startUpload(
