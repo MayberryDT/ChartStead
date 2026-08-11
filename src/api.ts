@@ -7,9 +7,13 @@ import type {
   CfpDefinitionV1,
   CfpFormResponse,
   EventListResponse,
+  OnboardingBoard,
+  OnboardingCompletionRequirement,
+  OnboardingReminderDraft,
   OrganizerCfpForm,
   OrganizerCfpFormSummary,
   OrganizerProposal,
+  PortalOnboardingTask,
   ProposalReviewResponse,
   ProposalStatus,
   ProposalListResponse,
@@ -557,6 +561,243 @@ export async function fetchSpeakerPortalSession(
   if (!response.ok || !("profile" in body)) {
     throw new ApiError(
       "error" in body ? body.error : "This portal link is invalid or has expired.",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function updateSpeakerPortalProfile(
+  eventId: string,
+  token: string,
+  patch: {
+    biography?: string;
+    name?: string;
+    headshotAssetId?: string | null;
+  },
+): Promise<SpeakerPortalSession> {
+  const response = await fetch(
+    `/api/events/${eventId}/portal/profile?token=${encodeURIComponent(token)}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+  );
+  const body = await readJson<SpeakerPortalSession | { error: string }>(response);
+  if (!response.ok || !("profile" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to update profile",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function startPortalUpload(
+  eventId: string,
+  token: string,
+  input: {
+    purpose: "headshot" | "task";
+    taskId?: string;
+    fileName: string;
+    mime: string;
+    sizeBytes: number;
+  },
+): Promise<AssetUploadSession> {
+  const response = await fetch(
+    `/api/events/${eventId}/portal/uploads?token=${encodeURIComponent(token)}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  const body = await readJson<{ upload: AssetUploadSession } | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("upload" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to start upload",
+      response.status,
+      body,
+    );
+  }
+  return body.upload;
+}
+
+export async function putPortalUpload(
+  uploadUrl: string,
+  token: string,
+  file: File,
+): Promise<void> {
+  const separator = uploadUrl.includes("?") ? "&" : "?";
+  const response = await fetch(
+    `${uploadUrl}${separator}token=${encodeURIComponent(token)}`,
+    {
+      method: "PUT",
+      headers: {
+        "content-type": file.type || "application/octet-stream",
+        "content-length": String(file.size),
+      },
+      body: file,
+    },
+  );
+  if (!response.ok) {
+    const body = await readJson<{ error?: string }>(response).catch(() => ({}));
+    throw new ApiError(
+      "error" in body && body.error ? body.error : "Upload failed",
+      response.status,
+      body,
+    );
+  }
+}
+
+export async function completePortalTask(
+  eventId: string,
+  token: string,
+  taskId: string,
+  input: { assetId?: string } = {},
+): Promise<SpeakerPortalSession> {
+  const response = await fetch(
+    `/api/events/${eventId}/portal/tasks/${taskId}/complete?token=${encodeURIComponent(token)}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  const body = await readJson<SpeakerPortalSession | { error: string }>(response);
+  if (!response.ok || !("profile" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to complete task",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function fetchOnboardingBoard(eventId: string): Promise<OnboardingBoard> {
+  const response = await fetch(`/api/events/${eventId}/onboarding`);
+  const body = await readJson<OnboardingBoard | { error: string }>(response);
+  if (!response.ok || !("speakers" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to load onboarding board",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function createOnboardingTask(
+  eventId: string,
+  input: {
+    speakerId: string;
+    title: string;
+    instructions: string;
+    kind: string;
+    completionRequirement: OnboardingCompletionRequirement;
+    readinessFlag?: string | null;
+    dueAt?: string | null;
+  },
+): Promise<PortalOnboardingTask> {
+  const response = await fetch(`/api/events/${eventId}/onboarding/tasks`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<{ task: PortalOnboardingTask } | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("task" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to create task",
+      response.status,
+      body,
+    );
+  }
+  return body.task;
+}
+
+export async function prepareOnboardingReminder(
+  eventId: string,
+  speakerId: string,
+): Promise<OnboardingReminderDraft> {
+  const response = await fetch(`/api/events/${eventId}/onboarding/reminders`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ speakerId }),
+  });
+  const body = await readJson<OnboardingReminderDraft | { error: string }>(response);
+  if (!response.ok || !("id" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to prepare reminder",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function updateOnboardingReminder(
+  eventId: string,
+  draftId: string,
+  patch: { subject?: string; bodyText?: string },
+): Promise<OnboardingReminderDraft> {
+  const response = await fetch(
+    `/api/events/${eventId}/onboarding/reminders/${draftId}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+  );
+  const body = await readJson<OnboardingReminderDraft | { error: string }>(response);
+  if (!response.ok || !("id" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to update reminder",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function discardOnboardingReminder(
+  eventId: string,
+  draftId: string,
+): Promise<OnboardingReminderDraft> {
+  const response = await fetch(
+    `/api/events/${eventId}/onboarding/reminders/${draftId}/discard`,
+    { method: "POST" },
+  );
+  const body = await readJson<OnboardingReminderDraft | { error: string }>(response);
+  if (!response.ok || !("id" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to discard reminder",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function sendOnboardingReminder(
+  eventId: string,
+  draftId: string,
+): Promise<OnboardingReminderDraft> {
+  const response = await fetch(
+    `/api/events/${eventId}/onboarding/reminders/${draftId}/send`,
+    { method: "POST" },
+  );
+  const body = await readJson<OnboardingReminderDraft | { error: string }>(response);
+  if (!response.ok || !("id" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to send reminder",
       response.status,
       body,
     );

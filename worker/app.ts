@@ -7,6 +7,7 @@ import {
 } from "../shared/cfp-definition";
 import type {
   EventRecord,
+  OnboardingCompletionRequirement,
   OrganizerCfpForm,
   OrganizerCfpFormSummary,
   OrganizerPrincipal,
@@ -34,6 +35,9 @@ import type {
 import {
   ASSET_PURGE_AFTER_MS,
   DraftConflictError,
+  HEADSHOT_MAX_BYTES,
+  HEADSHOT_MIME_TYPES,
+  TASK_FILE_MAX_BYTES,
 } from "./event-store";
 import { createSeedCfp } from "./seed-cfp";
 import { seedEvents } from "./seed-events";
@@ -1565,6 +1569,562 @@ export function createApp(options: AppOptions = {}) {
       return c.json(INVALID_PORTAL_LINK_ERROR, 401);
     }
     return c.json(session);
+  });
+
+  app.patch("/api/events/:eventId/portal/profile", async (c) => {
+    const eventId = c.req.param("eventId");
+    const token = c.req.query("token") ?? "";
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const authorized = await authorizeSpeakerPortal({
+      secret: signingSecret(c.env, options.signingSecret),
+      token,
+      eventId,
+      store,
+    });
+    if (!authorized) return c.json(INVALID_PORTAL_LINK_ERROR, 401);
+
+    const body = (await c.req.json().catch(() => null)) as {
+      biography?: unknown;
+      name?: unknown;
+      headshotAssetId?: unknown;
+    } | null;
+    if (!body || typeof body !== "object") {
+      return c.json({ error: "Profile update must be valid JSON." }, 400);
+    }
+
+    const patch: {
+      biography?: string;
+      name?: string;
+      headshotAssetId?: string | null;
+    } = {};
+    if ("biography" in body) {
+      if (typeof body.biography !== "string") {
+        return c.json({ error: "Biography must be a string." }, 400);
+      }
+      patch.biography = body.biography;
+    }
+    if ("name" in body) {
+      if (typeof body.name !== "string") {
+        return c.json({ error: "Name must be a string." }, 400);
+      }
+      patch.name = body.name;
+    }
+    if ("headshotAssetId" in body) {
+      if (body.headshotAssetId !== null && typeof body.headshotAssetId !== "string") {
+        return c.json({ error: "Headshot asset id is invalid." }, 400);
+      }
+      patch.headshotAssetId = body.headshotAssetId;
+    }
+
+    const result = await store.updateSpeakerPortalProfile({
+      speakerId: authorized.payload.speakerId,
+      ...patch,
+    });
+    if (!result.ok) {
+      return c.json({ error: result.error }, 400);
+    }
+
+    const session = await store.getSpeakerPortalSession({
+      speakerId: authorized.payload.speakerId,
+      expiresAt: authorized.tokenRow.expiresAt,
+    });
+    if (!session) return c.json(INVALID_PORTAL_LINK_ERROR, 401);
+    return c.json(session);
+  });
+
+  app.post("/api/events/:eventId/portal/uploads", async (c) => {
+    const eventId = c.req.param("eventId");
+    const token = c.req.query("token") ?? "";
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    if (!c.env.ASSETS) {
+      return c.json({ error: "File uploads are not configured." }, 503);
+    }
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const authorized = await authorizeSpeakerPortal({
+      secret: signingSecret(c.env, options.signingSecret),
+      token,
+      eventId,
+      store,
+    });
+    if (!authorized) return c.json(INVALID_PORTAL_LINK_ERROR, 401);
+
+    const body = (await c.req.json().catch(() => null)) as {
+      purpose?: unknown;
+      taskId?: unknown;
+      fileName?: unknown;
+      mime?: unknown;
+      sizeBytes?: unknown;
+    } | null;
+    if (!body || typeof body !== "object") {
+      return c.json({ error: "Upload request must be valid JSON." }, 400);
+    }
+
+    const purpose = body.purpose === "headshot" || body.purpose === "task" ? body.purpose : null;
+    const taskId = typeof body.taskId === "string" ? body.taskId.trim() : "";
+    const rawFileName =
+      typeof body.fileName === "string" && body.fileName.trim()
+        ? body.fileName.trim()
+        : "";
+    const fileName = rawFileName ? sanitizeUploadFileName(rawFileName) : "";
+    const mime =
+      typeof body.mime === "string" && body.mime.trim() ? body.mime.trim() : "";
+    const sizeBytes =
+      typeof body.sizeBytes === "number" && Number.isFinite(body.sizeBytes)
+        ? body.sizeBytes
+        : Number.NaN;
+
+    if (!purpose || !fileName || !mime || !Number.isInteger(sizeBytes) || sizeBytes < 0) {
+      return c.json({ error: "A valid portal upload start request is required." }, 400);
+    }
+    if (purpose === "task" && !taskId) {
+      return c.json({ error: "Task id is required for task uploads." }, 400);
+    }
+    if (purpose === "task") {
+      const session = await store.getSpeakerPortalSession({
+        speakerId: authorized.payload.speakerId,
+        expiresAt: authorized.tokenRow.expiresAt,
+      });
+      const task = session?.tasks.find((row) => row.id === taskId);
+      if (!task) return c.json({ error: "Task not found." }, 404);
+      if (task.completionRequirement !== "file") {
+        return c.json({ error: "This task does not accept file uploads." }, 400);
+      }
+    }
+
+    const maxBytes = purpose === "headshot" ? HEADSHOT_MAX_BYTES : TASK_FILE_MAX_BYTES;
+    const acceptMimeTypes =
+      purpose === "headshot" ? [...HEADSHOT_MIME_TYPES] : [] as string[];
+    if (sizeBytes > maxBytes) {
+      return c.json({ error: `Files must be ${maxBytes} bytes or smaller.` }, 400);
+    }
+    if (acceptMimeTypes.length > 0 && !acceptMimeTypes.includes(mime)) {
+      return c.json({ error: "That file type is not allowed." }, 400);
+    }
+
+    const assetId = createTokenId();
+    const objectKey = `${eventId}/portal/${authorized.payload.speakerId}/${assetId}/${fileName}`;
+    await store.createPortalAsset({
+      assetId,
+      objectKey,
+      fileName,
+      mime,
+      sizeBytes,
+      speakerId: authorized.payload.speakerId,
+      purpose: purpose === "headshot" ? "portal_headshot" : "portal_task",
+      taskId: purpose === "task" ? taskId : undefined,
+      maxBytes,
+    });
+
+    return c.json({
+      upload: {
+        assetId,
+        objectKey,
+        uploadUrl: `/api/events/${eventId}/portal/uploads/${assetId}`,
+        maxBytes,
+        acceptMimeTypes,
+      },
+    });
+  });
+
+  app.get("/api/events/:eventId/portal/assets/:assetId", async (c) => {
+    const eventId = c.req.param("eventId");
+    const assetId = c.req.param("assetId");
+    const token = c.req.query("token") ?? "";
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    if (!c.env.ASSETS) {
+      return c.json({ error: "File uploads are not configured." }, 503);
+    }
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const authorized = await authorizeSpeakerPortal({
+      secret: signingSecret(c.env, options.signingSecret),
+      token,
+      eventId,
+      store,
+    });
+    if (!authorized) return c.json(INVALID_PORTAL_LINK_ERROR, 401);
+
+    const asset = await store.getAsset(assetId);
+    if (
+      !asset ||
+      asset.status !== "complete" ||
+      asset.owner_speaker_id !== authorized.payload.speakerId ||
+      (asset.purpose !== "portal_headshot" && asset.purpose !== "portal_task")
+    ) {
+      return c.json({ error: "Asset not found." }, 404);
+    }
+
+    const object = await c.env.ASSETS.get(asset.object_key);
+    if (!object) {
+      return c.json({ error: "Asset file is missing." }, 404);
+    }
+    const headers = new Headers();
+    headers.set("content-type", asset.mime || "application/octet-stream");
+    headers.set("cache-control", "private, max-age=300");
+    if (asset.file_name) {
+      headers.set(
+        "content-disposition",
+        `inline; filename="${sanitizeUploadFileName(asset.file_name)}"`,
+      );
+    }
+    return new Response(object.body, { status: 200, headers });
+  });
+
+  app.put("/api/events/:eventId/portal/uploads/:assetId", async (c) => {
+    const eventId = c.req.param("eventId");
+    const assetId = c.req.param("assetId");
+    const token = c.req.query("token") ?? "";
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    if (!c.env.ASSETS) {
+      return c.json({ error: "File uploads are not configured." }, 503);
+    }
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const authorized = await authorizeSpeakerPortal({
+      secret: signingSecret(c.env, options.signingSecret),
+      token,
+      eventId,
+      store,
+    });
+    if (!authorized) return c.json(INVALID_PORTAL_LINK_ERROR, 401);
+
+    const asset = await store.getAsset(assetId);
+    if (
+      !asset ||
+      asset.owner_speaker_id !== authorized.payload.speakerId ||
+      (asset.purpose !== "portal_headshot" && asset.purpose !== "portal_task")
+    ) {
+      return c.json({ error: "Upload session not found." }, 404);
+    }
+    if (
+      asset.claimed_proposal_id ||
+      (asset.status !== "pending" && asset.status !== "failed")
+    ) {
+      return c.json({ error: "This upload can no longer be replaced." }, 400);
+    }
+
+    const contentLengthHeader = c.req.header("content-length");
+    if (contentLengthHeader == null || contentLengthHeader.trim() === "") {
+      return c.json({ error: "Content-Length is required." }, 400);
+    }
+    const contentLength = Number(contentLengthHeader);
+    if (!Number.isInteger(contentLength) || contentLength < 0) {
+      return c.json({ error: "Content-Length is invalid." }, 400);
+    }
+    if (contentLength !== Number(asset.size_bytes)) {
+      return c.json(
+        { error: "Upload size must match the declared file size." },
+        400,
+      );
+    }
+    if (contentLength > Number(asset.max_bytes)) {
+      return c.json(
+        { error: `Files must be ${Number(asset.max_bytes)} bytes or smaller.` },
+        400,
+      );
+    }
+    const contentType = c.req.header("content-type")?.split(";")[0]?.trim() ?? "";
+    if (contentType !== asset.mime) {
+      return c.json({ error: "Content-Type must match the declared file type." }, 400);
+    }
+    if (!c.req.raw.body) {
+      return c.json({ error: "Upload body is required." }, 400);
+    }
+
+    try {
+      const stored = await c.env.ASSETS.put(asset.object_key, c.req.raw.body, {
+        httpMetadata: { contentType: asset.mime },
+        customMetadata: {
+          assetId,
+          eventId,
+          fileName: asset.file_name,
+          speakerId: authorized.payload.speakerId,
+        },
+      });
+      if (!stored || stored.size !== Number(asset.size_bytes)) {
+        try {
+          await c.env.ASSETS.delete(asset.object_key);
+        } catch {
+          // best-effort
+        }
+        await store.failAsset(assetId);
+        return c.json(
+          { error: "Upload size did not match the declared file size." },
+          400,
+        );
+      }
+      const completed = await store.completeAsset({
+        assetId,
+        sizeBytes: stored.size,
+        mime: asset.mime,
+        fileName: asset.file_name,
+      });
+      if (!completed) {
+        return c.json({ error: "This upload can no longer be replaced." }, 409);
+      }
+      return c.json({ asset: completed });
+    } catch {
+      await store.failAsset(assetId);
+      return c.json(
+        { error: "Upload failed. You can retry without restarting." },
+        502,
+      );
+    }
+  });
+
+  app.post("/api/events/:eventId/portal/tasks/:taskId/complete", async (c) => {
+    const eventId = c.req.param("eventId");
+    const taskId = c.req.param("taskId");
+    const token = c.req.query("token") ?? "";
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const authorized = await authorizeSpeakerPortal({
+      secret: signingSecret(c.env, options.signingSecret),
+      token,
+      eventId,
+      store,
+    });
+    if (!authorized) return c.json(INVALID_PORTAL_LINK_ERROR, 401);
+
+    const body = (await c.req.json().catch(() => ({}))) as {
+      assetId?: unknown;
+    };
+    const assetId =
+      typeof body.assetId === "string" && body.assetId.trim()
+        ? body.assetId.trim()
+        : null;
+
+    const result = await store.completePortalTask({
+      speakerId: authorized.payload.speakerId,
+      taskId,
+      assetId,
+    });
+    if (!result.ok) {
+      const status = result.status === 404 ? 404 : 400;
+      return c.json({ error: result.error }, status);
+    }
+
+    const session = await store.getSpeakerPortalSession({
+      speakerId: authorized.payload.speakerId,
+      expiresAt: authorized.tokenRow.expiresAt,
+    });
+    if (!session) return c.json(INVALID_PORTAL_LINK_ERROR, 401);
+    return c.json(session);
+  });
+
+  app.get("/api/events/:eventId/onboarding", async (c) => {
+    const eventId = c.req.param("eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    const event = await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can open onboarding." }, 403);
+    }
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const board = await store.getOnboardingBoard();
+    return c.json({ ...board, eventId: event.id });
+  });
+
+  app.post("/api/events/:eventId/onboarding/tasks", async (c) => {
+    const eventId = c.req.param("eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can create tasks." }, 403);
+    }
+
+    const body = (await c.req.json().catch(() => null)) as {
+      speakerId?: unknown;
+      title?: unknown;
+      instructions?: unknown;
+      kind?: unknown;
+      completionRequirement?: unknown;
+      readinessFlag?: unknown;
+      dueAt?: unknown;
+    } | null;
+    if (!body || typeof body !== "object") {
+      return c.json({ error: "Task request must be valid JSON." }, 400);
+    }
+
+    const speakerId = typeof body.speakerId === "string" ? body.speakerId.trim() : "";
+    const title = typeof body.title === "string" ? body.title : "";
+    const instructions = typeof body.instructions === "string" ? body.instructions : "";
+    const kind = typeof body.kind === "string" ? body.kind : "custom";
+    const completionRequirement = (
+      body.completionRequirement === "manual" ||
+      body.completionRequirement === "file" ||
+      body.completionRequirement === "ack"
+        ? body.completionRequirement
+        : null
+    ) as OnboardingCompletionRequirement | null;
+    const readinessFlag =
+      typeof body.readinessFlag === "string" && body.readinessFlag.trim()
+        ? body.readinessFlag.trim()
+        : null;
+    const dueAt =
+      typeof body.dueAt === "string" && body.dueAt.trim() ? body.dueAt.trim() : null;
+
+    if (!speakerId || !completionRequirement) {
+      return c.json(
+        { error: "speakerId and completionRequirement are required." },
+        400,
+      );
+    }
+
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const created = await store.createOnboardingTask({
+      speakerId,
+      title,
+      instructions,
+      kind,
+      completionRequirement,
+      readinessFlag,
+      dueAt,
+      createdBy: principal.id,
+    });
+    if ("error" in created) {
+      return c.json({ error: created.error }, 400);
+    }
+    return c.json({ task: created }, 201);
+  });
+
+  app.post("/api/events/:eventId/onboarding/reminders", async (c) => {
+    const eventId = c.req.param("eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can prepare reminders." }, 403);
+    }
+    const body = (await c.req.json().catch(() => null)) as {
+      speakerId?: unknown;
+    } | null;
+    const speakerId =
+      body && typeof body.speakerId === "string" ? body.speakerId.trim() : "";
+    if (!speakerId) return c.json({ error: "speakerId is required." }, 400);
+
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const draft = await store.prepareOnboardingReminder({
+      speakerId,
+      actorId: principal.id,
+      actorName: principal.displayName,
+    });
+    if ("error" in draft) return c.json({ error: draft.error }, 400);
+    return c.json(draft, 201);
+  });
+
+  app.patch("/api/events/:eventId/onboarding/reminders/:draftId", async (c) => {
+    const eventId = c.req.param("eventId");
+    const draftId = c.req.param("draftId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can edit reminders." }, 403);
+    }
+    const body = (await c.req.json().catch(() => null)) as {
+      subject?: unknown;
+      bodyText?: unknown;
+    } | null;
+    if (!body || typeof body !== "object") {
+      return c.json({ error: "Draft update must be valid JSON." }, 400);
+    }
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const updated = await store.updateReminderDraft({
+      id: draftId,
+      subject: typeof body.subject === "string" ? body.subject : undefined,
+      bodyText: typeof body.bodyText === "string" ? body.bodyText : undefined,
+    });
+    if ("error" in updated) return c.json({ error: updated.error }, 400);
+    return c.json(updated);
+  });
+
+  app.post("/api/events/:eventId/onboarding/reminders/:draftId/discard", async (c) => {
+    const eventId = c.req.param("eventId");
+    const draftId = c.req.param("draftId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can discard reminders." }, 403);
+    }
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const discarded = await store.discardReminderDraft(draftId);
+    if ("error" in discarded) return c.json({ error: discarded.error }, 400);
+    return c.json(discarded);
+  });
+
+  app.post("/api/events/:eventId/onboarding/reminders/:draftId/send", async (c) => {
+    const eventId = c.req.param("eventId");
+    const draftId = c.req.param("draftId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can send reminders." }, 403);
+    }
+
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const queued = await store.queueReminderSend(draftId);
+    if ("error" in queued) return c.json({ error: queued.error }, 400);
+
+    const sender =
+      options.emailSender === undefined
+        ? createResendSender(c.env)
+        : options.emailSender;
+    if (!sender) {
+      await store.markOutboxFailed(
+        queued.outboxId,
+        "Email delivery is not configured.",
+        new Date().toISOString(),
+        null,
+      );
+      const failed = await store.getReminderDraft(draftId);
+      return c.json(failed ?? queued.draft);
+    }
+
+    await deliverOutboxMessage({
+      store,
+      sender,
+      messageId: queued.outboxId,
+      now: new Date(),
+    });
+    const after = await store.getReminderDraft(draftId);
+    return c.json(after ?? queued.draft);
   });
 
   app.get("/api/events/:eventId/submitter/edit", async (c) => {

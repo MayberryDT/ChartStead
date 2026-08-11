@@ -166,9 +166,13 @@ export type OutboxDeliveryStatus =
   | "sent"
   | "failed";
 
+export type OutboxMessageKind =
+  | "submission_confirmation"
+  | "onboarding_reminder";
+
 export interface OutboxMessage {
   id: string;
-  kind: "submission_confirmation";
+  kind: OutboxMessageKind | string;
   toEmail: string;
   subject: string;
   status: OutboxDeliveryStatus;
@@ -179,6 +183,98 @@ export interface OutboxMessage {
   sentAt: string | null;
   attemptCount: number;
   nextAttemptAt: string | null;
+}
+
+export type OnboardingTaskStatus = "open" | "completed";
+
+export type OnboardingCompletionRequirement = "manual" | "file" | "ack";
+
+export interface OnboardingTaskAsset {
+  assetId: string;
+  fileName: string;
+  mime: string;
+  size: number;
+}
+
+export interface PortalOnboardingTask {
+  id: string;
+  title: string;
+  kind: string;
+  status: OnboardingTaskStatus | string;
+  speakerId: string;
+  dueAt: string | null;
+  instructions: string;
+  completionRequirement: OnboardingCompletionRequirement | string;
+  readinessFlag: string | null;
+  asset: OnboardingTaskAsset | null;
+  completedAt: string | null;
+}
+
+export type ReminderDraftStatus =
+  | "draft"
+  | "discarded"
+  | "queued"
+  | "sent"
+  | "failed";
+
+export interface OnboardingReminderDraft {
+  id: string;
+  speakerId: string;
+  proposalId: string | null;
+  toEmail: string;
+  subject: string;
+  bodyText: string;
+  bodyHtml: string;
+  status: ReminderDraftStatus;
+  missingTaskIds: string[];
+  outboxId: string | null;
+  lastError: string | null;
+  createdById: string;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+  sentAt: string | null;
+}
+
+export interface OnboardingHistoryEntry {
+  id: string;
+  speakerId: string;
+  taskId: string | null;
+  type: string;
+  summary: string;
+  actorId: string;
+  actorName: string;
+  createdAt: string;
+}
+
+export interface OnboardingBoardSpeaker {
+  speakerId: string;
+  name: string;
+  email: string;
+  proposalId: string | null;
+  proposalTitle: string | null;
+  role: string;
+  openTaskCount: number;
+  overdueCount: number;
+  nextDueAt: string | null;
+  daysUntilNextDue: number | null;
+  readinessFlags: string[];
+  missingWork: Array<{
+    taskId: string;
+    title: string;
+    dueAt: string | null;
+    daysUntilDue: number | null;
+    readinessFlag: string | null;
+  }>;
+  lastContactAt: string | null;
+  lastContactStatus: string | null;
+  history: OnboardingHistoryEntry[];
+}
+
+export interface OnboardingBoard {
+  eventId: string;
+  speakers: OnboardingBoardSpeaker[];
+  drafts: OnboardingReminderDraft[];
 }
 
 export interface PublishedCfpForm {
@@ -248,6 +344,8 @@ export interface SpeakerPortalSession {
     name: string;
     email: string;
     biography: string;
+    headshotAssetId: string | null;
+    headshotFileName: string | null;
   };
   participation: {
     id: string;
@@ -271,14 +369,7 @@ export interface SpeakerPortalSession {
     startsAt: string | null;
     endsAt: string | null;
   } | null;
-  tasks: Array<{
-    id: string;
-    title: string;
-    kind: string;
-    status: string;
-    speakerId: string;
-    dueAt: string | null;
-  }>;
+  tasks: PortalOnboardingTask[];
   nextDeadline: string | null;
 }
 

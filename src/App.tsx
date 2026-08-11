@@ -9,6 +9,7 @@ import type { EventListResponse, EventRecord } from "../shared/events";
 import { ApiError, fetchEvents } from "./api";
 import { AppSelect } from "./AppSelect";
 import { authClient } from "./auth-client";
+import { OnboardingWorkspace } from "./OnboardingWorkspace";
 import {
   SubmissionsWorkspace,
   type ProposalQueueState,
@@ -336,6 +337,9 @@ function EventDesk({
       });
       return;
     }
+    if (item === "Speakers") {
+      return;
+    }
     if (item === "Overview") {
       void navigate({ to: "/" });
     }
@@ -376,11 +380,18 @@ function EventDesk({
 
   const cfpHref = `/e/${event.id}/cfp`;
   const formsHref = `/e/${event.id}/forms`;
-  const topbarTitle = activeNav === "Submissions" ? "Submissions" : event.name;
+  const topbarTitle =
+    activeNav === "Submissions"
+      ? "Submissions"
+      : activeNav === "Speakers"
+        ? "Speaker onboarding"
+        : event.name;
   const topbarMeta =
     activeNav === "Submissions"
       ? `${event.submissionCount} total · ${event.unreviewedCount} unreviewed · track routing on`
-      : formatDateRange(event.startsOn, event.endsOn);
+      : activeNav === "Speakers"
+        ? "Readiness, missing work, and assisted reminder drafts"
+        : formatDateRange(event.startsOn, event.endsOn);
   const currentRole = data.principal.rolesByEvent?.[event.id] ?? data.principal.role;
 
   return (
@@ -406,7 +417,7 @@ function EventDesk({
               }
               aria-current={activeNav === item ? "page" : undefined}
               onClick={(click) => {
-                if (item === "Speakers" || item === "Agenda" || item === "Messages" || item === "Settings") {
+                if (item === "Agenda" || item === "Messages" || item === "Settings") {
                   click.preventDefault();
                   setActiveNav(item);
                   return;
@@ -486,6 +497,8 @@ function EventDesk({
           />
         ) : activeNav === "Overview" ? (
           <OverviewWorkspace event={event} />
+        ) : activeNav === "Speakers" ? (
+          <OnboardingWorkspace eventId={event.id} />
         ) : (
           <div className="workspace">
             <section className="operations-panel">
@@ -493,7 +506,7 @@ function EventDesk({
                 <h2>{activeNav}</h2>
               </div>
               <p className="empty-state padded">
-                {activeNav} is outside the ticket 02 slice.
+                {activeNav} is outside the current competition spine.
               </p>
             </section>
           </div>
