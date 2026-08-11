@@ -314,4 +314,104 @@ describe("shared track review queue", () => {
       },
     });
   });
+
+  it("lets administrators remove reviewer access and track assignments", async () => {
+    const reviewerId = `reviewer-${crypto.randomUUID()}`;
+    const reviewerEmail = `${reviewerId}@example.test`;
+    const now = Date.now();
+    await env.AUTH_DB.batch([
+      env.AUTH_DB.prepare(
+        `INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt)
+         VALUES (?, ?, ?, 1, ?, ?)`,
+      ).bind(reviewerId, "Removed Reviewer", reviewerEmail, now, now),
+      env.AUTH_DB.prepare(
+        `INSERT INTO event_memberships (event_id, user_id, role) VALUES (?, ?, 'reviewer')`,
+      ).bind(eventId, reviewerId),
+      env.AUTH_DB.prepare(
+        `INSERT INTO reviewer_track_assignments (event_id, user_id, track_id)
+         VALUES (?, ?, 'platform')`,
+      ).bind(eventId, reviewerId),
+    ]);
+
+    const forbidden = await reviewerApp.request(
+      `https://chartstead.test/api/events/${eventId}/reviewers/${reviewerId}`,
+      { method: "DELETE" },
+      env,
+    );
+    expect(forbidden.status).toBe(403);
+
+    const response = await adminApp.request(
+      `https://chartstead.test/api/events/${eventId}/reviewers/${reviewerId}`,
+      { method: "DELETE" },
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    const membership = await env.AUTH_DB.prepare(
+      `SELECT role FROM event_memberships WHERE event_id = ? AND user_id = ?`,
+    )
+      .bind(eventId, reviewerId)
+      .first();
+    const assignments = await env.AUTH_DB.prepare(
+      `SELECT track_id FROM reviewer_track_assignments WHERE event_id = ? AND user_id = ?`,
+    )
+      .bind(eventId, reviewerId)
+      .all();
+    expect(membership).toBeNull();
+    expect(assignments.results).toEqual([]);
+  });
+
+  it("lets administrators replace a reviewer's assigned tracks", async () => {
+    const reviewerId = `reviewer-${crypto.randomUUID()}`;
+    const reviewerEmail = `${reviewerId}@example.test`;
+    const now = Date.now();
+    await env.AUTH_DB.batch([
+      env.AUTH_DB.prepare(
+        `INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt)
+         VALUES (?, ?, ?, 1, ?, ?)`,
+      ).bind(reviewerId, "Edited Reviewer", reviewerEmail, now, now),
+      env.AUTH_DB.prepare(
+        `INSERT INTO event_memberships (event_id, user_id, role) VALUES (?, ?, 'reviewer')`,
+      ).bind(eventId, reviewerId),
+      env.AUTH_DB.prepare(
+        `INSERT INTO reviewer_track_assignments (event_id, user_id, track_id)
+         VALUES (?, ?, 'platform'), (?, ?, 'community')`,
+      ).bind(eventId, reviewerId, eventId, reviewerId),
+    ]);
+
+    const forbidden = await reviewerApp.request(
+      `https://chartstead.test/api/events/${eventId}/reviewers/${reviewerId}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ trackIds: ["design-systems"] }),
+      },
+      env,
+    );
+    expect(forbidden.status).toBe(403);
+
+    const response = await adminApp.request(
+      `https://chartstead.test/api/events/${eventId}/reviewers/${reviewerId}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ trackIds: ["design-systems"] }),
+      },
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      reviewer: { id: reviewerId, trackIds: ["design-systems"] },
+    });
+    const assignments = await env.AUTH_DB.prepare(
+      `SELECT track_id FROM reviewer_track_assignments
+       WHERE event_id = ? AND user_id = ? ORDER BY track_id`,
+    )
+      .bind(eventId, reviewerId)
+      .all<{ track_id: string }>();
+    expect(assignments.results.map((row) => row.track_id)).toEqual([
+      "design-systems",
+    ]);
+  });
 });

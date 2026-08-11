@@ -32,9 +32,8 @@ test("demo administrator signs in, selects a persisted event, and keeps shell ch
     ]),
   );
 
-  await page.getByRole("combobox", { name: "Event" }).selectOption(
-    "ai-engineer-worlds-fair-2026",
-  );
+  await page.getByRole("combobox", { name: "Event" }).click();
+  await page.getByRole("option", { name: "AI Engineer World's Fair 2026" }).click();
   await expect(
     page.getByRole("heading", { name: "AI Engineer World's Fair 2026" }),
   ).toBeVisible();

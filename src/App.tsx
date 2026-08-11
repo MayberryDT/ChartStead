@@ -1,12 +1,13 @@
 import { Button } from "@base-ui/react/button";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 import markOnDarkUrl from "../design/assets/brand/chartstead-mark-on-dark.png";
 import markOnLightUrl from "../design/assets/brand/chartstead-mark-on-light.png";
 import type { EventListResponse, EventRecord } from "../shared/events";
 import { ApiError, fetchEvents } from "./api";
+import { AppSelect } from "./AppSelect";
 import { authClient } from "./auth-client";
 import {
   SubmissionsWorkspace,
@@ -276,6 +277,33 @@ function EventDesk({
   const event =
     data.events.find((candidate) => candidate.id === selectedEventId) ?? data.events[0];
 
+  useEffect(() => {
+    if (initialProposalId) return;
+    const proposalId = sessionStorage.getItem("chartstead:return-focus-proposal");
+    if (!proposalId) return;
+    let frame = 0;
+    let attempts = 0;
+    const focusProposal = () => {
+      const row = Array.from(
+        document.querySelectorAll<HTMLTableRowElement>("tr[data-id]"),
+      ).find((candidate) => candidate.dataset.id === proposalId);
+      const link = row?.querySelector<HTMLAnchorElement>(".proposal-row-link");
+      if (link) {
+        link.focus();
+        sessionStorage.removeItem("chartstead:return-focus-proposal");
+        return;
+      }
+      attempts += 1;
+      if (attempts < 60) {
+        frame = window.requestAnimationFrame(focusProposal);
+      } else {
+        sessionStorage.removeItem("chartstead:return-focus-proposal");
+      }
+    };
+    frame = window.requestAnimationFrame(focusProposal);
+    return () => window.cancelAnimationFrame(frame);
+  }, [initialProposalId]);
+
   if (!event) {
     return (
       <main className="sign-in-shell">
@@ -323,16 +351,13 @@ function EventDesk({
 
   async function closeProposal() {
     const proposalId = initialProposalId;
+    if (proposalId) {
+      sessionStorage.setItem("chartstead:return-focus-proposal", proposalId);
+    }
     await navigate({
       to: "/e/$eventId/submissions",
       params: { eventId: event.id },
       search: queueSearch(initialQueue),
-    });
-    window.requestAnimationFrame(() => {
-      const row = Array.from(
-        document.querySelectorAll<HTMLTableRowElement>("tr[data-id]"),
-      ).find((candidate) => candidate.dataset.id === proposalId);
-      row?.focus();
     });
   }
 
@@ -399,19 +424,16 @@ function EventDesk({
           ))}
         </nav>
         <div className="event-switcher">
-          <span className="event-switcher-label">Event</span>
-          <select
-            className="event-switcher-name"
-            aria-label="Event"
+          <AppSelect
+            label="Event"
             value={event.id}
-            onChange={(change) => selectEvent(change.target.value)}
-          >
-            {data.events.map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>
-                {candidate.name}
-              </option>
-            ))}
-          </select>
+            options={data.events.map((candidate) => ({
+              value: candidate.id,
+              label: candidate.name,
+            }))}
+            onValueChange={selectEvent}
+            variant="sidebar"
+          />
         </div>
       </aside>
 

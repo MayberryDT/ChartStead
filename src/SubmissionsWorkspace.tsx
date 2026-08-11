@@ -1,6 +1,11 @@
+import { Dialog } from "@base-ui/react/dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type {
+  CSSProperties,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+} from "react";
 
 import type {
   EventRecord,
@@ -16,8 +21,11 @@ import {
   fetchProposals,
   fetchReviewerAssignments,
   grantReviewerTracks,
+  revokeReviewerAccess,
+  updateReviewerTracks,
   updateProposalReview,
 } from "./api";
+import { AppSelect } from "./AppSelect";
 
 export interface ProposalQueueState {
   query: string;
@@ -99,6 +107,7 @@ export function SubmissionsWorkspace({
 }) {
   const [search, setSearch] = useState(queue.query);
   const [routingOpen, setRoutingOpen] = useState(false);
+  const [inspectorWidth, setInspectorWidth] = useState(460);
 
   useEffect(() => setSearch(queue.query), [queue.query]);
   useEffect(() => {
@@ -126,6 +135,24 @@ export function SubmissionsWorkspace({
 
   function setQueue(patch: Partial<ProposalQueueState>) {
     onQueueChange({ ...queue, ...patch });
+  }
+
+  function startInspectorResize(pointer: ReactPointerEvent<HTMLDivElement>) {
+    pointer.preventDefault();
+    const startX = pointer.clientX;
+    const startWidth = inspectorWidth;
+    const move = (event: PointerEvent) => {
+      const maxWidth = Math.max(380, Math.min(720, window.innerWidth - 560));
+      setInspectorWidth(
+        Math.min(maxWidth, Math.max(380, startWidth + startX - event.clientX)),
+      );
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
   }
 
   return (
@@ -159,57 +186,67 @@ export function SubmissionsWorkspace({
             ),
           )}
         </div>
-        <label className="toolbar-select">
-          <span>Track</span>
-          <select
-            aria-label="Track filter"
-            value={queue.track}
-            onChange={(change) => setQueue({ track: change.target.value })}
-          >
-            <option value="">All assigned tracks</option>
-            {event.tracks.map((track) => (
-              <option key={track.id} value={track.id}>
-                {track.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="toolbar-select">
-          <span>Sort</span>
-          <select
-            aria-label="Sort submissions"
-            value={queue.sort}
-            onChange={(change) =>
-              setQueue({ sort: change.target.value as ProposalQueueState["sort"] })
-            }
-          >
-            <option value="newest">Newest</option>
-            <option value="oldest">Oldest</option>
-            <option value="title-asc">Title A-Z</option>
-            <option value="speaker-asc">Speaker A-Z</option>
-          </select>
-        </label>
+        <AppSelect
+          label="Filter"
+          ariaLabel="Track filter"
+          value={queue.track}
+          options={[
+            { value: "", label: "All assigned tracks" },
+            ...event.tracks.map((track) => ({ value: track.id, label: track.name })),
+          ]}
+          onValueChange={(track) => setQueue({ track })}
+        />
+        <AppSelect
+          label="Sort"
+          ariaLabel="Sort submissions"
+          value={queue.sort}
+          options={[
+            { value: "newest", label: "Newest" },
+            { value: "oldest", label: "Oldest" },
+            { value: "title-asc", label: "Title A-Z" },
+            { value: "speaker-asc", label: "Speaker A-Z" },
+          ]}
+          onValueChange={(sort) =>
+            setQueue({ sort: sort as ProposalQueueState["sort"] })
+          }
+        />
         <span className="toolbar-spacer" />
         {currentRole === "admin" ? (
-          <button
-            className="btn btn-secondary btn-sm"
-            type="button"
-            aria-expanded={routingOpen}
-            onClick={() => setRoutingOpen((open) => !open)}
-          >
-            Reviewer routing
-          </button>
+          <Dialog.Root open={routingOpen} onOpenChange={setRoutingOpen}>
+            <Dialog.Trigger className="btn btn-secondary btn-sm">
+              Reviewer routing
+            </Dialog.Trigger>
+            <Dialog.Portal>
+              <Dialog.Backdrop className="dialog-backdrop" />
+              <Dialog.Viewport className="dialog-viewport">
+                <Dialog.Popup className="routing-dialog">
+                  <div className="routing-dialog-header">
+                    <div>
+                      <p className="eyebrow">Committee access</p>
+                      <Dialog.Title>Reviewer routing</Dialog.Title>
+                      <Dialog.Description>
+                        Grant or remove track access for signed-in reviewers.
+                      </Dialog.Description>
+                    </div>
+                    <Dialog.Close className="dialog-close" aria-label="Close reviewer routing">
+                      ×
+                    </Dialog.Close>
+                  </div>
+                  <ReviewerRouting event={event} />
+                </Dialog.Popup>
+              </Dialog.Viewport>
+            </Dialog.Portal>
+          </Dialog.Root>
         ) : null}
         <a className="btn btn-primary btn-sm" href={cfpHref}>
           Open CFP form
         </a>
       </div>
 
-      {routingOpen && currentRole === "admin" ? (
-        <ReviewerRouting event={event} />
-      ) : null}
-
-      <div className="split">
+      <div
+        className="split"
+        style={{ "--inspector-width": `${inspectorWidth}px` } as CSSProperties}
+      >
         <div className="table-wrap">
           {query.isPending ? (
             <p className="empty-state">Loading submissions…</p>
@@ -249,15 +286,6 @@ export function SubmissionsWorkspace({
                       key={proposal.id}
                       data-id={proposal.id}
                       aria-selected={selected?.id === proposal.id}
-                      tabIndex={0}
-                      onClick={() => onSelectProposal?.(proposal.id)}
-                      onKeyDown={(key) => {
-                        if (key.target !== key.currentTarget) return;
-                        if (key.key === "Enter" || key.key === " ") {
-                          key.preventDefault();
-                          onSelectProposal?.(proposal.id);
-                        }
-                      }}
                     >
                       <td>
                         <span className="avatar" aria-hidden="true">
@@ -265,25 +293,16 @@ export function SubmissionsWorkspace({
                         </span>
                       </td>
                       <td>
-                        <div className="talk">
-                          <ProposalLink
-                            href={href}
-                            proposalId={proposal.id}
-                            onSelectProposal={onSelectProposal}
-                          >
-                            {proposal.title}
-                          </ProposalLink>
-                        </div>
-                        <div className="talk-sub">
-                          {proposal.speakerName} ·{" "}
-                          <ProposalLink
-                            href={href}
-                            proposalId={proposal.id}
-                            onSelectProposal={onSelectProposal}
-                          >
-                            {proposal.id}
-                          </ProposalLink>
-                        </div>
+                        <ProposalLink
+                          href={href}
+                          proposalId={proposal.id}
+                          onSelectProposal={onSelectProposal}
+                        >
+                          <span className="talk">{proposal.title}</span>
+                          <span className="talk-sub">
+                            {proposal.speakerName} · {proposal.id}
+                          </span>
+                        </ProposalLink>
                       </td>
                       <td>
                         <span className={`track ${trackClass(proposal.trackId)}`}>
@@ -303,6 +322,27 @@ export function SubmissionsWorkspace({
             </table>
           )}
         </div>
+
+        <div
+          className="inspector-resizer"
+          role="separator"
+          aria-label="Resize proposal detail"
+          aria-orientation="vertical"
+          aria-valuemin={380}
+          aria-valuemax={720}
+          aria-valuenow={inspectorWidth}
+          tabIndex={0}
+          onPointerDown={startInspectorResize}
+          onKeyDown={(key) => {
+            if (key.key === "ArrowLeft") {
+              key.preventDefault();
+              setInspectorWidth((width) => Math.min(720, width + 24));
+            } else if (key.key === "ArrowRight") {
+              key.preventDefault();
+              setInspectorWidth((width) => Math.max(380, width - 24));
+            }
+          }}
+        />
 
         <aside
           className={`inspector${selectedProposalId ? " has-selection" : ""}`}
@@ -350,9 +390,9 @@ function ProposalLink({
 }) {
   return (
     <a
+      className="proposal-row-link"
       href={href}
       onClick={(click) => {
-        click.stopPropagation();
         if (
           click.button !== 0 ||
           click.altKey ||
@@ -375,6 +415,8 @@ function ReviewerRouting({ event }: { event: EventRecord }) {
   const queryClient = useQueryClient();
   const [email, setEmail] = useState("");
   const [trackIds, setTrackIds] = useState<string[]>([]);
+  const [editingReviewerId, setEditingReviewerId] = useState<string | null>(null);
+  const [editTrackIds, setEditTrackIds] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const query = useQuery({
     queryKey: ["reviewers", event.id],
@@ -389,14 +431,26 @@ function ReviewerRouting({ event }: { event: EventRecord }) {
       void queryClient.invalidateQueries({ queryKey: ["reviewers", event.id] });
     },
   });
+  const revokeMutation = useMutation({
+    mutationFn: (reviewerId: string) => revokeReviewerAccess(event.id, reviewerId),
+    onSuccess: () => {
+      setMessage("Reviewer access removed.");
+      void queryClient.invalidateQueries({ queryKey: ["reviewers", event.id] });
+    },
+  });
+  const editMutation = useMutation({
+    mutationFn: ({ reviewerId, trackIds }: { reviewerId: string; trackIds: string[] }) =>
+      updateReviewerTracks(event.id, reviewerId, trackIds),
+    onSuccess: () => {
+      setMessage("Reviewer tracks saved.");
+      setEditingReviewerId(null);
+      setEditTrackIds([]);
+      void queryClient.invalidateQueries({ queryKey: ["reviewers", event.id] });
+    },
+  });
 
   return (
-    <section className="reviewer-routing" aria-labelledby="reviewer-routing-title">
-      <div>
-        <p className="eyebrow">Committee access</p>
-        <h2 id="reviewer-routing-title">Reviewer routing</h2>
-        <p>Assign people who have already signed in. Reviewers only see proposals in these tracks.</p>
-      </div>
+    <section className="reviewer-routing" aria-label="Reviewer access controls">
       <form
         onSubmit={(submit) => {
           submit.preventDefault();
@@ -440,9 +494,9 @@ function ReviewerRouting({ event }: { event: EventRecord }) {
           {mutation.isPending ? "Saving…" : "Grant review access"}
         </button>
       </form>
-      {mutation.isError ? (
+      {mutation.isError || editMutation.isError ? (
         <p className="form-message" data-tone="error" role="alert">
-          {mutation.error.message}
+          {mutation.error?.message ?? editMutation.error?.message}
         </p>
       ) : message ? (
         <p className="form-message" role="status">{message}</p>
@@ -460,13 +514,75 @@ function ReviewerRouting({ event }: { event: EventRecord }) {
         <ul className="reviewer-list">
           {query.data.map((reviewer) => (
             <li key={reviewer.id}>
-              <strong>{reviewer.name}</strong>
-              <span>{reviewer.email}</span>
-              <span>
+              <div>
+                <strong>{reviewer.name}</strong>
+                <span>{reviewer.email}</span>
+              </div>
+              <button
+                className="reviewer-tracks reviewer-tracks-button"
+                type="button"
+                aria-label={`Edit access for ${reviewer.name}`}
+                onClick={() => {
+                  setEditingReviewerId(reviewer.id);
+                  setEditTrackIds(reviewer.trackIds);
+                  setMessage(null);
+                }}
+              >
                 {reviewer.trackIds
                   .map((trackId) => event.tracks.find((track) => track.id === trackId)?.name ?? trackId)
                   .join(" · ")}
-              </span>
+              </button>
+              <button
+                className="btn btn-secondary btn-sm"
+                type="button"
+                aria-label={`Remove access for ${reviewer.name}`}
+                disabled={revokeMutation.isPending}
+                onClick={() => revokeMutation.mutate(reviewer.id)}
+              >
+                Remove access
+              </button>
+              {editingReviewerId === reviewer.id ? (
+                <fieldset className="reviewer-track-editor">
+                  <legend>Edit assigned tracks</legend>
+                  <div className="reviewer-track-options">
+                    {event.tracks.map((track) => (
+                      <label key={track.id}>
+                        <input
+                          type="checkbox"
+                          checked={editTrackIds.includes(track.id)}
+                          onChange={(change) =>
+                            setEditTrackIds((current) =>
+                              change.target.checked
+                                ? [...current, track.id]
+                                : current.filter((trackId) => trackId !== track.id),
+                            )
+                          }
+                        />
+                        {track.name}
+                      </label>
+                    ))}
+                  </div>
+                  <div className="reviewer-track-actions">
+                    <button
+                      className="btn btn-primary btn-sm"
+                      type="button"
+                      disabled={editMutation.isPending || editTrackIds.length === 0}
+                      onClick={() =>
+                        editMutation.mutate({ reviewerId: reviewer.id, trackIds: editTrackIds })
+                      }
+                    >
+                      {editMutation.isPending ? "Saving…" : "Save tracks"}
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      type="button"
+                      onClick={() => setEditingReviewerId(null)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </fieldset>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -748,15 +864,22 @@ function ProposalInspector({
           {auditEvents.length === 0 ? (
             <p>No review changes yet.</p>
           ) : (
-            <ol>
-              {auditEvents.map((audit) => (
-                <li key={audit.id}>
-                  <strong>{audit.actorName}</strong> set {statusLabel(audit.toStatus)}
-                  {audit.committeeNoteChanged ? " and updated the committee note" : ""}.
-                  <time dateTime={audit.createdAt}>{formatSubmittedAt(audit.createdAt)}</time>
-                </li>
-              ))}
-            </ol>
+            <details>
+              <summary>
+                <strong>{auditEvents[0]!.actorName}</strong> set{" "}
+                {statusLabel(auditEvents[0]!.toStatus)}
+                <span>{formatSubmittedAt(auditEvents[0]!.createdAt)}</span>
+              </summary>
+              <ol>
+                {auditEvents.map((audit) => (
+                  <li key={audit.id}>
+                    <strong>{audit.actorName}</strong> set {statusLabel(audit.toStatus)}
+                    {audit.committeeNoteChanged ? " and updated the committee note" : ""}.
+                    <time dateTime={audit.createdAt}>{formatSubmittedAt(audit.createdAt)}</time>
+                  </li>
+                ))}
+              </ol>
+            </details>
           )}
         </section>
         <p className="internal-only-note">Internal only. No speaker email is sent when this decision changes.</p>

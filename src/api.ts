@@ -204,7 +204,9 @@ export async function abandonUpload(
   });
   if (response.status === 404) return;
   if (!response.ok) {
-    const body = await readJson<{ error?: string }>(response).catch(() => ({}));
+    const body = await readJson<{ error?: string }>(response).catch(
+      (): { error?: string } => ({}),
+    );
     throw new ApiError(
       body && "error" in body && body.error
         ? body.error
@@ -414,6 +416,52 @@ export async function grantReviewerTracks(
   if (!response.ok || !("reviewer" in body)) {
     throw new ApiError(
       "error" in body ? body.error : "Unable to save reviewer routing",
+      response.status,
+      body,
+    );
+  }
+  return body.reviewer;
+}
+
+export async function revokeReviewerAccess(
+  eventId: string,
+  reviewerId: string,
+): Promise<void> {
+  const response = await fetch(
+    `/api/events/${eventId}/reviewers/${encodeURIComponent(reviewerId)}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    const body: { error?: string } = await readJson<{ error?: string }>(
+      response,
+    ).catch(() => ({}));
+    throw new ApiError(
+      body.error ?? "Unable to remove reviewer access",
+      response.status,
+      body,
+    );
+  }
+}
+
+export async function updateReviewerTracks(
+  eventId: string,
+  reviewerId: string,
+  trackIds: string[],
+): Promise<ReviewerAssignment> {
+  const response = await fetch(
+    `/api/events/${eventId}/reviewers/${encodeURIComponent(reviewerId)}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ trackIds }),
+    },
+  );
+  const body = await readJson<{ reviewer: ReviewerAssignment } | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("reviewer" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to update reviewer tracks",
       response.status,
       body,
     );

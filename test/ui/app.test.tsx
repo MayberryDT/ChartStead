@@ -209,9 +209,9 @@ describe("organizer application", () => {
     expect(screen.getByLabelText("4 tracks")).toBeVisible();
     expect(screen.getByLabelText("3 rooms")).toBeVisible();
 
-    await userEvent.selectOptions(
-      screen.getByRole("combobox", { name: "Event" }),
-      "ai-engineer-worlds-fair-2026",
+    await userEvent.click(screen.getByRole("combobox", { name: "Event" }));
+    await userEvent.click(
+      screen.getByRole("option", { name: "AI Engineer World's Fair 2026" }),
     );
 
     expect(
@@ -534,26 +534,18 @@ describe("organizer application", () => {
       "aria-current",
       "page",
     );
-    expect(
-      screen.getByRole("link", { name: "Open charts for harbor operations" }),
-    ).toHaveAttribute(
-      "href",
-      "/e/pacific-open-data-summit-2026/submissions/SUB-ABCD12",
-    );
-    expect(screen.getByRole("link", { name: "SUB-ABCD12" })).toHaveAttribute(
-      "href",
-      "/e/pacific-open-data-summit-2026/submissions/SUB-ABCD12",
-    );
-    expect(
-      screen.getByRole("row", {
-        name: /Open charts for harbor operations/,
-      }),
-    ).toHaveAttribute("tabindex", "0");
-    const proposalLink = screen.getByRole("link", {
-      name: "Open charts for harbor operations",
+    const proposalRow = screen.getByRole("row", {
+      name: /Open charts for harbor operations/,
     });
+    expect(proposalRow).not.toHaveAttribute("tabindex");
+    const proposalLinks = within(proposalRow).getAllByRole("link");
+    expect(proposalLinks).toHaveLength(1);
+    expect(proposalLinks[0]).toHaveAttribute(
+      "href",
+      "/e/pacific-open-data-summit-2026/submissions/SUB-ABCD12",
+    );
     let defaultPreventedByComponent: boolean | undefined;
-    proposalLink.closest(".app")?.parentElement?.addEventListener(
+    proposalLinks[0]!.closest(".app")?.parentElement?.addEventListener(
       "click",
       (event) => {
         defaultPreventedByComponent = event.defaultPrevented;
@@ -561,11 +553,11 @@ describe("organizer application", () => {
       },
       { once: true },
     );
-    fireEvent.click(proposalLink, { ctrlKey: true });
+    fireEvent.click(proposalLinks[0]!, { ctrlKey: true });
     expect(defaultPreventedByComponent).toBe(false);
-    await userEvent.click(proposalLink);
+    await userEvent.click(proposalLinks[0]!);
     expect(await screen.findByText("Committee only")).toBeVisible();
-    expect(screen.getAllByText("SUB-ABCD12")).toHaveLength(2);
+    expect(screen.getByText("SUB-ABCD12")).toBeVisible();
   });
 
   it("preserves review queue context while saving notes and reversible decisions", async () => {
@@ -693,20 +685,19 @@ describe("organizer application", () => {
         { name: "Unreviewed" },
       ),
     ).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("combobox", { name: "Track filter" })).toHaveValue(
-      "platform",
-    );
-    expect(screen.getByRole("combobox", { name: "Sort submissions" })).toHaveValue(
-      "title-asc",
-    );
+    expect(
+      screen.getByRole("combobox", { name: "Track filter" }),
+    ).toHaveTextContent("FilterPlatform");
+    expect(
+      screen.getByRole("combobox", { name: "Sort submissions" }),
+    ).toHaveTextContent("SortTitle A-Z");
     expect(screen.getByText("A repeatable harbor data checklist.")).toBeVisible();
     expect(screen.getByText("ada-headshot.jpg")).toBeVisible();
     expect(screen.getByText("she/her")).toBeVisible();
     expect(screen.getByText(/No speaker email is sent/i)).toBeVisible();
-
-    const stableLink = screen.getByRole("link", {
-      name: "Open charts for harbor operations",
-    });
+    const stableLink = within(
+      screen.getByRole("row", { name: /Open charts for harbor operations/ }),
+    ).getByRole("link");
     expect(stableLink.getAttribute("href")).toContain(
       "/e/pacific-open-data-summit-2026/submissions/SUB-ABCD12",
     );
@@ -733,12 +724,20 @@ describe("organizer application", () => {
     ]);
     const history = screen.getByText("Review history").closest(".panel");
     expect(history).toBeTruthy();
-    expect(within(history as HTMLElement).getByText(/Demo Administrator/)).toBeVisible();
+    expect(history?.querySelector("summary")).toHaveTextContent(
+      /Demo Administrator.*Maybe/,
+    );
   });
 
   it("lets administrators route signed-in reviewers to event tracks", async () => {
     const user = userEvent.setup();
     const writes: unknown[] = [];
+    let assignedReviewer: {
+      id: string;
+      name: string;
+      email: string;
+      trackIds: string[];
+    } | null = null;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       if (url.endsWith("/api/events")) {
@@ -748,20 +747,37 @@ describe("organizer application", () => {
       }
       if (url.endsWith("/reviewers") && init?.method === "POST") {
         writes.push(JSON.parse(String(init.body)));
+        assignedReviewer = {
+          id: "reviewer-1",
+          name: "Rae Viewer",
+          email: "rae@example.com",
+          trackIds: ["platform"],
+        };
         return new Response(
-          JSON.stringify({
-            reviewer: {
-              id: "reviewer-1",
-              name: "Rae Viewer",
-              email: "rae@example.com",
-              trackIds: ["platform"],
-            },
-          }),
+          JSON.stringify({ reviewer: assignedReviewer }),
           { headers: { "content-type": "application/json" } },
         );
       }
+      if (url.endsWith("/reviewers/reviewer-1") && init?.method === "DELETE") {
+        writes.push({ remove: "reviewer-1" });
+        assignedReviewer = null;
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/reviewers/reviewer-1") && init?.method === "PATCH") {
+        const body = JSON.parse(String(init.body));
+        writes.push({ edit: body });
+        assignedReviewer = {
+          ...assignedReviewer!,
+          trackIds: body.trackIds,
+        };
+        return new Response(JSON.stringify({ reviewer: assignedReviewer }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
       if (url.endsWith("/reviewers")) {
-        return new Response(JSON.stringify({ reviewers: [] }), {
+        return new Response(JSON.stringify({ reviewers: assignedReviewer ? [assignedReviewer] : [] }), {
           headers: { "content-type": "application/json" },
         });
       }
@@ -785,6 +801,27 @@ describe("organizer application", () => {
     ).toBeVisible();
     expect(writes).toEqual([
       { email: "rae@example.com", trackIds: ["platform"] },
+    ]);
+    const editButton = await screen.findByRole("button", {
+      name: "Edit access for Rae Viewer",
+    });
+    await user.click(editButton);
+    const reviewerRow = editButton.closest("li");
+    expect(reviewerRow).toBeTruthy();
+    await user.click(within(reviewerRow as HTMLElement).getByRole("checkbox", { name: "Platform" }));
+    await user.click(within(reviewerRow as HTMLElement).getByRole("checkbox", { name: "Design Systems" }));
+    await user.click(within(reviewerRow as HTMLElement).getByRole("button", { name: "Save tracks" }));
+    expect(await screen.findByText("Reviewer tracks saved.")).toBeVisible();
+    expect(writes).toEqual([
+      { email: "rae@example.com", trackIds: ["platform"] },
+      { edit: { trackIds: ["design-systems"] } },
+    ]);
+    await user.click(await screen.findByRole("button", { name: "Remove access for Rae Viewer" }));
+    expect(await screen.findByText("Reviewer access removed.")).toBeVisible();
+    expect(writes).toEqual([
+      { email: "rae@example.com", trackIds: ["platform"] },
+      { edit: { trackIds: ["design-systems"] } },
+      { remove: "reviewer-1" },
     ]);
   });
 

@@ -825,6 +825,79 @@ export function createApp(options: AppOptions = {}) {
     });
   });
 
+  app.delete("/api/events/:eventId/reviewers/:reviewerId", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const reviewerId = c.req.param("reviewerId");
+    await c.env.AUTH_DB.batch([
+      c.env.AUTH_DB.prepare(
+        `DELETE FROM reviewer_track_assignments WHERE event_id = ? AND user_id = ?`,
+      ).bind(eventId, reviewerId),
+      c.env.AUTH_DB.prepare(
+        `DELETE FROM event_memberships
+         WHERE event_id = ? AND user_id = ? AND role = 'reviewer'`,
+      ).bind(eventId, reviewerId),
+    ]);
+    return c.json({ ok: true });
+  });
+
+  app.patch("/api/events/:eventId/reviewers/:reviewerId", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    const body = (await c.req.json().catch(() => null)) as { trackIds?: unknown } | null;
+    const trackIds = Array.isArray(body?.trackIds)
+      ? [...new Set(body.trackIds.filter((trackId): trackId is string => typeof trackId === "string"))]
+      : [];
+    if (trackIds.length === 0) {
+      return c.json({ error: "Choose at least one track" }, 400);
+    }
+    if (trackIds.some((trackId) => !seed.tracks.some((track) => track.id === trackId))) {
+      return c.json({ error: "One or more tracks do not belong to this event" }, 400);
+    }
+
+    const reviewerId = c.req.param("reviewerId");
+    const reviewer = await c.env.AUTH_DB.prepare(
+      `SELECT u.id, u.name, u.email
+       FROM event_memberships m
+       JOIN "user" u ON u.id = m.user_id
+       WHERE m.event_id = ? AND m.user_id = ? AND m.role = 'reviewer'
+       LIMIT 1`,
+    )
+      .bind(eventId, reviewerId)
+      .first<{ id: string; name: string; email: string }>();
+    if (!reviewer) return c.json({ error: "Reviewer not found" }, 404);
+
+    await c.env.AUTH_DB.batch([
+      c.env.AUTH_DB.prepare(
+        `DELETE FROM reviewer_track_assignments WHERE event_id = ? AND user_id = ?`,
+      ).bind(eventId, reviewerId),
+      ...trackIds.map((trackId) =>
+        c.env.AUTH_DB.prepare(
+          `INSERT INTO reviewer_track_assignments (event_id, user_id, track_id)
+           VALUES (?, ?, ?)`,
+        ).bind(eventId, reviewerId, trackId),
+      ),
+    ]);
+
+    return c.json({
+      reviewer: { ...reviewer, trackIds } satisfies ReviewerAssignment,
+    });
+  });
+
   app.post("/api/events/:eventId/uploads", async (c) => {
     const eventId = c.req.param("eventId");
     const seed = findSeed(eventId);

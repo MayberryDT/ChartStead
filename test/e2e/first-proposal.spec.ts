@@ -195,15 +195,14 @@ test("public CFP submit reaches organizer submissions and survives reload", asyn
 test("submissions event switch updates the permanent route", async ({ page }) => {
   await page.goto(`/e/${eventId}/submissions`);
 
-  await page
-    .getByRole("combobox", { name: "Event" })
-    .selectOption("ai-engineer-worlds-fair-2026");
+  await page.getByRole("combobox", { name: "Event" }).click();
+  await page.getByRole("option", { name: "AI Engineer World's Fair 2026" }).click();
   await expect(page).toHaveURL(/\/e\/ai-engineer-worlds-fair-2026\/submissions$/);
 
   await page.reload();
   await expect(
     page.getByRole("combobox", { name: "Event" }),
-  ).toHaveValue("ai-engineer-worlds-fair-2026");
+  ).toContainText("AI Engineer World's Fair 2026");
 });
 
 test("committee review stays internal, reversible, and durable", async ({ page }) => {
@@ -223,13 +222,14 @@ test("committee review stays internal, reversible, and durable", async ({ page }
   await expect(page.getByRole("button", { name: "Back to queue" })).toBeFocused();
   await page.getByRole("button", { name: "Back to queue" }).click();
   await expect(page).toHaveURL(new RegExp(`submissions\\?q=${proposalId}$`));
-  await expect(row).toBeFocused();
-  await row.getByRole("link", { name: proposalId }).click();
+  const proposalLink = row.getByRole("link", { name: proposalId });
+  await expect(proposalLink).toBeFocused();
+  await proposalLink.click();
   await expect(page.getByRole("button", { name: "Back to queue" })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(page).toHaveURL(new RegExp(`submissions\\?q=${proposalId}$`));
-  await expect(row).toBeFocused();
-  await row.getByRole("link", { name: proposalId }).click();
+  await expect(proposalLink).toBeFocused();
+  await proposalLink.click();
 
   await page.getByLabel("Committee note").fill(note);
   await page.getByRole("button", { name: "Save committee note" }).click();
