@@ -6,4 +6,8 @@ export interface SecretBindings {
   AUTH_EMAIL_FROM?: string;
 }
 
-export type AppBindings = CloudflareBindings & SecretBindings;
+export interface AssetBindings {
+  ASSETS?: R2Bucket;
+}
+
+export type AppBindings = CloudflareBindings & SecretBindings & AssetBindings;

@@ -1,4 +1,6 @@
+import { isUploadedAssetAnswer } from "../shared/cfp-definition";
 import type {
+  CoSpeakerInput,
   EventRecord,
   OrganizerProposal,
   ProposalInput,
@@ -8,21 +10,80 @@ import type {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+function readString(source: Record<string, unknown>, key: string): string {
+  const value = source[key];
+  return typeof value === "string" ? value : "";
+}
+
+function normalizeCoSpeakers(value: unknown): CoSpeakerInput[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => {
+    const record =
+      entry && typeof entry === "object"
+        ? (entry as Record<string, unknown>)
+        : {};
+    return {
+      name: readString(record, "name"),
+      email: readString(record, "email"),
+      biography: readString(record, "biography"),
+    };
+  });
+}
+
+function normalizeSpeakersPanel(source: Record<string, unknown>): {
+  speakerName: string;
+  speakerEmail: string;
+  biography: string;
+  coSpeakers: CoSpeakerInput[];
+} | null {
+  if (!Array.isArray(source.speakers) || source.speakers.length === 0) {
+    return null;
+  }
+  const panels = source.speakers.map((entry) => {
+    const record =
+      entry && typeof entry === "object"
+        ? (entry as Record<string, unknown>)
+        : {};
+    return {
+      name: readString(record, "name") || readString(record, "speakerName"),
+      email: readString(record, "email") || readString(record, "speakerEmail"),
+      biography:
+        readString(record, "biography") || readString(record, "bio"),
+    };
+  });
+  const [primary, ...rest] = panels;
+  return {
+    speakerName: primary.name,
+    speakerEmail: primary.email,
+    biography: primary.biography,
+    coSpeakers: rest,
+  };
+}
+
 export function normalizeProposalInput(body: unknown): ProposalInput {
   const source =
     body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-  const read = (key: keyof ProposalInput) => {
-    const value = source[key];
-    return typeof value === "string" ? value : "";
-  };
+  const fromPanel = normalizeSpeakersPanel(source);
+  const supportingFileRaw = source.supportingFile;
+  const supportingFile =
+    supportingFileRaw === null
+      ? null
+      : isUploadedAssetAnswer(supportingFileRaw)
+        ? supportingFileRaw
+        : undefined;
+
   return {
-    title: read("title"),
-    abstract: read("abstract"),
-    trackId: read("trackId"),
-    speakerName: read("speakerName"),
-    speakerEmail: read("speakerEmail"),
-    biography: read("biography"),
-    supportingLink: read("supportingLink"),
+    title: readString(source, "title"),
+    abstract: readString(source, "abstract"),
+    trackId: readString(source, "trackId"),
+    speakerName: fromPanel?.speakerName ?? readString(source, "speakerName"),
+    speakerEmail: fromPanel?.speakerEmail ?? readString(source, "speakerEmail"),
+    biography: fromPanel?.biography ?? readString(source, "biography"),
+    supportingLink: readString(source, "supportingLink"),
+    sessionFormat: readString(source, "sessionFormat"),
+    workshopDuration: readString(source, "workshopDuration"),
+    coSpeakers: fromPanel?.coSpeakers ?? normalizeCoSpeakers(source.coSpeakers),
+    supportingFile: supportingFile === undefined ? null : supportingFile,
   };
 }
 
@@ -64,20 +125,52 @@ export function validateProposalInput(
   if (supportingLink) {
     if (supportingLink.length > 2_048) {
       errors.supportingLink = "Use 2048 characters or fewer.";
-      return { errors, values: input };
-    }
-    try {
-      const url = new URL(supportingLink);
-      if (url.protocol !== "http:" && url.protocol !== "https:") {
-        errors.supportingLink = "Use an http or https link.";
+    } else {
+      try {
+        const url = new URL(supportingLink);
+        if (url.protocol !== "http:" && url.protocol !== "https:") {
+          errors.supportingLink = "Use an http or https link.";
+        }
+      } catch {
+        errors.supportingLink = "Enter a valid URL.";
       }
-    } catch {
-      errors.supportingLink = "Enter a valid URL.";
     }
   }
 
+  for (const [index, speaker] of (input.coSpeakers ?? []).entries()) {
+    if (!speaker.name.trim()) {
+      errors[`coSpeakers.${index}.name`] = "Enter the co-speaker name.";
+    }
+    if (!speaker.email.trim() || !EMAIL_RE.test(speaker.email.trim())) {
+      errors[`coSpeakers.${index}.email`] = "Enter a valid co-speaker email.";
+    }
+  }
+
+  if (input.sessionFormat === "workshop" && !input.workshopDuration?.trim()) {
+    errors.workshopDuration = "Enter a workshop duration.";
+  }
+
   if (Object.keys(errors).length === 0) return null;
-  return { errors, values: input };
+  return {
+    errors,
+    values: {
+      title: input.title,
+      abstract: input.abstract,
+      trackId: input.trackId,
+      speakerName: input.speakerName,
+      speakerEmail: input.speakerEmail,
+      biography: input.biography,
+      supportingLink: input.supportingLink,
+      sessionFormat: input.sessionFormat ?? "",
+      workshopDuration: input.workshopDuration ?? "",
+      coSpeakers: (input.coSpeakers ?? []).map((speaker) => ({
+        name: speaker.name,
+        email: speaker.email,
+        biography: speaker.biography,
+      })),
+      supportingFile: input.supportingFile ?? null,
+    },
+  };
 }
 
 export function createStableProposalId(): string {
@@ -100,5 +193,21 @@ export function toPublicProposal(proposal: OrganizerProposal): PublicProposal {
     trackName: proposal.trackName,
     speakerName: proposal.speakerName,
     submittedAt: proposal.submittedAt,
+  };
+}
+
+/** Explicit allowlist for submitter edit sessions — never spread OrganizerProposal. */
+export function toSubmitterProposal(
+  proposal: OrganizerProposal,
+): PublicProposal & { speakerEmail: string } {
+  return {
+    id: proposal.id,
+    eventId: proposal.eventId,
+    title: proposal.title,
+    trackId: proposal.trackId,
+    trackName: proposal.trackName,
+    speakerName: proposal.speakerName,
+    submittedAt: proposal.submittedAt,
+    speakerEmail: proposal.speakerEmail,
   };
 }

@@ -43,7 +43,6 @@ Use the single-context domain-doc layout. See [docs/agents/domain.md](docs/agent
 - Cloudflare bindings and environments: [`wrangler.jsonc`](wrangler.jsonc)
 - Implementation work: [`.scratch/chartstead-competition-build/`](.scratch/chartstead-competition-build/)
 - Course Check specification and implementation work: [`.scratch/chartstead-course-check/`](.scratch/chartstead-course-check/)
-- Ticket 03 implementation branch/worktree (when Tyler asks): `.worktrees/ticket-03-guided-cfp` on `ticket-03-guided-cfp`
 
 ## Private / bulk source material
 

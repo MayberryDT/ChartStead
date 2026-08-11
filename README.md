@@ -26,13 +26,20 @@ Copy `.dev.vars.example` to `.dev.vars`. Names only — never commit values:
 | Name | Purpose |
 | --- | --- |
 | `BETTER_AUTH_URL` | Public origin used by Better Auth callbacks |
-| `BETTER_AUTH_SECRET` | Better Auth signing secret (≥32 characters) |
+| `BETTER_AUTH_SECRET` | Better Auth signing secret (≥32 characters). **Required for signed submitter edit links** — proposal submissions return `503` without it. |
 | `GOOGLE_CLIENT_ID` | Google OAuth client id |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
-| `RESEND_API_KEY` | Resend API key for magic-link delivery |
-| `AUTH_EMAIL_FROM` | From address for magic-link email |
+| `RESEND_API_KEY` | Resend API key for magic-link auth and submission confirmation delivery |
+| `AUTH_EMAIL_FROM` | From address for magic-link auth and confirmation email |
 
-Remote production and demo Workers use the same secret names via `wrangler secret put`. Binding names (not secrets) live in `wrangler.jsonc`: `AUTH_DB`, `EVENT_STORE`, and environment-specific D1 database ids.
+Remote production and demo Workers use the same secret names via `wrangler secret put`. Binding names (not secrets) live in `wrangler.jsonc`: `AUTH_DB`, `EVENT_STORE`, `ASSETS`, and environment-specific D1 / R2 resource ids.
+
+### Deployment gates
+
+- **`BETTER_AUTH_SECRET`** must be set before public submissions work. Without it, the Worker refuses to create proposals (signed edit links cannot be issued) and returns `503`.
+- **`RESEND_API_KEY` + `AUTH_EMAIL_FROM`** are required for real confirmation email delivery. When either is missing, confirmation messages stay **queued** in the Durable Object outbox (they are not pretended sent). A `*/5 * * * *` cron flushes due outbox rows when Resend is configured.
+- **`ASSETS` R2 buckets** (`chartstead-assets` default, `chartstead-assets-demo` for demo) must exist before file uploads work.
+- Local Worker tests inject an in-memory email sender. They prove outbox state transitions and React Email rendering; they do **not** prove live Resend provider delivery.
 
 ## Local setup
 

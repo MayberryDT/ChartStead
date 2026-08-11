@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — First proposal end to end.
 
-**Status:** done on branch `ticket-03-guided-cfp` (`2cf33f8`); not merged to `main` yet
+**Status:** done (merged to `main`)
 
 - [x] An organizer can create, name, preview, publish, close, and reopen more than one CFP form for an event.
 - [x] The guided builder covers welcome content, proposal fields, track choices, speaker and repeatable co-speaker information, supporting links, and files.
@@ -18,3 +18,5 @@
 - [x] Tests cover draft/published separation, conditional behavior, upload failure, confirmation delivery state, and signed-link authorization.
 
 ## Comments
+
+Implemented on branch `ticket-03-guided-cfp` (`2cf33f8`), merged to `main`.

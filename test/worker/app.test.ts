@@ -1,7 +1,11 @@
 import { env, evictDurableObject, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
-import type { EventRecord, PublishedCfpForm } from "../../shared/events";
+import type {
+  EventRecord,
+  PublishedCfpForm,
+  SubmissionAnswers,
+} from "../../shared/events";
 import { createApp } from "../../worker/app";
 import { createSeedProposals } from "../../worker/seed-proposals";
 
@@ -15,7 +19,26 @@ const demoApp = createApp({
       "ai-engineer-worlds-fair-2026",
     ],
   }),
+  signingSecret: "test-worker-signing-secret-32chars!!",
 });
+
+function mainCfpAnswers(overrides: SubmissionAnswers = {}): SubmissionAnswers {
+  return {
+    title: "Main CFP proposal",
+    abstract: "A valid abstract for the main form.",
+    trackId: "platform",
+    sessionFormat: "talk",
+    speakers: [
+      {
+        name: "Main Speaker",
+        email: "main@example.com",
+        biography: "A short biography.",
+      },
+    ],
+    supportingLink: "",
+    ...overrides,
+  };
+}
 
 describe("ChartStead Worker", () => {
   it("reports health through the HTTP application", async () => {
@@ -128,11 +151,17 @@ describe("ChartStead Worker", () => {
         status: "published",
         definitionVersion: 1,
         definition: {
-          elements: expect.arrayContaining([
-            expect.objectContaining({ name: "title", type: "text" }),
-            expect.objectContaining({ name: "trackId", type: "dropdown" }),
-            expect.objectContaining({ name: "speakerEmail", type: "text" }),
-          ]),
+          schemaVersion: 1,
+          runtime: {
+            engine: "surveyjs",
+            survey: {
+              elements: expect.arrayContaining([
+                expect.objectContaining({ name: "title", type: "text" }),
+                expect.objectContaining({ name: "trackId", type: "dropdown" }),
+                expect.objectContaining({ name: "speakers", type: "paneldynamic" }),
+              ]),
+            },
+          },
         },
       },
     });
@@ -140,17 +169,73 @@ describe("ChartStead Worker", () => {
 
   it("keeps published form versions as immutable snapshots", async () => {
     const store = env.EVENT_STORE.getByName("form-version-snapshot-test");
+    const baseDefinition = {
+      schemaVersion: 1 as const,
+      definitionId: "main-cfp",
+      definitionVersion: 1,
+      eventId: "form-version-snapshot-test",
+      status: "published" as const,
+      opensAt: null,
+      closesAt: null,
+      runtime: {
+        engine: "surveyjs" as const,
+        engineMajor: 2 as const,
+        survey: {
+          showTitle: false as const,
+          showQuestionNumbers: "off" as const,
+          checkErrorsMode: "onComplete" as const,
+          textUpdateMode: "onTyping" as const,
+          questionErrorLocation: "bottom" as const,
+          completeText: "Submit proposal",
+          requiredMark: "*" as const,
+          elements: [
+            {
+              type: "text" as const,
+              name: "title",
+              title: "Version one",
+              isRequired: true,
+            },
+          ],
+        },
+      },
+      chartstead: {
+        template: "standard-cfp" as const,
+        protectedNames: ["title", "abstract", "trackId", "speakers"],
+        proposalTitleName: "title" as const,
+        trackQuestionName: "trackId" as const,
+        speakerPanelName: "speakers" as const,
+        uploadQuestionNames: [] as string[],
+      },
+    };
     const versionOne: PublishedCfpForm = {
       id: "main-cfp",
+      name: "Main CFP",
       status: "published",
       definitionVersion: 1,
-      definition: { title: "Version one" },
+      definition: baseDefinition,
       publishedAt: "2026-08-01T00:00:00.000Z",
     };
     const versionTwo: PublishedCfpForm = {
       ...versionOne,
       definitionVersion: 2,
-      definition: { title: "Version two" },
+      definition: {
+        ...baseDefinition,
+        definitionVersion: 2,
+        runtime: {
+          ...baseDefinition.runtime,
+          survey: {
+            ...baseDefinition.runtime.survey,
+            elements: [
+              {
+                type: "text",
+                name: "title",
+                title: "Version two",
+                isRequired: true,
+              },
+            ],
+          },
+        },
+      },
       publishedAt: "2026-08-02T00:00:00.000Z",
     };
 
@@ -158,16 +243,44 @@ describe("ChartStead Worker", () => {
     await store.seedPublishedFormIfEmpty(versionTwo);
     await store.seedPublishedFormIfEmpty({
       ...versionOne,
-      definition: { title: "Mutated version one" },
+      definition: {
+        ...baseDefinition,
+        runtime: {
+          ...baseDefinition.runtime,
+          survey: {
+            ...baseDefinition.runtime.survey,
+            elements: [
+              {
+                type: "text",
+                name: "title",
+                title: "Mutated version one",
+                isRequired: true,
+              },
+            ],
+          },
+        },
+      },
     });
 
     await expect(store.getFormVersion("main-cfp", 1)).resolves.toMatchObject({
       definitionVersion: 1,
-      definition: { title: "Version one" },
+      definition: {
+        runtime: {
+          survey: {
+            elements: [expect.objectContaining({ title: "Version one" })],
+          },
+        },
+      },
     });
     await expect(store.getPublishedForm()).resolves.toMatchObject({
       definitionVersion: 2,
-      definition: { title: "Version two" },
+      definition: {
+        runtime: {
+          survey: {
+            elements: [expect.objectContaining({ title: "Version two" })],
+          },
+        },
+      },
     });
   });
 
@@ -237,8 +350,21 @@ describe("ChartStead Worker", () => {
     };
 
     await store.seedIfEmpty(event);
-    const operational = await store.createProposal(
-      {
+    const created = await store.createProposal({
+      formId: "main-cfp",
+      formDefinitionVersion: 1,
+      answers: mainCfpAnswers({
+        title: "Existing operational proposal",
+        abstract: "This proposal predates demo row seeding.",
+        speakers: [
+          {
+            name: "Existing Speaker",
+            email: "existing@example.com",
+            biography: "Existing biography.",
+          },
+        ],
+      }),
+      normalized: {
         title: "Existing operational proposal",
         abstract: "This proposal predates demo row seeding.",
         trackId: "platform",
@@ -246,10 +372,12 @@ describe("ChartStead Worker", () => {
         speakerEmail: "existing@example.com",
         biography: "Existing biography.",
         supportingLink: "",
+        sessionFormat: "talk",
       },
-      "main-cfp",
-      1,
-    );
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) throw new Error("expected proposal create");
+    const operational = created.proposal;
 
     await store.seedProposalsIfNeeded(createSeedProposals(event));
 
@@ -265,16 +393,22 @@ describe("ChartStead Worker", () => {
 
   it("accepts a public proposal, assigns a stable id, and keeps committee fields private", async () => {
     const eventId = "pacific-open-data-summit-2026";
+    const answers = mainCfpAnswers({
+      title: "Open charts for harbor operations",
+      abstract: "A talk about making open data useful on the waterfront.",
+      speakers: [
+        {
+          name: "Ada Harbor",
+          email: "ada@example.com",
+          biography: "Harbor systems engineer and open data advocate.",
+        },
+      ],
+      supportingLink: "https://example.com/ada-harbor",
+    });
     const payload = {
       formId: "main-cfp",
       formDefinitionVersion: 1,
-      title: "Open charts for harbor operations",
-      abstract: "A talk about making open data useful on the waterfront.",
-      trackId: "platform",
-      speakerName: "Ada Harbor",
-      speakerEmail: "ada@example.com",
-      biography: "Harbor systems engineer and open data advocate.",
-      supportingLink: "https://example.com/ada-harbor",
+      answers,
     };
 
     const before = await env.EVENT_STORE.getByName(eventId).getEvent();
@@ -309,8 +443,8 @@ describe("ChartStead Worker", () => {
     }>();
     expect(created.proposal.id).toMatch(/^SUB-[A-Z0-9]+$/);
     expect(created.proposal).toMatchObject({
-      title: payload.title,
-      speakerName: payload.speakerName,
+      title: answers.title,
+      speakerName: "Ada Harbor",
       trackId: "platform",
     });
     expect(created.proposal).not.toHaveProperty("committeeNote");
@@ -338,8 +472,8 @@ describe("ChartStead Worker", () => {
     }>();
     expect(publicBody.proposal).toMatchObject({
       id: created.proposal.id,
-      title: payload.title,
-      speakerName: payload.speakerName,
+      title: answers.title,
+      speakerName: "Ada Harbor",
     });
     expect(publicBody.proposal).not.toHaveProperty("committeeNote");
     expect(publicBody.proposal).not.toHaveProperty("speakerEmail");
@@ -359,8 +493,12 @@ describe("ChartStead Worker", () => {
         id: created.proposal.id,
         formId: "main-cfp",
         formDefinitionVersion: 1,
-        speakerEmail: payload.speakerEmail,
+        speakerEmail: "ada@example.com",
         committeeNote: "",
+        answers: expect.objectContaining({
+          title: answers.title,
+          supportingLink: answers.supportingLink,
+        }),
       },
     });
 
@@ -381,11 +519,11 @@ describe("ChartStead Worker", () => {
     expect(listed.proposals).toEqual([
       expect.objectContaining({
         id: created.proposal.id,
-        title: payload.title,
-        speakerName: payload.speakerName,
-        speakerEmail: payload.speakerEmail,
-        biography: payload.biography,
-        supportingLink: payload.supportingLink,
+        title: answers.title,
+        speakerName: "Ada Harbor",
+        speakerEmail: "ada@example.com",
+        biography: "Harbor systems engineer and open data advocate.",
+        supportingLink: answers.supportingLink,
         status: "unreviewed",
         committeeNote: "",
       }),
@@ -416,7 +554,7 @@ describe("ChartStead Worker", () => {
     expect(reloaded.proposals).toEqual([
       expect.objectContaining({
         id: created.proposal.id,
-        title: payload.title,
+        title: answers.title,
       }),
     ]);
   });
@@ -433,13 +571,17 @@ describe("ChartStead Worker", () => {
         body: JSON.stringify({
           formId: "main-cfp",
           formDefinitionVersion: 999,
-          title: "Stale form proposal",
-          abstract: "A valid abstract from a stale form.",
-          trackId: "platform",
-          speakerName: "Stale Speaker",
-          speakerEmail: "stale@example.com",
-          biography: "A valid biography.",
-          supportingLink: "",
+          answers: mainCfpAnswers({
+            title: "Stale form proposal",
+            abstract: "A valid abstract from a stale form.",
+            speakers: [
+              {
+                name: "Stale Speaker",
+                email: "stale@example.com",
+                biography: "A valid biography.",
+              },
+            ],
+          }),
         }),
       },
     );
@@ -457,13 +599,22 @@ describe("ChartStead Worker", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          title: "",
-          abstract: "Kept abstract",
-          trackId: "not-a-track",
-          speakerName: "Kept speaker",
-          speakerEmail: "not-an-email",
-          biography: "",
-          supportingLink: "ftp://bad.example",
+          formId: "main-cfp",
+          formDefinitionVersion: 1,
+          answers: {
+            title: "",
+            abstract: "Kept abstract",
+            trackId: "not-a-track",
+            sessionFormat: "talk",
+            speakers: [
+              {
+                name: "Kept speaker",
+                email: "not-an-email",
+                biography: "",
+              },
+            ],
+            supportingLink: "ftp://bad.example",
+          },
         }),
       },
     );
@@ -474,16 +625,20 @@ describe("ChartStead Worker", () => {
         title: "",
         abstract: "Kept abstract",
         trackId: "not-a-track",
-        speakerName: "Kept speaker",
-        speakerEmail: "not-an-email",
-        biography: "",
+        speakers: [
+          {
+            name: "Kept speaker",
+            email: "not-an-email",
+            biography: "",
+          },
+        ],
         supportingLink: "ftp://bad.example",
       },
       errors: {
         title: expect.any(String),
         trackId: expect.any(String),
-        speakerEmail: expect.any(String),
-        biography: expect.any(String),
+        "speakers.0.email": expect.any(String),
+        "speakers.0.biography": expect.any(String),
         supportingLink: expect.any(String),
       },
     });
@@ -497,13 +652,19 @@ describe("ChartStead Worker", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          title: "x".repeat(161),
-          abstract: "Valid abstract",
-          trackId: "platform",
-          speakerName: "Valid Speaker",
-          speakerEmail: "valid@example.com",
-          biography: "Valid biography",
-          supportingLink: "",
+          formId: "main-cfp",
+          formDefinitionVersion: 1,
+          answers: mainCfpAnswers({
+            title: "x".repeat(161),
+            abstract: "Valid abstract",
+            speakers: [
+              {
+                name: "Valid Speaker",
+                email: "valid@example.com",
+                biography: "Valid biography",
+              },
+            ],
+          }),
         }),
       },
     );
@@ -558,13 +719,18 @@ describe("ChartStead Worker", () => {
     const payload = {
       formId: "main-cfp",
       formDefinitionVersion: 1,
-      title: "Rate limit test",
-      abstract: "A valid abstract for rate limiting.",
-      trackId: "agents",
-      speakerName: "Rate Limited Speaker",
-      speakerEmail: "rate@example.com",
-      biography: "A valid biography.",
-      supportingLink: "",
+      answers: mainCfpAnswers({
+        title: "Rate limit test",
+        abstract: "A valid abstract for rate limiting.",
+        trackId: "agents",
+        speakers: [
+          {
+            name: "Rate Limited Speaker",
+            email: "rate@example.com",
+            biography: "A valid biography.",
+          },
+        ],
+      }),
     };
 
     for (let index = 0; index < 20; index += 1) {
