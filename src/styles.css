@@ -232,6 +232,12 @@ img { display: block; max-width: 100%; }
   transition: transform var(--dur-slow) var(--ease-out);
 }
 
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .brand:hover img {
   transform: rotate(-8deg);
 }

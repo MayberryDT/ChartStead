@@ -216,10 +216,10 @@ function EventDesk({ data }: { data: EventListResponse }) {
       <aside className="sidebar">
         <a className="brand" href="/" aria-label="ChartStead home">
           <img src={markOnDarkUrl} width="32" height="32" alt="" />
-          <span className="brand-text">
-            <span className="brand-name">ChartStead</span>
-            <span className="brand-desc">Conference programming</span>
-          </span>
+            <span className="brand-text">
+              <span className="brand-name">ChartStead</span>
+              <span className="brand-desc">Conference Programming</span>
+            </span>
         </a>
         <nav className="nav" aria-label="Organizer">
           {navItems.map((item) => (
