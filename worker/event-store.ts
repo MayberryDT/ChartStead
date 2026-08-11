@@ -19,16 +19,24 @@ import type {
   CalendarIntentRecord,
   CoSpeakerInput,
   EventRecord,
+  OnboardingBoard,
+  OnboardingBoardSpeaker,
+  OnboardingCompletionRequirement,
+  OnboardingHistoryEntry,
+  OnboardingReminderDraft,
   OrganizerCfpForm,
   OrganizerCfpFormSummary,
   OrganizerProposal,
   OrganizerSession,
   OutboxDeliveryStatus,
   OutboxMessage,
+  OutboxMessageKind,
+  PortalOnboardingTask,
   ProposalAuditEvent,
   ProposalInput,
   ProposalStatus,
   PublishedCfpForm,
+  ReminderDraftStatus,
   SessionPlacementPatch,
   SessionPlacementResponse,
   SpeakerPortalSession,
@@ -116,13 +124,172 @@ interface CourseCheckPlanRow {
 }
 
 interface SpeakerRow {
-  [key: string]: string;
+  [key: string]: string | null;
   id: string;
   name: string;
   email: string;
   biography: string;
+  headshot_asset_id: string | null;
   created_at: string;
 }
+
+interface OnboardingTaskRow {
+  [key: string]: string | null;
+  id: string;
+  speaker_id: string;
+  session_id: string | null;
+  proposal_id: string | null;
+  course_check_plan_id: string;
+  title: string;
+  kind: string;
+  status: string;
+  due_at: string | null;
+  created_at: string;
+  instructions: string;
+  completion_requirement: string;
+  readiness_flag: string | null;
+  asset_id: string | null;
+  completed_at: string | null;
+  created_by: string;
+}
+
+interface ReminderDraftRow {
+  [key: string]: string | null;
+  id: string;
+  speaker_id: string;
+  proposal_id: string | null;
+  to_email: string;
+  subject: string;
+  body_text: string;
+  body_html: string;
+  status: string;
+  missing_task_ids_json: string;
+  outbox_id: string | null;
+  last_error: string | null;
+  created_by_id: string;
+  created_by_name: string;
+  created_at: string;
+  updated_at: string;
+  sent_at: string | null;
+}
+
+interface OnboardingHistoryRow {
+  [key: string]: string | null;
+  id: string;
+  speaker_id: string;
+  task_id: string | null;
+  type: string;
+  summary: string;
+  actor_id: string;
+  actor_name: string;
+  created_at: string;
+}
+
+const HEADSHOT_MAX_BYTES = 5 * 1024 * 1024;
+const TASK_FILE_MAX_BYTES = 25 * 1024 * 1024;
+const HEADSHOT_MIME_TYPES = ["image/png", "image/jpeg", "image/webp"] as const;
+
+function defaultCompletionRequirement(kind: string): OnboardingCompletionRequirement {
+  if (kind === "headshot" || kind === "slides" || kind === "employer_approval") {
+    return "file";
+  }
+  return "manual";
+}
+
+function daysUntil(iso: string | null, nowMs: number): number | null {
+  if (!iso) return null;
+  const due = Date.parse(iso);
+  if (!Number.isFinite(due)) return null;
+  return Math.floor((due - nowMs) / (24 * 60 * 60 * 1000));
+}
+
+function mapPortalTask(
+  row: OnboardingTaskRow,
+  asset: {
+    asset_id: string;
+    file_name: string;
+    mime: string;
+    size_bytes: number;
+  } | null,
+): PortalOnboardingTask {
+  return {
+    id: row.id,
+    title: row.title,
+    kind: row.kind,
+    status: row.status,
+    speakerId: row.speaker_id,
+    dueAt: row.due_at,
+    instructions: row.instructions ?? "",
+    completionRequirement:
+      row.completion_requirement || defaultCompletionRequirement(row.kind),
+    readinessFlag: row.readiness_flag,
+    asset: asset
+      ? {
+          assetId: asset.asset_id,
+          fileName: asset.file_name,
+          mime: asset.mime,
+          size: Number(asset.size_bytes),
+        }
+      : null,
+    completedAt: row.completed_at,
+  };
+}
+
+function mapReminderDraft(row: ReminderDraftRow): OnboardingReminderDraft {
+  let missingTaskIds: string[] = [];
+  try {
+    missingTaskIds = JSON.parse(row.missing_task_ids_json || "[]") as string[];
+  } catch {
+    missingTaskIds = [];
+  }
+  return {
+    id: row.id,
+    speakerId: row.speaker_id,
+    proposalId: row.proposal_id,
+    toEmail: row.to_email,
+    subject: row.subject,
+    bodyText: row.body_text,
+    bodyHtml: row.body_html,
+    status: row.status as ReminderDraftStatus,
+    missingTaskIds,
+    outboxId: row.outbox_id,
+    lastError: row.last_error,
+    createdById: row.created_by_id,
+    createdByName: row.created_by_name,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    sentAt: row.sent_at,
+  };
+}
+
+function mapOnboardingHistory(row: OnboardingHistoryRow): OnboardingHistoryEntry {
+  return {
+    id: row.id,
+    speakerId: row.speaker_id,
+    taskId: row.task_id,
+    type: row.type,
+    summary: row.summary,
+    actorId: row.actor_id,
+    actorName: row.actor_name,
+    createdAt: row.created_at,
+  };
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+export {
+  HEADSHOT_MAX_BYTES,
+  TASK_FILE_MAX_BYTES,
+  HEADSHOT_MIME_TYPES,
+  defaultCompletionRequirement,
+};
 
 export interface AcceptanceCascadeSnapshot {
   speakers: Array<{ id: string; name: string; email: string; biography: string }>;
@@ -234,6 +401,8 @@ interface AssetRow {
   question_name: string;
   max_bytes: number;
   claimed_proposal_id: string | null;
+  owner_speaker_id: string | null;
+  purpose: string;
 }
 
 interface RateLimitRow {
@@ -417,7 +586,7 @@ function mapForm(
 function mapOutbox(row: OutboxRow): OutboxMessage {
   return {
     id: row.id,
-    kind: "submission_confirmation",
+    kind: row.kind,
     toEmail: row.to_email,
     subject: row.subject,
     status: row.status as OutboxDeliveryStatus,
@@ -776,6 +945,67 @@ export class EventStore extends DurableObject<AppBindings> {
         "INTEGER NOT NULL DEFAULT 0",
       );
       this.backfillSessionCalendarUids();
+      this.ensureColumn("speakers", "headshot_asset_id", "TEXT");
+      this.ensureColumn(
+        "onboarding_tasks",
+        "instructions",
+        "TEXT NOT NULL DEFAULT ''",
+      );
+      this.ensureColumn(
+        "onboarding_tasks",
+        "completion_requirement",
+        "TEXT NOT NULL DEFAULT 'manual'",
+      );
+      this.ensureColumn("onboarding_tasks", "readiness_flag", "TEXT");
+      this.ensureColumn("onboarding_tasks", "asset_id", "TEXT");
+      this.ensureColumn("onboarding_tasks", "completed_at", "TEXT");
+      this.ensureColumn(
+        "onboarding_tasks",
+        "created_by",
+        "TEXT NOT NULL DEFAULT 'system'",
+      );
+      this.ensureColumn("assets", "owner_speaker_id", "TEXT");
+      this.ensureColumn(
+        "assets",
+        "purpose",
+        "TEXT NOT NULL DEFAULT 'cfp'",
+      );
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS reminder_drafts (
+          id TEXT PRIMARY KEY,
+          speaker_id TEXT NOT NULL,
+          proposal_id TEXT,
+          to_email TEXT NOT NULL,
+          subject TEXT NOT NULL,
+          body_text TEXT NOT NULL,
+          body_html TEXT NOT NULL,
+          status TEXT NOT NULL,
+          missing_task_ids_json TEXT NOT NULL DEFAULT '[]',
+          outbox_id TEXT,
+          last_error TEXT,
+          created_by_id TEXT NOT NULL,
+          created_by_name TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          sent_at TEXT
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS onboarding_history (
+          id TEXT PRIMARY KEY,
+          speaker_id TEXT NOT NULL,
+          task_id TEXT,
+          type TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          actor_id TEXT NOT NULL,
+          actor_name TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS onboarding_history_speaker_created_idx
+        ON onboarding_history (speaker_id, created_at DESC)
+      `);
     });
   }
 
@@ -1862,12 +2092,12 @@ export class EventStore extends DurableObject<AppBindings> {
 
   queueOutboxMessage(input: {
     id: string;
-    kind: "submission_confirmation";
+    kind: OutboxMessageKind;
     toEmail: string;
     subject: string;
     htmlBody: string;
     textBody: string;
-    proposalId: string;
+    proposalId: string | null;
   }): OutboxMessage {
     const now = new Date().toISOString();
     this.ctx.storage.sql.exec(
@@ -1885,12 +2115,14 @@ export class EventStore extends DurableObject<AppBindings> {
       now,
       now,
     );
-    this.ctx.storage.sql.exec(
-      `UPDATE proposals
-       SET confirmation_email_status = 'queued'
-       WHERE id = ?`,
-      input.proposalId,
-    );
+    if (input.kind === "submission_confirmation" && input.proposalId) {
+      this.ctx.storage.sql.exec(
+        `UPDATE proposals
+         SET confirmation_email_status = 'queued'
+         WHERE id = ?`,
+        input.proposalId,
+      );
+    }
     const message = this.getOutboxMessage(input.id);
     if (!message) throw new Error("Outbox message was not queued.");
     return message;
@@ -2004,7 +2236,7 @@ export class EventStore extends DurableObject<AppBindings> {
           id,
         );
       }
-      if (message.proposalId) {
+      if (message.kind === "submission_confirmation" && message.proposalId) {
         this.ctx.storage.sql.exec(
           `UPDATE proposals SET confirmation_email_status = 'sending' WHERE id = ?`,
           message.proposalId,
@@ -2026,11 +2258,14 @@ export class EventStore extends DurableObject<AppBindings> {
       nowIso,
       id,
     );
-    if (message.proposalId) {
+    if (message.kind === "submission_confirmation" && message.proposalId) {
       this.ctx.storage.sql.exec(
         `UPDATE proposals SET confirmation_email_status = 'sent' WHERE id = ?`,
         message.proposalId,
       );
+    }
+    if (message.kind === "onboarding_reminder") {
+      this.syncReminderDraftFromOutbox(id, "sent", null, nowIso);
     }
     return this.getOutboxMessage(id)!;
   }
@@ -2052,13 +2287,56 @@ export class EventStore extends DurableObject<AppBindings> {
       nextAttemptAt,
       id,
     );
-    if (message.proposalId) {
+    if (message.kind === "submission_confirmation" && message.proposalId) {
       this.ctx.storage.sql.exec(
         `UPDATE proposals SET confirmation_email_status = 'failed' WHERE id = ?`,
         message.proposalId,
       );
     }
+    if (message.kind === "onboarding_reminder") {
+      this.syncReminderDraftFromOutbox(id, "failed", error, nowIso);
+    }
     return this.getOutboxMessage(id)!;
+  }
+
+  private syncReminderDraftFromOutbox(
+    outboxId: string,
+    status: "sent" | "failed",
+    error: string | null,
+    nowIso: string,
+  ): void {
+    const draft = this.ctx.storage.sql
+      .exec<ReminderDraftRow>(
+        `SELECT id, speaker_id, proposal_id, to_email, subject, body_text, body_html,
+                status, missing_task_ids_json, outbox_id, last_error, created_by_id,
+                created_by_name, created_at, updated_at, sent_at
+         FROM reminder_drafts WHERE outbox_id = ?`,
+        outboxId,
+      )
+      .toArray()[0];
+    if (!draft) return;
+    this.ctx.storage.sql.exec(
+      `UPDATE reminder_drafts
+       SET status = ?, last_error = ?, updated_at = ?, sent_at = CASE WHEN ? = 'sent' THEN ? ELSE sent_at END
+       WHERE id = ?`,
+      status,
+      error,
+      nowIso,
+      status,
+      nowIso,
+      draft.id,
+    );
+    this.appendOnboardingHistory({
+      speakerId: draft.speaker_id,
+      taskId: null,
+      type: status === "sent" ? "reminder_sent" : "reminder_send_failed",
+      summary:
+        status === "sent"
+          ? `Reminder sent: ${draft.subject}`
+          : `Reminder failed: ${error ?? "delivery error"}`,
+      actorId: draft.created_by_id,
+      actorName: draft.created_by_name,
+    });
   }
 
   getOutboxBodies(id: string): { html: string; text: string } | null {
@@ -2217,6 +2495,109 @@ export class EventStore extends DurableObject<AppBindings> {
     );
   }
 
+  private getSpeakerRow(speakerId: string): SpeakerRow | null {
+    return (
+      this.ctx.storage.sql
+        .exec<SpeakerRow>(
+          `SELECT id, name, email, biography, headshot_asset_id, created_at
+           FROM speakers WHERE id = ?`,
+          speakerId,
+        )
+        .toArray()[0] ?? null
+    );
+  }
+
+  private listOnboardingTaskRows(speakerId?: string): OnboardingTaskRow[] {
+    if (speakerId) {
+      return this.ctx.storage.sql
+        .exec<OnboardingTaskRow>(
+          `SELECT id, speaker_id, session_id, proposal_id, course_check_plan_id, title, kind,
+                  status, due_at, created_at, instructions, completion_requirement,
+                  readiness_flag, asset_id, completed_at, created_by
+           FROM onboarding_tasks
+           WHERE speaker_id = ?
+           ORDER BY
+             CASE status WHEN 'open' THEN 0 ELSE 1 END,
+             due_at IS NULL,
+             due_at ASC,
+             created_at ASC`,
+          speakerId,
+        )
+        .toArray();
+    }
+    return this.ctx.storage.sql
+      .exec<OnboardingTaskRow>(
+        `SELECT id, speaker_id, session_id, proposal_id, course_check_plan_id, title, kind,
+                status, due_at, created_at, instructions, completion_requirement,
+                readiness_flag, asset_id, completed_at, created_by
+         FROM onboarding_tasks
+         ORDER BY
+           CASE status WHEN 'open' THEN 0 ELSE 1 END,
+           due_at IS NULL,
+           due_at ASC,
+           created_at ASC`,
+      )
+      .toArray();
+  }
+
+  private getTaskAsset(assetId: string | null): {
+    asset_id: string;
+    file_name: string;
+    mime: string;
+    size_bytes: number;
+  } | null {
+    if (!assetId) return null;
+    const row = this.getAsset(assetId);
+    if (!row || row.status !== "complete") return null;
+    return {
+      asset_id: row.asset_id,
+      file_name: row.file_name,
+      mime: row.mime,
+      size_bytes: Number(row.size_bytes),
+    };
+  }
+
+  private mapTasksForSpeaker(speakerId: string): PortalOnboardingTask[] {
+    return this.listOnboardingTaskRows(speakerId).map((row) =>
+      mapPortalTask(row, this.getTaskAsset(row.asset_id)),
+    );
+  }
+
+  appendOnboardingHistory(input: {
+    speakerId: string;
+    taskId: string | null;
+    type: string;
+    summary: string;
+    actorId: string;
+    actorName: string;
+  }): OnboardingHistoryEntry {
+    const id = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    this.ctx.storage.sql.exec(
+      `INSERT INTO onboarding_history
+        (id, speaker_id, task_id, type, summary, actor_id, actor_name, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      input.speakerId,
+      input.taskId,
+      input.type,
+      input.summary,
+      input.actorId,
+      input.actorName,
+      createdAt,
+    );
+    return {
+      id,
+      speakerId: input.speakerId,
+      taskId: input.taskId,
+      type: input.type,
+      summary: input.summary,
+      actorId: input.actorId,
+      actorName: input.actorName,
+      createdAt,
+    };
+  }
+
   getSpeakerPortalSession(input: {
     speakerId: string;
     expiresAt: string;
@@ -2224,12 +2605,7 @@ export class EventStore extends DurableObject<AppBindings> {
     const event = this.getEvent();
     if (!event) return null;
 
-    const speaker = this.ctx.storage.sql
-      .exec<SpeakerRow>(
-        `SELECT id, name, email, biography, created_at FROM speakers WHERE id = ?`,
-        input.speakerId,
-      )
-      .toArray()[0];
+    const speaker = this.getSpeakerRow(input.speakerId);
     if (!speaker) return null;
 
     const participation = this.ctx.storage.sql
@@ -2303,35 +2679,13 @@ export class EventStore extends DurableObject<AppBindings> {
       )
       .toArray()[0];
 
-    const tasks = this.ctx.storage.sql
-      .exec<{
-        id: string;
-        title: string;
-        kind: string;
-        status: string;
-        speaker_id: string;
-        due_at: string | null;
-      }>(
-        `SELECT id, title, kind, status, speaker_id, due_at
-         FROM onboarding_tasks
-         WHERE speaker_id = ?
-         ORDER BY due_at IS NULL, due_at ASC, created_at ASC`,
-        input.speakerId,
-      )
-      .toArray()
-      .map((row) => ({
-        id: row.id,
-        title: row.title,
-        kind: row.kind,
-        status: row.status,
-        speakerId: row.speaker_id,
-        dueAt: row.due_at,
-      }));
-
+    const tasks = this.mapTasksForSpeaker(input.speakerId);
     const openDeadlines = tasks
       .filter((task) => task.status === "open" && task.dueAt)
       .map((task) => task.dueAt as string)
       .sort();
+
+    const headshot = this.getTaskAsset(speaker.headshot_asset_id);
 
     return {
       eventId: event.id,
@@ -2343,6 +2697,8 @@ export class EventStore extends DurableObject<AppBindings> {
         name: speaker.name,
         email: speaker.email,
         biography: speaker.biography,
+        headshotAssetId: speaker.headshot_asset_id,
+        headshotFileName: headshot?.file_name ?? null,
       },
       participation: {
         id: participation.id,
@@ -2366,6 +2722,619 @@ export class EventStore extends DurableObject<AppBindings> {
       tasks,
       nextDeadline: openDeadlines[0] ?? null,
     };
+  }
+
+  updateSpeakerPortalProfile(input: {
+    speakerId: string;
+    biography?: string;
+    name?: string;
+    headshotAssetId?: string | null;
+  }): { ok: true } | { ok: false; error: string } {
+    const speaker = this.getSpeakerRow(input.speakerId);
+    if (!speaker) return { ok: false, error: "Speaker not found." };
+
+    let headshotAssetId = speaker.headshot_asset_id;
+    if (input.headshotAssetId !== undefined) {
+      if (input.headshotAssetId === null) {
+        headshotAssetId = null;
+      } else {
+        const asset = this.getAsset(input.headshotAssetId);
+        if (
+          !asset ||
+          asset.status !== "complete" ||
+          asset.owner_speaker_id !== input.speakerId ||
+          asset.purpose !== "portal_headshot"
+        ) {
+          return { ok: false, error: "That headshot upload is not available." };
+        }
+        this.ctx.storage.sql.exec(
+          `UPDATE assets
+           SET claimed_proposal_id = COALESCE(claimed_proposal_id, ?)
+           WHERE asset_id = ?`,
+          `portal:${input.speakerId}`,
+          asset.asset_id,
+        );
+        headshotAssetId = asset.asset_id;
+      }
+    }
+
+    const name =
+      input.name !== undefined ? input.name.trim() : speaker.name;
+    const biography =
+      input.biography !== undefined ? input.biography.trim() : speaker.biography;
+    if (!name) return { ok: false, error: "Name is required." };
+    if (name.length > 200) return { ok: false, error: "Use 200 characters or fewer for name." };
+    if (biography.length > 2_000) {
+      return { ok: false, error: "Use 2000 characters or fewer for biography." };
+    }
+
+    this.ctx.storage.sql.exec(
+      `UPDATE speakers
+       SET name = ?, biography = ?, headshot_asset_id = ?
+       WHERE id = ?`,
+      name,
+      biography,
+      headshotAssetId,
+      input.speakerId,
+    );
+    this.appendOnboardingHistory({
+      speakerId: input.speakerId,
+      taskId: null,
+      type: "profile_updated",
+      summary: "Speaker updated profile fields from the portal.",
+      actorId: input.speakerId,
+      actorName: name,
+    });
+    return { ok: true };
+  }
+
+  createPortalAsset(input: {
+    assetId: string;
+    objectKey: string;
+    fileName: string;
+    mime: string;
+    sizeBytes: number;
+    speakerId: string;
+    purpose: "portal_headshot" | "portal_task";
+    taskId?: string;
+    maxBytes: number;
+  }): void {
+    this.ctx.storage.sql.exec(
+      `INSERT INTO assets
+        (asset_id, object_key, file_name, mime, size_bytes, status, created_at,
+         form_id, form_definition_version, question_name, max_bytes, claimed_proposal_id,
+         owner_speaker_id, purpose)
+       VALUES (?, ?, ?, ?, ?, 'pending', ?, 'portal', 0, ?, ?, NULL, ?, ?)`,
+      input.assetId,
+      input.objectKey,
+      input.fileName,
+      input.mime,
+      input.sizeBytes,
+      new Date().toISOString(),
+      input.taskId ? `task:${input.taskId}` : input.purpose,
+      input.maxBytes,
+      input.speakerId,
+      input.purpose,
+    );
+  }
+
+  completePortalTask(input: {
+    speakerId: string;
+    taskId: string;
+    assetId?: string | null;
+  }): { ok: true } | { ok: false; error: string; status?: number } {
+    const row = this.listOnboardingTaskRows(input.speakerId).find(
+      (task) => task.id === input.taskId,
+    );
+    if (!row || row.speaker_id !== input.speakerId) {
+      return { ok: false, error: "Task not found.", status: 404 };
+    }
+
+    const requirement =
+      row.completion_requirement || defaultCompletionRequirement(row.kind);
+    let assetId = row.asset_id;
+
+    if (requirement === "file") {
+      if (!input.assetId) {
+        return { ok: false, error: "Upload a file to complete this task.", status: 400 };
+      }
+      const asset = this.getAsset(input.assetId);
+      if (
+        !asset ||
+        asset.status !== "complete" ||
+        asset.owner_speaker_id !== input.speakerId ||
+        asset.purpose !== "portal_task"
+      ) {
+        return { ok: false, error: "That file upload is not available.", status: 400 };
+      }
+      if (asset.question_name !== `task:${input.taskId}` && asset.question_name !== "portal_task") {
+        // allow purpose portal_task with matching task question
+        if (!asset.question_name.startsWith("task:")) {
+          return { ok: false, error: "That file upload is not available.", status: 400 };
+        }
+        if (asset.question_name !== `task:${input.taskId}`) {
+          return { ok: false, error: "That file belongs to a different task.", status: 400 };
+        }
+      }
+      this.ctx.storage.sql.exec(
+        `UPDATE assets
+         SET claimed_proposal_id = COALESCE(claimed_proposal_id, ?)
+         WHERE asset_id = ?`,
+        `portal-task:${input.taskId}`,
+        asset.asset_id,
+      );
+      assetId = asset.asset_id;
+    } else if (input.assetId) {
+      return {
+        ok: false,
+        error: "This task does not accept a file attachment.",
+        status: 400,
+      };
+    }
+
+    const now = new Date().toISOString();
+    this.ctx.storage.sql.exec(
+      `UPDATE onboarding_tasks
+       SET status = 'completed', asset_id = ?, completed_at = ?
+       WHERE id = ? AND speaker_id = ?`,
+      assetId,
+      now,
+      input.taskId,
+      input.speakerId,
+    );
+    this.appendOnboardingHistory({
+      speakerId: input.speakerId,
+      taskId: input.taskId,
+      type: "task_completed",
+      summary: `Completed task: ${row.title}`,
+      actorId: input.speakerId,
+      actorName: this.getSpeakerRow(input.speakerId)?.name ?? "Speaker",
+    });
+    return { ok: true };
+  }
+
+  createOnboardingTask(input: {
+    speakerId: string;
+    title: string;
+    instructions: string;
+    kind: string;
+    completionRequirement: OnboardingCompletionRequirement;
+    readinessFlag?: string | null;
+    dueAt?: string | null;
+    createdBy: string;
+  }): PortalOnboardingTask | { error: string } {
+    const speaker = this.getSpeakerRow(input.speakerId);
+    if (!speaker) return { error: "Speaker not found." };
+
+    const participation = this.ctx.storage.sql
+      .exec<{
+        proposal_id: string | null;
+        course_check_plan_id: string;
+      }>(
+        `SELECT proposal_id, course_check_plan_id
+         FROM event_participations
+         WHERE speaker_id = ?
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        input.speakerId,
+      )
+      .toArray()[0];
+    if (!participation) return { error: "Speaker is not part of this event." };
+
+    const session = this.ctx.storage.sql
+      .exec<{ id: string }>(
+        participation.proposal_id
+          ? `SELECT id FROM sessions WHERE proposal_id = ? LIMIT 1`
+          : `SELECT id FROM sessions WHERE course_check_plan_id = ? LIMIT 1`,
+        participation.proposal_id ?? participation.course_check_plan_id,
+      )
+      .toArray()[0];
+
+    const id = `tsk_org_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
+    const now = new Date().toISOString();
+    const title = input.title.trim();
+    const instructions = input.instructions.trim();
+    const kind = input.kind.trim() || "custom";
+    if (!title) return { error: "Task title is required." };
+    if (title.length > 200) return { error: "Use 200 characters or fewer for the title." };
+
+    this.ctx.storage.sql.exec(
+      `INSERT INTO onboarding_tasks
+        (id, speaker_id, session_id, proposal_id, course_check_plan_id, title, kind,
+         status, due_at, created_at, instructions, completion_requirement, readiness_flag,
+         asset_id, completed_at, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, NULL, NULL, ?)`,
+      id,
+      input.speakerId,
+      session?.id ?? null,
+      participation.proposal_id,
+      participation.course_check_plan_id,
+      title,
+      kind,
+      input.dueAt ?? null,
+      now,
+      instructions,
+      input.completionRequirement,
+      input.readinessFlag ?? null,
+      input.createdBy,
+    );
+    this.appendOnboardingHistory({
+      speakerId: input.speakerId,
+      taskId: id,
+      type: "task_created",
+      summary: `Organizer created task: ${title}`,
+      actorId: input.createdBy,
+      actorName: input.createdBy,
+    });
+    const created = this.listOnboardingTaskRows(input.speakerId).find((row) => row.id === id)!;
+    return mapPortalTask(created, null);
+  }
+
+  getOnboardingBoard(nowMs = Date.now()): OnboardingBoard {
+    const event = this.getEvent();
+    if (!event) {
+      return { eventId: "", speakers: [], drafts: [] };
+    }
+
+    const participations = this.ctx.storage.sql
+      .exec<{
+        id: string;
+        speaker_id: string;
+        proposal_id: string | null;
+        role: string;
+      }>(
+        `SELECT id, speaker_id, proposal_id, role
+         FROM event_participations
+         ORDER BY created_at DESC`,
+      )
+      .toArray();
+
+    const seen = new Set<string>();
+    const speakers: OnboardingBoardSpeaker[] = [];
+
+    for (const participation of participations) {
+      if (seen.has(participation.speaker_id)) continue;
+      seen.add(participation.speaker_id);
+      const speaker = this.getSpeakerRow(participation.speaker_id);
+      if (!speaker) continue;
+
+      let proposalTitle: string | null = null;
+      if (participation.proposal_id) {
+        const proposal = this.ctx.storage.sql
+          .exec<{ title: string; program_outcome: string }>(
+            `SELECT title, program_outcome FROM proposals WHERE id = ?`,
+            participation.proposal_id,
+          )
+          .toArray()[0];
+        if (!proposal || proposal.program_outcome !== "accepted") continue;
+        proposalTitle = proposal.title;
+      }
+
+      const tasks = this.mapTasksForSpeaker(participation.speaker_id);
+      const openTasks = tasks.filter((task) => task.status === "open");
+      const missingWork = openTasks.map((task) => ({
+        taskId: task.id,
+        title: task.title,
+        dueAt: task.dueAt,
+        daysUntilDue: daysUntil(task.dueAt, nowMs),
+        readinessFlag: task.readinessFlag,
+      }));
+      const overdueCount = missingWork.filter(
+        (item) => item.daysUntilDue !== null && item.daysUntilDue < 0,
+      ).length;
+      const nextDueAt =
+        openTasks
+          .map((task) => task.dueAt)
+          .filter((value): value is string => Boolean(value))
+          .sort()[0] ?? null;
+      const readinessFlags = [
+        ...new Set(
+          openTasks
+            .map((task) => task.readinessFlag)
+            .filter((value): value is string => Boolean(value)),
+        ),
+      ];
+      const history = this.ctx.storage.sql
+        .exec<OnboardingHistoryRow>(
+          `SELECT id, speaker_id, task_id, type, summary, actor_id, actor_name, created_at
+           FROM onboarding_history
+           WHERE speaker_id = ?
+           ORDER BY created_at DESC
+           LIMIT 20`,
+          participation.speaker_id,
+        )
+        .toArray()
+        .map(mapOnboardingHistory);
+
+      const lastContact = history.find(
+        (entry) =>
+          entry.type === "reminder_sent" ||
+          entry.type === "reminder_send_failed" ||
+          entry.type === "reminder_queued",
+      );
+
+      speakers.push({
+        speakerId: speaker.id,
+        name: speaker.name,
+        email: speaker.email,
+        proposalId: participation.proposal_id,
+        proposalTitle,
+        role: participation.role,
+        openTaskCount: openTasks.length,
+        overdueCount,
+        nextDueAt,
+        daysUntilNextDue: daysUntil(nextDueAt, nowMs),
+        readinessFlags,
+        missingWork,
+        lastContactAt: lastContact?.createdAt ?? null,
+        lastContactStatus: lastContact
+          ? lastContact.type === "reminder_sent"
+            ? "sent"
+            : lastContact.type === "reminder_send_failed"
+              ? "failed"
+              : "queued"
+          : null,
+        history,
+      });
+    }
+
+    speakers.sort((a, b) => {
+      if (b.overdueCount !== a.overdueCount) return b.overdueCount - a.overdueCount;
+      const aDue = a.daysUntilNextDue ?? Number.POSITIVE_INFINITY;
+      const bDue = b.daysUntilNextDue ?? Number.POSITIVE_INFINITY;
+      if (aDue !== bDue) return aDue - bDue;
+      return a.name.localeCompare(b.name);
+    });
+
+    const drafts = this.ctx.storage.sql
+      .exec<ReminderDraftRow>(
+        `SELECT id, speaker_id, proposal_id, to_email, subject, body_text, body_html,
+                status, missing_task_ids_json, outbox_id, last_error, created_by_id,
+                created_by_name, created_at, updated_at, sent_at
+         FROM reminder_drafts
+         ORDER BY updated_at DESC
+         LIMIT 50`,
+      )
+      .toArray()
+      .map(mapReminderDraft);
+
+    return { eventId: event.id, speakers, drafts };
+  }
+
+  prepareOnboardingReminder(input: {
+    speakerId: string;
+    actorId: string;
+    actorName: string;
+    nowMs?: number;
+  }): OnboardingReminderDraft | { error: string } {
+    const event = this.getEvent();
+    if (!event) return { error: "Event not found." };
+    const speaker = this.getSpeakerRow(input.speakerId);
+    if (!speaker) return { error: "Speaker not found." };
+
+    const participation = this.ctx.storage.sql
+      .exec<{ proposal_id: string | null }>(
+        `SELECT proposal_id FROM event_participations
+         WHERE speaker_id = ?
+         ORDER BY created_at DESC LIMIT 1`,
+        input.speakerId,
+      )
+      .toArray()[0];
+    if (!participation) return { error: "Speaker is not part of this event." };
+
+    const nowMs = input.nowMs ?? Date.now();
+    const openTasks = this.mapTasksForSpeaker(input.speakerId).filter(
+      (task) => task.status === "open",
+    );
+
+    const lines = openTasks.map((task) => {
+      const dueLabel = task.dueAt
+        ? (() => {
+            const days = daysUntil(task.dueAt, nowMs);
+            if (days === null) return `due ${task.dueAt}`;
+            if (days < 0) return `${Math.abs(days)} day(s) overdue`;
+            if (days === 0) return "due today";
+            return `due in ${days} day(s)`;
+          })()
+        : "no due date";
+      return `- ${task.title} (${dueLabel})`;
+    });
+
+    const subject =
+      openTasks.length > 0
+        ? `Reminder: finish your ${event.name} speaker onboarding`
+        : `Quick check-in about ${event.name}`;
+    const bodyText = [
+      `Hi ${speaker.name},`,
+      "",
+      ...(openTasks.length > 0
+        ? [
+            `This is a friendly reminder about outstanding onboarding work for ${event.name}:`,
+            "",
+            ...lines,
+            "",
+            "Please complete these items in your speaker portal when you can.",
+          ]
+        : [
+            `Checking in about ${event.name}.`,
+            "",
+            "We do not see open onboarding tasks on your side right now. Reply if anything is blocking you or if you need help from the organizers.",
+          ]),
+      "",
+      "Thank you,",
+      input.actorName,
+    ].join("\n");
+    const bodyHtml = bodyText
+      .split("\n")
+      .map((line) =>
+        line.startsWith("- ")
+          ? `<li>${escapeHtml(line.slice(2))}</li>`
+          : line
+            ? `<p>${escapeHtml(line)}</p>`
+            : "",
+      )
+      .join("");
+
+    const id = `rem_${crypto.randomUUID().replaceAll("-", "").slice(0, 18)}`;
+    const now = new Date().toISOString();
+    this.ctx.storage.sql.exec(
+      `INSERT INTO reminder_drafts
+        (id, speaker_id, proposal_id, to_email, subject, body_text, body_html, status,
+         missing_task_ids_json, outbox_id, last_error, created_by_id, created_by_name,
+         created_at, updated_at, sent_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, NULL, NULL, ?, ?, ?, ?, NULL)`,
+      id,
+      input.speakerId,
+      participation.proposal_id,
+      speaker.email,
+      subject,
+      bodyText,
+      `<div>${bodyHtml}</div>`,
+      JSON.stringify(openTasks.map((task) => task.id)),
+      input.actorId,
+      input.actorName,
+      now,
+      now,
+    );
+    this.appendOnboardingHistory({
+      speakerId: input.speakerId,
+      taskId: null,
+      type: "reminder_draft_created",
+      summary: `Prepared reminder draft covering ${openTasks.length} open task(s).`,
+      actorId: input.actorId,
+      actorName: input.actorName,
+    });
+    return this.getReminderDraft(id)!;
+  }
+
+  getReminderDraft(id: string): OnboardingReminderDraft | null {
+    const row = this.ctx.storage.sql
+      .exec<ReminderDraftRow>(
+        `SELECT id, speaker_id, proposal_id, to_email, subject, body_text, body_html,
+                status, missing_task_ids_json, outbox_id, last_error, created_by_id,
+                created_by_name, created_at, updated_at, sent_at
+         FROM reminder_drafts WHERE id = ?`,
+        id,
+      )
+      .toArray()[0];
+    return row ? mapReminderDraft(row) : null;
+  }
+
+  updateReminderDraft(input: {
+    id: string;
+    subject?: string;
+    bodyText?: string;
+  }): OnboardingReminderDraft | { error: string } {
+    const current = this.getReminderDraft(input.id);
+    if (!current) return { error: "Draft not found." };
+    if (current.status !== "draft") {
+      return { error: "Only editable drafts can be changed." };
+    }
+    const subject = (input.subject ?? current.subject).trim();
+    const bodyText = (input.bodyText ?? current.bodyText).trim();
+    if (!subject) return { error: "Subject is required." };
+    if (!bodyText) return { error: "Message body is required." };
+    const bodyHtml = bodyText
+      .split("\n")
+      .map((line) => (line ? `<p>${escapeHtml(line)}</p>` : ""))
+      .join("");
+    const now = new Date().toISOString();
+    this.ctx.storage.sql.exec(
+      `UPDATE reminder_drafts
+       SET subject = ?, body_text = ?, body_html = ?, updated_at = ?
+       WHERE id = ?`,
+      subject,
+      bodyText,
+      bodyHtml,
+      now,
+      input.id,
+    );
+    return this.getReminderDraft(input.id)!;
+  }
+
+  discardReminderDraft(id: string): OnboardingReminderDraft | { error: string } {
+    const current = this.getReminderDraft(id);
+    if (!current) return { error: "Draft not found." };
+    if (current.status !== "draft") {
+      return { error: "Only open drafts can be discarded." };
+    }
+    const now = new Date().toISOString();
+    this.ctx.storage.sql.exec(
+      `UPDATE reminder_drafts SET status = 'discarded', updated_at = ? WHERE id = ?`,
+      now,
+      id,
+    );
+    this.appendOnboardingHistory({
+      speakerId: current.speakerId,
+      taskId: null,
+      type: "reminder_discarded",
+      summary: `Discarded reminder draft: ${current.subject}`,
+      actorId: current.createdById,
+      actorName: current.createdByName,
+    });
+    return this.getReminderDraft(id)!;
+  }
+
+  /**
+   * Queue an explicit send. Creating/editing a draft never calls this.
+   * Returns the draft after queueing; caller should deliver the outbox message.
+   */
+  queueReminderSend(id: string):
+    | { draft: OnboardingReminderDraft; outboxId: string }
+    | { error: string } {
+    const current = this.getReminderDraft(id);
+    if (!current) return { error: "Draft not found." };
+    if (current.status !== "draft" && current.status !== "failed") {
+      return { error: "Only draft or failed reminders can be sent." };
+    }
+
+    const outboxId = `outbox-reminder-${id}`;
+    const existing = this.getOutboxMessage(outboxId);
+    if (!existing) {
+      this.queueOutboxMessage({
+        id: outboxId,
+        kind: "onboarding_reminder",
+        toEmail: current.toEmail,
+        subject: current.subject,
+        htmlBody: current.bodyHtml,
+        textBody: current.bodyText,
+        proposalId: current.proposalId,
+      });
+    } else if (existing.status === "sent") {
+      return { error: "This reminder was already sent." };
+    } else {
+      // refresh bodies for retry
+      this.ctx.storage.sql.exec(
+        `UPDATE outbox_messages
+         SET subject = ?, html_body = ?, text_body = ?, status = 'queued',
+             error = NULL, next_attempt_at = NULL, updated_at = ?
+         WHERE id = ?`,
+        current.subject,
+        current.bodyHtml,
+        current.bodyText,
+        new Date().toISOString(),
+        outboxId,
+      );
+    }
+
+    const now = new Date().toISOString();
+    this.ctx.storage.sql.exec(
+      `UPDATE reminder_drafts
+       SET status = 'queued', outbox_id = ?, last_error = NULL, updated_at = ?
+       WHERE id = ?`,
+      outboxId,
+      now,
+      id,
+    );
+    this.appendOnboardingHistory({
+      speakerId: current.speakerId,
+      taskId: null,
+      type: "reminder_queued",
+      summary: `Queued reminder for send: ${current.subject}`,
+      actorId: current.createdById,
+      actorName: current.createdByName,
+    });
+    return { draft: this.getReminderDraft(id)!, outboxId };
   }
 
   updateSessionForTest(
@@ -2821,7 +3790,7 @@ export class EventStore extends DurableObject<AppBindings> {
   ): void {
     const current = this.ctx.storage.sql
       .exec<SpeakerRow>(
-        `SELECT id, name, email, biography, created_at FROM speakers WHERE id = ?`,
+        `SELECT id, name, email, biography, headshot_asset_id, created_at FROM speakers WHERE id = ?`,
         speakerId,
       )
       .toArray()[0];
@@ -2950,7 +3919,8 @@ export class EventStore extends DurableObject<AppBindings> {
       this.ctx.storage.sql
         .exec<AssetRow>(
           `SELECT asset_id, object_key, file_name, mime, size_bytes, status, created_at,
-                  form_id, form_definition_version, question_name, max_bytes, claimed_proposal_id
+                  form_id, form_definition_version, question_name, max_bytes, claimed_proposal_id,
+                  owner_speaker_id, purpose
            FROM assets WHERE asset_id = ?`,
           assetId,
         )
@@ -2987,7 +3957,8 @@ export class EventStore extends DurableObject<AppBindings> {
     return this.ctx.storage.sql
       .exec<AssetRow>(
         `SELECT asset_id, object_key, file_name, mime, size_bytes, status, created_at,
-                form_id, form_definition_version, question_name, max_bytes, claimed_proposal_id
+                form_id, form_definition_version, question_name, max_bytes, claimed_proposal_id,
+                owner_speaker_id, purpose
          FROM assets
          WHERE claimed_proposal_id IS NULL
            AND created_at <= ?
@@ -3096,7 +4067,7 @@ export class EventStore extends DurableObject<AppBindings> {
 
   private listExistingSpeakersByEmail(): Map<string, ExistingSpeaker[]> {
     const rows = this.ctx.storage.sql
-      .exec<SpeakerRow>(`SELECT id, name, email, biography, created_at FROM speakers`)
+      .exec<SpeakerRow>(`SELECT id, name, email, biography, headshot_asset_id, created_at FROM speakers`)
       .toArray();
     const map = new Map<string, ExistingSpeaker[]>();
     for (const row of rows) {
@@ -3664,11 +4635,21 @@ export class EventStore extends DurableObject<AppBindings> {
       const dueAt = new Date(
         safeBase - (body.tasks.length - taskIndex) * 24 * 60 * 60 * 1000,
       ).toISOString();
+      const completionRequirement = defaultCompletionRequirement(task.kind);
+      const instructions =
+        task.kind === "headshot"
+          ? "Upload a recent headshot for the program."
+          : task.kind === "profile"
+            ? "Review and complete your speaker profile."
+            : task.kind === "session_details"
+              ? "Confirm your session title and details with organizers."
+              : "";
       this.ctx.storage.sql.exec(
         `INSERT INTO onboarding_tasks
           (id, speaker_id, session_id, proposal_id, course_check_plan_id, title, kind,
-           status, due_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`,
+           status, due_at, created_at, instructions, completion_requirement, readiness_flag,
+           asset_id, completed_at, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, NULL, NULL, NULL, 'system')`,
         task.plannedId,
         speakerId,
         session?.plannedId ?? null,
@@ -3678,6 +4659,8 @@ export class EventStore extends DurableObject<AppBindings> {
         task.kind,
         dueAt,
         now,
+        instructions,
+        completionRequirement,
       );
     });
 
@@ -3756,7 +4739,7 @@ export class EventStore extends DurableObject<AppBindings> {
         ? []
         : this.ctx.storage.sql
             .exec<SpeakerRow>(
-              `SELECT id, name, email, biography, created_at
+              `SELECT id, name, email, biography, headshot_asset_id, created_at
                FROM speakers
                WHERE id IN (${speakerIds.map(() => "?").join(",")})`,
               ...speakerIds,
