@@ -15,20 +15,29 @@ import type {
   ProgramOutcome,
 } from "../shared/course-check";
 import type {
+  AgendaWorkspaceResponse,
+  CalendarIntentRecord,
   CoSpeakerInput,
   EventRecord,
   OrganizerCfpForm,
   OrganizerCfpFormSummary,
   OrganizerProposal,
+  OrganizerSession,
   OutboxDeliveryStatus,
   OutboxMessage,
   ProposalAuditEvent,
   ProposalInput,
   ProposalStatus,
   PublishedCfpForm,
+  SessionPlacementPatch,
+  SessionPlacementResponse,
   SpeakerPortalSession,
   SubmissionAnswers,
 } from "../shared/events";
+import {
+  detectScheduleConflicts,
+  placementStatus,
+} from "../shared/schedule-conflicts";
 import type { AssetClaimInput } from "./cfp-submissions";
 import {
   hasBlockerFindings,
@@ -612,6 +621,21 @@ export class EventStore extends DurableObject<AppBindings> {
       `);
 
       this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS calendar_intents (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          uid TEXT NOT NULL,
+          sequence INTEGER NOT NULL,
+          room_id TEXT,
+          starts_at TEXT,
+          ends_at TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at TEXT NOT NULL
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS onboarding_tasks (
           id TEXT PRIMARY KEY,
           speaker_id TEXT NOT NULL,
@@ -740,6 +764,18 @@ export class EventStore extends DurableObject<AppBindings> {
       this.ensureColumn("proposals", "program_outcome", "TEXT NOT NULL DEFAULT ''");
       this.ensureColumn("onboarding_tasks", "due_at", "TEXT");
       this.ensureColumn("portal_tokens", "signed_token", "TEXT");
+      this.ensureColumn("sessions", "calendar_uid", "TEXT NOT NULL DEFAULT ''");
+      this.ensureColumn(
+        "sessions",
+        "calendar_sequence",
+        "INTEGER NOT NULL DEFAULT 0",
+      );
+      this.ensureColumn(
+        "sessions",
+        "calendar_invite_recorded",
+        "INTEGER NOT NULL DEFAULT 0",
+      );
+      this.backfillSessionCalendarUids();
     });
   }
 
@@ -2365,6 +2401,420 @@ export class EventStore extends DurableObject<AppBindings> {
     );
   }
 
+  private backfillSessionCalendarUids(): void {
+    const rows = this.ctx.storage.sql
+      .exec<{ id: string; calendar_uid: string }>(
+        `SELECT id, calendar_uid FROM sessions`,
+      )
+      .toArray();
+    for (const row of rows) {
+      if (row.calendar_uid) continue;
+      this.ctx.storage.sql.exec(
+        `UPDATE sessions SET calendar_uid = ? WHERE id = ?`,
+        `cal_${row.id}`,
+        row.id,
+      );
+    }
+  }
+
+  private roomNameMap(): Map<string, string> {
+    const event = this.ctx.storage.sql
+      .exec<{ rooms_json: string }>(`SELECT rooms_json FROM events LIMIT 1`)
+      .toArray()[0];
+    const rooms = event
+      ? (JSON.parse(event.rooms_json) as Array<{ id: string; name: string }>)
+      : [];
+    return new Map(rooms.map((room) => [room.id, room.name]));
+  }
+
+  private trackNameMap(): Map<string, string> {
+    const event = this.ctx.storage.sql
+      .exec<{ tracks_json: string }>(`SELECT tracks_json FROM events LIMIT 1`)
+      .toArray()[0];
+    const tracks = event
+      ? (JSON.parse(event.tracks_json) as Array<{ id: string; name: string }>)
+      : [];
+    return new Map(tracks.map((track) => [track.id, track.name]));
+  }
+
+  private listSessionSpeakers(
+    session: {
+      proposal_id: string | null;
+      course_check_plan_id: string;
+    },
+  ): Array<{ id: string; name: string; email: string; role: string }> {
+    const rows = this.ctx.storage.sql
+      .exec<{
+        id: string;
+        name: string;
+        email: string;
+        role: string;
+      }>(
+        `SELECT s.id AS id, s.name AS name, s.email AS email, p.role AS role
+         FROM event_participations p
+         JOIN speakers s ON s.id = p.speaker_id
+         WHERE (
+           (? IS NOT NULL AND p.proposal_id = ?)
+           OR (? IS NULL AND p.course_check_plan_id = ?)
+         )
+         ORDER BY CASE p.role WHEN 'primary' THEN 0 ELSE 1 END, s.name ASC`,
+        session.proposal_id,
+        session.proposal_id,
+        session.proposal_id,
+        session.course_check_plan_id,
+      )
+      .toArray();
+    return rows;
+  }
+
+  private toOrganizerSession(row: {
+    id: string;
+    proposal_id: string | null;
+    course_check_plan_id: string;
+    title: string;
+    format: string;
+    track_id: string;
+    room_id: string | null;
+    starts_at: string | null;
+    ends_at: string | null;
+    created_at: string;
+    calendar_uid: string;
+    calendar_sequence: number;
+    calendar_invite_recorded: number;
+  }): OrganizerSession {
+    const rooms = this.roomNameMap();
+    const tracks = this.trackNameMap();
+    const speakers = this.listSessionSpeakers(row);
+    return {
+      id: row.id,
+      proposalId: row.proposal_id,
+      courseCheckPlanId: row.course_check_plan_id,
+      title: row.title,
+      format: row.format,
+      trackId: row.track_id,
+      trackName: tracks.get(row.track_id) ?? row.track_id,
+      roomId: row.room_id,
+      roomName: row.room_id ? (rooms.get(row.room_id) ?? row.room_id) : null,
+      startsAt: row.starts_at,
+      endsAt: row.ends_at,
+      placementStatus: placementStatus({
+        roomId: row.room_id,
+        startsAt: row.starts_at,
+        endsAt: row.ends_at,
+      }),
+      speakers,
+      calendarUid: row.calendar_uid || `cal_${row.id}`,
+      calendarSequence: Number(row.calendar_sequence) || 0,
+      calendarInviteRecorded: Number(row.calendar_invite_recorded) === 1,
+      createdAt: row.created_at,
+    };
+  }
+
+  private loadSessionRows() {
+    return this.ctx.storage.sql
+      .exec<{
+        id: string;
+        proposal_id: string | null;
+        course_check_plan_id: string;
+        title: string;
+        format: string;
+        track_id: string;
+        room_id: string | null;
+        starts_at: string | null;
+        ends_at: string | null;
+        created_at: string;
+        calendar_uid: string;
+        calendar_sequence: number;
+        calendar_invite_recorded: number;
+      }>(
+        `SELECT id, proposal_id, course_check_plan_id, title, format, track_id,
+                room_id, starts_at, ends_at, created_at,
+                COALESCE(calendar_uid, '') AS calendar_uid,
+                COALESCE(calendar_sequence, 0) AS calendar_sequence,
+                COALESCE(calendar_invite_recorded, 0) AS calendar_invite_recorded
+         FROM sessions
+         ORDER BY created_at ASC, title ASC`,
+      )
+      .toArray();
+  }
+
+  private listCalendarIntentRecords(): CalendarIntentRecord[] {
+    return this.ctx.storage.sql
+      .exec<{
+        id: string;
+        session_id: string;
+        kind: string;
+        uid: string;
+        sequence: number;
+        room_id: string | null;
+        starts_at: string | null;
+        ends_at: string | null;
+        status: string;
+        created_at: string;
+      }>(
+        `SELECT id, session_id, kind, uid, sequence, room_id, starts_at, ends_at,
+                status, created_at
+         FROM calendar_intents
+         ORDER BY created_at ASC`,
+      )
+      .toArray()
+      .map((row) => ({
+        id: row.id,
+        sessionId: row.session_id,
+        kind: row.kind as CalendarIntentRecord["kind"],
+        uid: row.uid,
+        sequence: Number(row.sequence),
+        roomId: row.room_id,
+        startsAt: row.starts_at,
+        endsAt: row.ends_at,
+        status: "pending" as const,
+        createdAt: row.created_at,
+      }));
+  }
+
+  private agendaCounts(sessions: OrganizerSession[]) {
+    let unplaced = 0;
+    let partial = 0;
+    let placed = 0;
+    for (const session of sessions) {
+      if (session.placementStatus === "unplaced") unplaced += 1;
+      else if (session.placementStatus === "partial") partial += 1;
+      else placed += 1;
+    }
+    return { unplaced, partial, placed };
+  }
+
+  private computeConflicts(sessions: OrganizerSession[]) {
+    return detectScheduleConflicts(
+      sessions.map((session) => ({
+        id: session.id,
+        title: session.title,
+        roomId: session.roomId,
+        roomName: session.roomName,
+        startsAt: session.startsAt,
+        endsAt: session.endsAt,
+        speakers: session.speakers.map((speaker) => ({
+          id: speaker.id,
+          name: speaker.name,
+        })),
+      })),
+    );
+  }
+
+  getAgendaWorkspace(): AgendaWorkspaceResponse {
+    this.backfillSessionCalendarUids();
+    const sessions = this.loadSessionRows().map((row) =>
+      this.toOrganizerSession(row),
+    );
+    const conflicts = this.computeConflicts(sessions);
+    const baseCounts = this.agendaCounts(sessions);
+    const event = this.ctx.storage.sql
+      .exec<{ id: string }>(`SELECT id FROM events LIMIT 1`)
+      .toArray()[0];
+    return {
+      eventId: event?.id ?? "",
+      sessions,
+      unplacedSessions: sessions.filter(
+        (session) => session.placementStatus !== "placed",
+      ),
+      conflicts,
+      counts: {
+        ...baseCounts,
+        conflicts: conflicts.length,
+      },
+      calendarIntents: this.listCalendarIntentRecords(),
+    };
+  }
+
+  updateSessionPlacement(
+    sessionId: string,
+    patch: SessionPlacementPatch,
+  ):
+    | { ok: true; result: SessionPlacementResponse }
+    | { ok: false; status: 400 | 404; error: string } {
+    this.backfillSessionCalendarUids();
+    const current = this.loadSessionRows().find((row) => row.id === sessionId);
+    if (!current) {
+      return { ok: false, status: 404, error: "Session not found" };
+    }
+
+    if (
+      patch.roomId === undefined &&
+      patch.startsAt === undefined &&
+      patch.endsAt === undefined
+    ) {
+      return {
+        ok: false,
+        status: 400,
+        error: "At least one of roomId, startsAt, or endsAt is required.",
+      };
+    }
+
+    if (patch.roomId !== undefined && patch.roomId !== null) {
+      const rooms = this.roomNameMap();
+      if (!rooms.has(patch.roomId)) {
+        return { ok: false, status: 400, error: "Unknown room." };
+      }
+    }
+
+    for (const key of ["startsAt", "endsAt"] as const) {
+      const value = patch[key];
+      if (value === undefined || value === null) continue;
+      if (Number.isNaN(Date.parse(value))) {
+        return {
+          ok: false,
+          status: 400,
+          error: `${key} must be a valid ISO timestamp or null.`,
+        };
+      }
+    }
+
+    const nextRoomId =
+      patch.roomId === undefined ? current.room_id : patch.roomId;
+    const nextStartsAt =
+      patch.startsAt === undefined ? current.starts_at : patch.startsAt;
+    const nextEndsAt =
+      patch.endsAt === undefined ? current.ends_at : patch.endsAt;
+
+    if (nextStartsAt && nextEndsAt && Date.parse(nextStartsAt) >= Date.parse(nextEndsAt)) {
+      return {
+        ok: false,
+        status: 400,
+        error: "startsAt must be earlier than endsAt.",
+      };
+    }
+
+    const scheduleChanged =
+      nextRoomId !== current.room_id ||
+      nextStartsAt !== current.starts_at ||
+      nextEndsAt !== current.ends_at;
+
+    const now = new Date().toISOString();
+    const calendarUid = current.calendar_uid || `cal_${current.id}`;
+    let calendarSequence = Number(current.calendar_sequence) || 0;
+    let calendarInviteRecorded = Number(current.calendar_invite_recorded) === 1;
+    const createdIntents: CalendarIntentRecord[] = [];
+
+    const fullyScheduled = Boolean(nextRoomId && nextStartsAt && nextEndsAt);
+
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        `UPDATE sessions
+         SET room_id = ?, starts_at = ?, ends_at = ?, calendar_uid = ?
+         WHERE id = ?`,
+        nextRoomId,
+        nextStartsAt,
+        nextEndsAt,
+        calendarUid,
+        sessionId,
+      );
+
+      if (scheduleChanged && fullyScheduled) {
+        if (!calendarInviteRecorded) {
+          calendarSequence = 0;
+          const intent: CalendarIntentRecord = {
+            id: `cint_${sessionId}_create_${now}`,
+            sessionId,
+            kind: "create",
+            uid: calendarUid,
+            sequence: calendarSequence,
+            roomId: nextRoomId,
+            startsAt: nextStartsAt,
+            endsAt: nextEndsAt,
+            status: "pending",
+            createdAt: now,
+          };
+          this.ctx.storage.sql.exec(
+            `INSERT INTO calendar_intents
+              (id, session_id, kind, uid, sequence, room_id, starts_at, ends_at, status, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+            intent.id,
+            intent.sessionId,
+            intent.kind,
+            intent.uid,
+            intent.sequence,
+            intent.roomId,
+            intent.startsAt,
+            intent.endsAt,
+            intent.createdAt,
+          );
+          this.ctx.storage.sql.exec(
+            `UPDATE sessions
+             SET calendar_sequence = ?, calendar_invite_recorded = 1
+             WHERE id = ?`,
+            calendarSequence,
+            sessionId,
+          );
+          calendarInviteRecorded = true;
+          createdIntents.push(intent);
+        } else {
+          calendarSequence += 1;
+          const intent: CalendarIntentRecord = {
+            id: `cint_${sessionId}_update_${calendarSequence}_${now}`,
+            sessionId,
+            kind: "update",
+            uid: calendarUid,
+            sequence: calendarSequence,
+            roomId: nextRoomId,
+            startsAt: nextStartsAt,
+            endsAt: nextEndsAt,
+            status: "pending",
+            createdAt: now,
+          };
+          this.ctx.storage.sql.exec(
+            `INSERT INTO calendar_intents
+              (id, session_id, kind, uid, sequence, room_id, starts_at, ends_at, status, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+            intent.id,
+            intent.sessionId,
+            intent.kind,
+            intent.uid,
+            intent.sequence,
+            intent.roomId,
+            intent.startsAt,
+            intent.endsAt,
+            intent.createdAt,
+          );
+          this.ctx.storage.sql.exec(
+            `UPDATE sessions SET calendar_sequence = ? WHERE id = ?`,
+            calendarSequence,
+            sessionId,
+          );
+          createdIntents.push(intent);
+        }
+      }
+    });
+
+    const agenda = this.getAgendaWorkspace();
+    const session = agenda.sessions.find((item) => item.id === sessionId);
+    if (!session) {
+      return { ok: false, status: 404, error: "Session not found after update" };
+    }
+    return {
+      ok: true,
+      result: {
+        session,
+        conflicts: agenda.conflicts,
+        counts: agenda.counts,
+        calendarIntentsCreated: createdIntents,
+      },
+    };
+  }
+
+  markSessionCalendarInvitedForTest(sessionId: string): void {
+    const row = this.loadSessionRows().find((item) => item.id === sessionId);
+    if (!row) throw new Error(`Session ${sessionId} not found`);
+    const uid = row.calendar_uid || `cal_${sessionId}`;
+    this.ctx.storage.sql.exec(
+      `UPDATE sessions
+       SET calendar_uid = ?, calendar_invite_recorded = 1, calendar_sequence = ?
+       WHERE id = ?`,
+      uid,
+      Number(row.calendar_sequence) || 0,
+      sessionId,
+    );
+  }
+
   updateSpeakerProfileForTest(
     speakerId: string,
     patch: { biography?: string; name?: string },
@@ -3185,8 +3635,9 @@ export class EventStore extends DurableObject<AppBindings> {
       this.ctx.storage.sql.exec(
         `INSERT INTO sessions
           (id, proposal_id, course_check_plan_id, title, format, track_id,
-           room_id, starts_at, ends_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           room_id, starts_at, ends_at, created_at, calendar_uid,
+           calendar_sequence, calendar_invite_recorded)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`,
         session.plannedId,
         body.actionType === "decision" ? body.proposalId : null,
         plan.id,
@@ -3197,6 +3648,7 @@ export class EventStore extends DurableObject<AppBindings> {
         session.startsAt,
         session.endsAt,
         now,
+        `cal_${session.plannedId}`,
       );
     }
 

@@ -282,6 +282,98 @@ export interface SpeakerPortalSession {
   nextDeadline: string | null;
 }
 
+export type SessionPlacementStatus = "unplaced" | "partial" | "placed";
+
+export type ScheduleConflictKind = "speaker_double_book" | "room_overlap";
+
+export type ScheduleConflictAction =
+  | "move_time"
+  | "move_room"
+  | "keep_placement"
+  | "open_speaker_schedule";
+
+export interface SessionSpeakerRef {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+}
+
+export interface OrganizerSession {
+  id: string;
+  proposalId: string | null;
+  courseCheckPlanId: string;
+  title: string;
+  format: string;
+  trackId: string;
+  trackName: string;
+  roomId: string | null;
+  roomName: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  placementStatus: SessionPlacementStatus;
+  speakers: SessionSpeakerRef[];
+  calendarUid: string;
+  calendarSequence: number;
+  calendarInviteRecorded: boolean;
+  createdAt: string;
+}
+
+export interface ScheduleConflict {
+  id: string;
+  kind: ScheduleConflictKind;
+  summary: string;
+  sessionIds: [string, string];
+  sessionTitles: [string, string];
+  speakerId?: string;
+  speakerName?: string;
+  roomId?: string;
+  roomName?: string;
+  startsAt: string;
+  endsAt: string;
+  actions: ScheduleConflictAction[];
+}
+
+export interface CalendarIntentRecord {
+  id: string;
+  sessionId: string;
+  kind: "create" | "update" | "cancel";
+  uid: string;
+  sequence: number;
+  roomId: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  status: "pending";
+  createdAt: string;
+}
+
+export interface AgendaWorkspaceResponse {
+  eventId: string;
+  sessions: OrganizerSession[];
+  unplacedSessions: OrganizerSession[];
+  conflicts: ScheduleConflict[];
+  counts: {
+    unplaced: number;
+    partial: number;
+    placed: number;
+    conflicts: number;
+  };
+  calendarIntents: CalendarIntentRecord[];
+}
+
+export interface SessionPlacementPatch {
+  roomId?: string | null;
+  startsAt?: string | null;
+  endsAt?: string | null;
+}
+
+export interface SessionPlacementResponse {
+  session: OrganizerSession;
+  conflicts: ScheduleConflict[];
+  counts: AgendaWorkspaceResponse["counts"];
+  calendarIntentsCreated: CalendarIntentRecord[];
+}
+
 export interface AssetUploadStartRequest {
   formId: string;
   formDefinitionVersion: number;

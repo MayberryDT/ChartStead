@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createDefaultCfpDefinition } from "../../shared/cfp-definition";
 import type { OrganizerCfpForm } from "../../shared/events";
-import { App, SubmissionsPage } from "../../src/App";
+import { AgendaPage, App, SubmissionsPage } from "../../src/App";
 import { CfpBuilderPage, CfpFormsPage } from "../../src/CfpBuilderPage";
 import { CfpPage } from "../../src/CfpPage";
 import { ProposalDetailPage } from "../../src/ProposalDetailPage";
@@ -73,6 +73,11 @@ function renderAt(path: string) {
     component: SubmissionsPage,
     validateSearch: (search: Record<string, unknown>) => search,
   });
+  const agendaRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/e/$eventId/agenda",
+    component: AgendaPage,
+  });
   const router = createRouter({
     routeTree: rootRoute.addChildren([
       indexRoute,
@@ -84,6 +89,7 @@ function renderAt(path: string) {
       formBuilderRoute,
       submissionsRoute,
       submissionDetailRoute,
+      agendaRoute,
     ]),
     history: createMemoryHistory({ initialEntries: [path] }),
   });
@@ -201,11 +207,25 @@ describe("organizer application", () => {
   });
 
   it("shows the seeded event in the locked organizer shell", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify(eventsPayload), {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes("/sessions")) {
+        return new Response(
+          JSON.stringify({
+            eventId: "ai-engineer-worlds-fair-2026",
+            sessions: [],
+            unplacedSessions: [],
+            conflicts: [],
+            counts: { unplaced: 0, partial: 0, placed: 0, conflicts: 0 },
+            calendarIntents: [],
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify(eventsPayload), {
         headers: { "content-type": "application/json" },
-      }),
-    );
+      });
+    });
 
     renderAt("/");
 
@@ -227,10 +247,11 @@ describe("organizer application", () => {
     expect(screen.getByLabelText("32 submissions")).toBeVisible();
 
     await userEvent.click(screen.getByRole("link", { name: "Agenda" }));
-    expect(screen.getByRole("link", { name: "Agenda" })).toHaveAttribute(
+    expect(await screen.findByRole("link", { name: "Agenda" })).toHaveAttribute(
       "aria-current",
       "page",
     );
+    expect(await screen.findByLabelText("Unplaced sessions")).toBeVisible();
   });
 
   it("offers Google and magic-link authentication when access is required", async () => {

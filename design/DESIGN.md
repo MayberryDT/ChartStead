@@ -592,9 +592,11 @@ The shape language is **precise with controlled softness**.
 - Standard card radius: `12px`.
 - Schedule blocks and compact table controls: `6px`.
 - Large marketing feature panels: up to `16px`.
-- Status pills and avatars: fully rounded where appropriate.
+- Avatars may be fully circular. **Nothing else may be a pill.**
 
-Avoid excessive pill-shaped containers, oversized bubbly cards, and mixed radius styles in the same view.
+**No pills.** Do not use fully rounded chip/pill containers for status, counts, filters, labels, tags, or schedule metadata. Prefer plain text, square or lightly rounded (`2–6px`) labels, segmented controls with hard corners matching `--r-control`, or left-border accent blocks. Source-of-truth HTML already bans pill chips — keep `DESIGN.md` aligned with that.
+
+Avoid oversized bubbly cards and mixed radius styles in the same view.
 
 ### Iconography
 
@@ -665,7 +667,7 @@ Button labels use verbs and remain specific. Prefer `Publish agenda` over `Conti
 Tables are the primary pattern for submissions, review assignments, sessions, speakers, communications, and audit history.
 
 - Keep the identifying title column prominent.
-- Use status pills with text and color.
+- Use status labels with text and color — never pill chips.
 - Allow filtering, sorting, bulk selection, export, and saved views where appropriate.
 - Row actions live in a trailing menu; the most common action may be visible.
 - Preserve column alignment across loading and empty states.
@@ -682,7 +684,7 @@ Use one large number, a concise label, and optionally one comparison or action. 
 
 ### Status badges
 
-Status names should be stable and explicit. Recommended vocabulary:
+Status badges are compact rectangular labels (small radius, not pills). Status names should be stable and explicit. Recommended vocabulary:
 
 - Draft
 - Open
@@ -723,6 +725,8 @@ The schedule builder is a grid organized by time, room, and track.
 - Keep an obvious unplaced-session pool and allow room, time, or exact placement to remain `TBD`.
 - Save partial placement and known conflicts. Never require a false value merely to satisfy the interface.
 - Show compact live math such as `3 unplaced · 1 conflict`.
+- Session cards are schedule blocks: track pastel fill, dark text, `6px` radius, left accent edge — no status pills and no action buttons on the draggable card. Keyboard **Move Session** lives in the inspector only.
+- Day selectors use the segmented control pattern (joined buttons), not free-floating unstyled tabs.
 
 ### Conflict alerts
 

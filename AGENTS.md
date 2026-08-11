@@ -9,6 +9,7 @@ Keep this file **minimal**. It only points agents at the right sources. Do not d
 - **Never start, resume, or “helpfully continue” a competition ticket unless Tyler explicitly names that ticket in this conversation.** Course Check, research, and docs sessions stay in their lane. Do not open ticket worktrees or edit ticket implementation “while you’re here.”
 - Do not invent recovery handoffs, quarantine status, or blocked gates that Tyler did not ask for.
 - Whenever you create or update a handoff, plan, research report, or other deliverable document on Halla, also copy the final file over SSH to `veelox:/home/tyler/Desktop/Plans/<filename>` and include a direct `file:///home/tyler/Desktop/Plans/<filename>` link plus the exact path in the final response; never report only the folder.
+- **Whenever you finish a ticket (or claim it ready for human QA), always start or reuse a Tailscale-reachable demo and put in the final response: (1) the direct demo URL `http://100.105.117.93:<port>/…` — never localhost — and (2) a short “what to test” checklist for that ticket.** Bind with `--host 0.0.0.0` (or the host Tailscale IP) and confirm the listener is not loopback-only before linking.
 
 ## Start here
 

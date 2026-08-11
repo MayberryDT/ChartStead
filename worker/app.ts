@@ -14,6 +14,7 @@ import type {
   ProposalStatus,
   PublishedCfpForm,
   ReviewerAssignment,
+  SessionPlacementPatch,
 } from "../shared/events";
 import { createAuth, resolveProductionPrincipal } from "./auth";
 import {
@@ -1975,6 +1976,70 @@ export function createApp(options: AppOptions = {}) {
     }
 
     return c.json(result.plan);
+  });
+
+  app.get("/api/events/:eventId/sessions", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const agenda = await c.env.EVENT_STORE.getByName(eventId).getAgendaWorkspace();
+    return c.json(agenda);
+  });
+
+  app.patch("/api/events/:eventId/sessions/:sessionId", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    const sessionId = c.req.param("sessionId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const body = (await c.req.json().catch(() => null)) as SessionPlacementPatch | null;
+    if (!body || typeof body !== "object") {
+      return c.json({ error: "JSON body is required." }, 400);
+    }
+    const patch: SessionPlacementPatch = {};
+    if ("roomId" in body) {
+      if (body.roomId !== null && typeof body.roomId !== "string") {
+        return c.json({ error: "roomId must be a string or null." }, 400);
+      }
+      patch.roomId = body.roomId;
+    }
+    if ("startsAt" in body) {
+      if (body.startsAt !== null && typeof body.startsAt !== "string") {
+        return c.json({ error: "startsAt must be a string or null." }, 400);
+      }
+      patch.startsAt = body.startsAt;
+    }
+    if ("endsAt" in body) {
+      if (body.endsAt !== null && typeof body.endsAt !== "string") {
+        return c.json({ error: "endsAt must be a string or null." }, 400);
+      }
+      patch.endsAt = body.endsAt;
+    }
+    const result = (await c.env.EVENT_STORE.getByName(eventId).updateSessionPlacement(
+      sessionId,
+      patch,
+    )) as
+      | { ok: true; result: import("../shared/events").SessionPlacementResponse }
+      | { ok: false; status: 400 | 404; error: string };
+    if (!result.ok) {
+      return c.json({ error: result.error }, result.status);
+    }
+    return c.json(result.result);
   });
 
   return app;

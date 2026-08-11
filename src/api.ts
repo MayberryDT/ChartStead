@@ -3,6 +3,7 @@ import type {
   ProgramOutcome,
 } from "../shared/course-check";
 import type {
+  AgendaWorkspaceResponse,
   AssetUploadSession,
   CfpDefinitionV1,
   CfpFormResponse,
@@ -16,6 +17,8 @@ import type {
   ProposalValidationError,
   PublicProposal,
   ReviewerAssignment,
+  SessionPlacementPatch,
+  SessionPlacementResponse,
   SpeakerPortalSession,
   SubmissionAnswers,
   SubmitterEditSession,
@@ -639,6 +642,40 @@ export async function applyCourseCheckPlan(
           : body.error
         : "Unable to apply Course Check";
     throw new ApiError(message, response.status, body);
+  }
+  return body;
+}
+
+export async function fetchAgenda(eventId: string): Promise<AgendaWorkspaceResponse> {
+  const response = await fetch(`/api/events/${eventId}/sessions`);
+  const body = await readJson<AgendaWorkspaceResponse | { error: string }>(response);
+  if (!response.ok || !("sessions" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to load agenda",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function updateSessionPlacement(
+  eventId: string,
+  sessionId: string,
+  patch: SessionPlacementPatch,
+): Promise<SessionPlacementResponse> {
+  const response = await fetch(`/api/events/${eventId}/sessions/${sessionId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  const body = await readJson<SessionPlacementResponse | { error: string }>(response);
+  if (!response.ok || !("session" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to update session placement",
+      response.status,
+      body,
+    );
   }
   return body;
 }

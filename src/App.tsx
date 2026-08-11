@@ -9,6 +9,7 @@ import type { EventListResponse, EventRecord } from "../shared/events";
 import { ApiError, fetchEvents } from "./api";
 import { AppSelect } from "./AppSelect";
 import { authClient } from "./auth-client";
+import { AgendaWorkspace } from "./AgendaWorkspace";
 import {
   SubmissionsWorkspace,
   type ProposalQueueState,
@@ -323,6 +324,13 @@ function EventDesk({
         params: { eventId },
         search: queueSearch(initialQueue),
       });
+      return;
+    }
+    if (activeNav === "Agenda") {
+      void navigate({
+        to: "/e/$eventId/agenda",
+        params: { eventId },
+      });
     }
   }
 
@@ -333,6 +341,13 @@ function EventDesk({
         to: "/e/$eventId/submissions",
         params: { eventId: event.id },
         search: queueSearch(initialQueue),
+      });
+      return;
+    }
+    if (item === "Agenda") {
+      void navigate({
+        to: "/e/$eventId/agenda",
+        params: { eventId: event.id },
       });
       return;
     }
@@ -376,11 +391,18 @@ function EventDesk({
 
   const cfpHref = `/e/${event.id}/cfp`;
   const formsHref = `/e/${event.id}/forms`;
-  const topbarTitle = activeNav === "Submissions" ? "Submissions" : event.name;
+  const topbarTitle =
+    activeNav === "Submissions"
+      ? "Submissions"
+      : activeNav === "Agenda"
+        ? "Agenda"
+        : event.name;
   const topbarMeta =
     activeNav === "Submissions"
       ? `${event.submissionCount} total · ${event.unreviewedCount} unreviewed · track routing on`
-      : formatDateRange(event.startsOn, event.endsOn);
+      : activeNav === "Agenda"
+        ? `${formatDateRange(event.startsOn, event.endsOn)} · day and room placement`
+        : formatDateRange(event.startsOn, event.endsOn);
   const currentRole = data.principal.rolesByEvent?.[event.id] ?? data.principal.role;
 
   return (
@@ -400,13 +422,15 @@ function EventDesk({
               href={
                 item === "Submissions"
                   ? `/e/${event.id}/submissions`
-                  : item === "Overview"
-                    ? "/"
-                    : `#${item.toLowerCase()}`
+                  : item === "Agenda"
+                    ? `/e/${event.id}/agenda`
+                    : item === "Overview"
+                      ? "/"
+                      : `#${item.toLowerCase()}`
               }
               aria-current={activeNav === item ? "page" : undefined}
               onClick={(click) => {
-                if (item === "Speakers" || item === "Agenda" || item === "Messages" || item === "Settings") {
+                if (item === "Speakers" || item === "Messages" || item === "Settings") {
                   click.preventDefault();
                   setActiveNav(item);
                   return;
@@ -484,6 +508,8 @@ function EventDesk({
             onQueueChange={changeQueue}
             cfpHref={cfpHref}
           />
+        ) : activeNav === "Agenda" ? (
+          <AgendaWorkspace event={event} />
         ) : activeNav === "Overview" ? (
           <OverviewWorkspace event={event} />
         ) : (
@@ -559,6 +585,32 @@ export function SubmissionsPage() {
       initialEventId={params.eventId ?? null}
       initialProposalId={params.proposalId ?? null}
       initialQueue={parseQueueSearch(search)}
+    />
+  );
+}
+
+export function AgendaPage() {
+  const query = useOrganizerData();
+  const params = useParams({ strict: false }) as { eventId?: string };
+
+  if (query.isPending) return <LoadingShell />;
+  if (query.error instanceof ApiError && query.error.status === 401) return <SignIn />;
+  if (query.isError) {
+    return (
+      <main className="sign-in-shell">
+        <section className="error-panel" role="alert">
+          <h1>ChartStead could not open the agenda.</h1>
+          <p>{query.error.message}</p>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <EventDesk
+      data={query.data}
+      initialNav="Agenda"
+      initialEventId={params.eventId ?? null}
     />
   );
 }
