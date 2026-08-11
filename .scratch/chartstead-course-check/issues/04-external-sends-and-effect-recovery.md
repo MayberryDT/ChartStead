@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — Communication drafts and recipient reasoning.
 
-**Status:** blocked
+**Status:** ready-for-agent
 
 - [ ] `Send messages` approves and begins delivery of the exact frozen Communication Course Check version.
 - [ ] Internal send intent, audit history, idempotency receipts, and address-level outbox effects commit atomically before network delivery.
@@ -24,4 +24,4 @@
 
 Blocked by Course Check 03 — Communication drafts and recipient reasoning.
 
-- 2026-08-11 — frontier-reconcile: Still blocked on: Course Check 03 (in-review).
+- 2026-08-11 — frontier-reconcile: All blockers done → ready-for-agent.

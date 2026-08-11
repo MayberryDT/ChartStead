@@ -25,4 +25,4 @@
 
 Blocked by Course Check 02, 04, 05, 06, and 07, plus Competition Ticket 10 — Airtable mapping and authenticated HTTP foundation.
 
-- 2026-08-11 — frontier-reconcile: Still blocked on: Course Check 04 (blocked); Course Check 05 (blocked); Course Check 07 (blocked).
+- 2026-08-11 — frontier-reconcile: Still blocked on: Course Check 04 (ready-for-agent); Course Check 05 (blocked); Course Check 07 (ready-for-agent).
