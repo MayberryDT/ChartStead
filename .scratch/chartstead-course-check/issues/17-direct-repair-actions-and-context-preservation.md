@@ -4,7 +4,7 @@
 
 **Blocked by:** Course Check 14 — Truthful decision review projection and receipts.
 
-**Status:** in-progress
+**Status:** done
 
 ## Source
 
@@ -31,3 +31,5 @@
 - 2026-08-12 — Started in the overnight parallel frontier after Course Check 14; automated verification is required, with demos/review/QA deferred per Tyler's instruction.
 
 - 2026-08-12 — Implemented stable permission-filtered decision issue actions, dependency-safe revalidation summaries, inline acknowledge/exclusion paths, exact source-field links, and session-backed review return context. Focused contract/UI tests passed 5/5 and 9/9; full UI passed 76/76 serialized; full worker passed 186/186 serialized; full e2e passed 17/17; build/typecheck and `git diff --check` passed. Earlier concurrent broad runs reproduced only known 5-second host-load timeouts, whose targeted cases passed. Status intentionally remains in-progress per execution instruction; no demo or human QA was started.
+
+- 2026-08-12 — Integrated over Course Check 15/16. Combined verification passed: focused worker 15/15, focused UI 17/17, Course Check browser walkthrough 6/6, full UI 85/85, full worker 188/188, typecheck, and production build. Marked done under Tyler's explicit instruction to defer demos, reviews, and human QA.
