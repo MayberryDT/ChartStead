@@ -1048,8 +1048,84 @@ function CommunicationBody({
 }) {
   const body = plan.body as CommunicationPlanBody;
   const draftsFrozen = body.stageVisibility.draft === "complete";
+  const communicationIssues = body.findings.filter(
+    (finding) =>
+      finding.code.startsWith("recipient_") ||
+      finding.code === "prior_related_communication",
+  );
+  const recipientById = new Map(
+    body.recipientGroups.flatMap((group) =>
+      group.recipients.map((recipient) => [
+        recipient.recipientId,
+        { recipient, group },
+      ] as const),
+    ),
+  );
   return (
     <div className="course-check-sections">
+      {body.source.kind === "linked_decision" ? (
+        <section className="panel connected-course-check-progress" aria-label="Connected review progress">
+          <h2>Decision and message progress</h2>
+          <ol>
+            <li data-state="complete"><strong>Decision applied</strong><span>Internal decisions and records are committed.</span></li>
+            <li data-state={draftsFrozen ? "complete" : "current"}><strong>{draftsFrozen ? "Drafts created" : "Prepare drafts"}</strong><span>Message content and exact recipients require a separate commit.</span></li>
+            <li data-state={body.stageVisibility.send === "complete" ? "complete" : "pending"}><strong>Send messages</strong><span>Sending remains a separate explicit approval.</span></li>
+          </ol>
+        </section>
+      ) : null}
+
+      {communicationIssues.length > 0 ? (
+        <section className="panel" aria-labelledby="communication-issues-title">
+          <h2 id="communication-issues-title">Message issues</h2>
+          <p className="muted">
+            These affect draft preparation only. Applied decisions and internal records stay committed.
+          </p>
+          <ul className="course-check-findings">
+            {communicationIssues.map((finding) => {
+              const affected = finding.entityRef
+                ? recipientById.get(finding.entityRef)
+                : undefined;
+              const proposalId = affected?.group.proposalId;
+              return (
+                <li key={finding.id} data-severity={finding.severity}>
+                  <strong>{finding.severity === "warning" ? "Check" : "Details"}</strong>
+                  <p>{finding.message}</p>
+                  {finding.recoveryGuidance ? (
+                    <p className="course-check-recovery">{finding.recoveryGuidance}</p>
+                  ) : null}
+                  <div className="course-check-issue-actions" aria-label="Issue actions">
+                    {proposalId &&
+                    (finding.code === "recipient_missing_address" ||
+                      finding.code === "recipient_invalid_address") ? (
+                      <a
+                        className="btn btn-secondary btn-sm"
+                        href={`/e/${encodeURIComponent(plan.eventId)}/submissions/${encodeURIComponent(proposalId)}?field=speakerEmail&returnTo=${encodeURIComponent(`/e/${plan.eventId}/course-checks/${body.parentPlanId ?? plan.id}?stage=${plan.id}`)}`}
+                      >
+                        Correct speaker email
+                      </a>
+                    ) : null}
+                    {affected?.recipient.deliverability === "ok" ? (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={draftsFrozen}
+                        onClick={() => onToggleRecipient(affected.recipient.recipientId)}
+                      >
+                        {selectedRecipientIds.has(affected.recipient.recipientId)
+                          ? "Exclude from drafts"
+                          : "Include in drafts"}
+                      </button>
+                    ) : (
+                      <span className="muted">No draft will be created for this recipient.</span>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
+
       <section className="panel">
         <h2>Communication plan</h2>
         <dl className="course-check-meta">
@@ -1266,14 +1342,16 @@ function CommunicationBody({
         </section>
       ) : null}
 
-      <section className="panel">
-        <h2>Evidence</h2>
-        <div className="course-check-evidence-list">
-          {(body.evidenceSections ?? []).map((section) => (
-            <EvidenceSectionView key={section.kind} section={section} plan={plan} />
-          ))}
-        </div>
-      </section>
+      {(body.evidenceSections ?? []).length > 0 ? (
+        <details className="panel decision-exception-details">
+          <summary>Details</summary>
+          <div className="course-check-evidence-list">
+            {(body.evidenceSections ?? []).map((section) => (
+              <EvidenceSectionView key={section.kind} section={section} plan={plan} />
+            ))}
+          </div>
+        </details>
+      ) : null}
 
       <OperationHistoryPanel plan={plan} />
     </div>
@@ -1289,6 +1367,7 @@ export function CourseCheckPage() {
   const originSearch = useSearch({
     from: "/e/$eventId/course-checks/$planId",
   });
+  const activePlanId = originSearch.stage ?? planId;
   const [message, setMessage] = useState<string | null>(null);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [deferReason, setDeferReason] = useState("");
@@ -1307,37 +1386,37 @@ export function CourseCheckPage() {
     new Set(),
   );
   const applyKey = useMemo(
-    () => `ui-apply-${planId}-${createClientId()}`,
-    [planId],
+    () => `ui-apply-${activePlanId}-${createClientId()}`,
+    [activePlanId],
   );
   const deferKey = useMemo(
-    () => `ui-defer-${planId}-${createClientId()}`,
-    [planId],
+    () => `ui-defer-${activePlanId}-${createClientId()}`,
+    [activePlanId],
   );
   const draftsKey = useMemo(
-    () => `ui-drafts-${planId}-${createClientId()}`,
-    [planId],
+    () => `ui-drafts-${activePlanId}-${createClientId()}`,
+    [activePlanId],
   );
   const reviseKey = useMemo(
-    () => `ui-revise-${planId}-${createClientId()}`,
-    [planId],
+    () => `ui-revise-${activePlanId}-${createClientId()}`,
+    [activePlanId],
   );
   const linkCommKey = useMemo(
     () => `ui-link-comm-${planId}-${createClientId()}`,
     [planId],
   );
   const airtableKey = useMemo(
-    () => `ui-airtable-${planId}-${createClientId()}`,
-    [planId],
+    () => `ui-airtable-${activePlanId}-${createClientId()}`,
+    [activePlanId],
   );
   const sendKey = useMemo(
-    () => `ui-send-${planId}-${createClientId()}`,
-    [planId],
+    () => `ui-send-${activePlanId}-${createClientId()}`,
+    [activePlanId],
   );
 
   const planQuery = useQuery({
-    queryKey: ["course-check", eventId, planId],
-    queryFn: () => fetchCourseCheckPlan(eventId, planId),
+    queryKey: ["course-check", eventId, activePlanId],
+    queryFn: () => fetchCourseCheckPlan(eventId, activePlanId),
     refetchInterval: (query) => {
       const current = query.state.data;
       if (!current || current.body.actionType !== "communication") return false;
@@ -1373,7 +1452,7 @@ export function CourseCheckPage() {
     setAcknowledgedActionIds(new Set(context.acknowledgedIssueIds));
   }, []);
   useCourseCheckReturnContext(
-    planId,
+    activePlanId,
     Boolean(planQuery.data),
     restoreReviewContext,
   );
@@ -1414,7 +1493,7 @@ export function CourseCheckPage() {
       });
     },
     onSuccess: (next) => {
-      queryClient.setQueryData(["course-check", eventId, planId], next);
+      queryClient.setQueryData(["course-check", eventId, activePlanId], next);
       void queryClient.invalidateQueries({ queryKey: ["proposals", eventId] });
       void queryClient.invalidateQueries({ queryKey: ["public-program", eventId] });
       setMessage(
@@ -1447,7 +1526,7 @@ export function CourseCheckPage() {
         idempotencyKey: `${deferKey}-${itemIds.join(",")}`,
       }),
     onSuccess: (next) => {
-      queryClient.setQueryData(["course-check", eventId, planId], next);
+      queryClient.setQueryData(["course-check", eventId, activePlanId], next);
       setSelectedItemIds(new Set());
       setDeferReason("");
       if (
@@ -1488,7 +1567,7 @@ export function CourseCheckPage() {
       });
     },
     onSuccess: (next) => {
-      queryClient.setQueryData(["course-check", eventId, planId], next);
+      queryClient.setQueryData(["course-check", eventId, activePlanId], next);
       setMessage("Saved a new communication plan version. Draft approval cleared.");
     },
   });
@@ -1537,7 +1616,7 @@ export function CourseCheckPage() {
       });
     },
     onSuccess: (next) => {
-      queryClient.setQueryData(["course-check", eventId, planId], next);
+      queryClient.setQueryData(["course-check", eventId, activePlanId], next);
       void queryClient.invalidateQueries({ queryKey: ["course-checks", eventId] });
       setMessage("Drafts frozen. Review the exact payloads, then send when ready.");
     },
@@ -1556,7 +1635,7 @@ export function CourseCheckPage() {
       });
     },
     onSuccess: (next) => {
-      queryClient.setQueryData(["course-check", eventId, planId], next);
+      queryClient.setQueryData(["course-check", eventId, activePlanId], next);
       setMessage(
         "Delivery intent is durable. Each address now has an independent effect record.",
       );
@@ -1567,12 +1646,12 @@ export function CourseCheckPage() {
     mutationFn: (effectId: string) =>
       retryCommunicationEffect(
         eventId,
-        planId,
+        activePlanId,
         effectId,
         `ui-retry-${effectId}-${createClientId()}`,
       ),
     onSuccess: (next) => {
-      queryClient.setQueryData(["course-check", eventId, planId], next);
+      queryClient.setQueryData(["course-check", eventId, activePlanId], next);
       setMessage("The selected address is queued for a new bounded delivery attempt.");
     },
   });
@@ -1584,14 +1663,14 @@ export function CourseCheckPage() {
       note: string;
       providerReference: string;
     }) =>
-      reconcileCommunicationEffect(eventId, planId, input.effectId, {
+      reconcileCommunicationEffect(eventId, activePlanId, input.effectId, {
         outcome: input.outcome,
         note: input.note,
         providerReference: input.providerReference || undefined,
         idempotencyKey: `ui-reconcile-${input.effectId}-${createClientId()}`,
       }),
     onSuccess: (next) => {
-      queryClient.setQueryData(["course-check", eventId, planId], next);
+      queryClient.setQueryData(["course-check", eventId, activePlanId], next);
       setMessage("The unknown provider outcome was reconciled and recorded.");
     },
   });
@@ -1603,7 +1682,7 @@ export function CourseCheckPage() {
       subject: string;
       bodyText: string;
     }) =>
-      createCommunicationCorrection(eventId, planId, input.effectId, {
+      createCommunicationCorrection(eventId, activePlanId, input.effectId, {
         reason: input.reason,
         subject: input.subject,
         bodyText: input.bodyText,
@@ -1621,9 +1700,18 @@ export function CourseCheckPage() {
         idempotencyKey: linkCommKey,
       }),
     onSuccess: (next) => {
+      queryClient.setQueryData(["course-check", eventId, next.id], next);
       void navigate({
         to: "/e/$eventId/course-checks/$planId",
-        params: { eventId, planId: next.id },
+        params: { eventId, planId },
+        search: {
+          q: originSearch.q,
+          status: originSearch.status,
+          track: originSearch.track,
+          sort: originSearch.sort,
+          stage: next.id,
+        },
+        replace: true,
       });
     },
   });
@@ -1643,7 +1731,7 @@ export function CourseCheckPage() {
       return setCourseCheckAirtableDisposition(eventId, input.plan, input.action, key);
     },
     onSuccess: (next) => {
-      queryClient.setQueryData(["course-check", eventId, planId], next);
+      queryClient.setQueryData(["course-check", eventId, activePlanId], next);
       setMessage("Airtable stage updated. Internal ChartStead work remains committed.");
     },
   });
@@ -1773,7 +1861,13 @@ export function CourseCheckPage() {
           <p className="eyebrow">Course Check</p>
           <h1>
             {isCommunication
-              ? "Communication workspace"
+              ? communicationBody?.source.kind === "linked_decision"
+                ? communicationBody.templateKind === "acceptance"
+                  ? "Prepare acceptance messages"
+                  : communicationBody.templateKind === "decline"
+                    ? "Prepare decline messages"
+                    : "Prepare decision messages"
+                : "Communication workspace"
               : isPublication
                 ? "Program publication workspace"
                 : isDecision
@@ -1782,7 +1876,9 @@ export function CourseCheckPage() {
           </h1>
           <p className="lede">
             {isCommunication
-              ? "Review exact recipients, approve delivery, and recover every address from the delivery results."
+              ? communicationBody?.source.kind === "linked_decision"
+                ? "Continue the decision review here: edit message content, check exact recipients, then separately create drafts. No messages are sent at this stage."
+                : "Review exact recipients, approve delivery, and recover every address from the delivery results."
               : isPublication
                 ? "Inspect the public program changes before you publish, unpublish, or restore. Communication stays separate."
                 : decisionReview?.courseCheckSummary ??

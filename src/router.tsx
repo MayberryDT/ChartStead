@@ -118,6 +118,7 @@ function validateProposalQueueSearch(search: Record<string, unknown>): {
   sort?: string;
   field?: string;
   returnTo?: string;
+  stage?: string;
 } {
   return {
     q: typeof search.q === "string" ? search.q : undefined,
@@ -126,6 +127,7 @@ function validateProposalQueueSearch(search: Record<string, unknown>): {
     sort: typeof search.sort === "string" ? search.sort : undefined,
     field: typeof search.field === "string" ? search.field : undefined,
     returnTo: typeof search.returnTo === "string" ? search.returnTo : undefined,
+    stage: typeof search.stage === "string" ? search.stage : undefined,
   };
 }
 

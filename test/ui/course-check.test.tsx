@@ -755,6 +755,130 @@ describe("Course Check review workspace", () => {
     );
   });
 
+  it("advances from an applied decision into editable message preparation in the same workspace", async () => {
+    const user = userEvent.setup();
+    const requests: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      requests.push(`${method} ${url}`);
+      if (method === "GET" && url.endsWith("/course-checks/plan-1")) {
+        return jsonResponse(projectedAppliedPlan);
+      }
+      if (method === "POST" && url.endsWith("/course-checks/communications")) {
+        return jsonResponse(communicationPlan, 201);
+      }
+      if (method === "GET" && url.endsWith("/course-checks/communication-plan-1")) {
+        return jsonResponse(communicationPlan);
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    });
+    const { router } = renderCourseCheck();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Prepare communication drafts" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Prepare acceptance messages" }),
+    ).toBeVisible();
+    expect(screen.getByText("Decision applied")).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Subject" })).toHaveValue(
+      communicationBody.subject,
+    );
+    expect(screen.getByRole("button", { name: "Create drafts" })).toBeEnabled();
+    expect(router.state.location.pathname).toBe(
+      "/e/pacific-open-data-summit-2026/course-checks/plan-1",
+    );
+    expect(requests.filter((request) => request.startsWith("POST "))).toEqual([
+      "POST /api/events/pacific-open-data-summit-2026/course-checks/communications",
+    ]);
+  });
+
+  it("reloads and shares the exact connected stage without changing the root workspace", async () => {
+    const requests: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      requests.push(`${method} ${url}`);
+      if (method === "GET" && url.endsWith("/course-checks/communication-plan-1")) {
+        return jsonResponse(communicationPlan);
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    });
+    const { router } = renderCourseCheck(
+      "/e/pacific-open-data-summit-2026/course-checks/plan-1?stage=communication-plan-1",
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Prepare acceptance messages" }),
+    ).toBeVisible();
+    expect(screen.getByText("Decision applied")).toBeVisible();
+    expect(router.state.location.pathname).toBe(
+      "/e/pacific-open-data-summit-2026/course-checks/plan-1",
+    );
+    expect(router.state.location.search).toMatchObject({
+      stage: "communication-plan-1",
+    });
+    expect(requests).toEqual([
+      "GET /api/events/pacific-open-data-summit-2026/course-checks/communication-plan-1",
+    ]);
+  });
+
+  it("keeps communication exceptions inside the connected review and limits them to drafts", async () => {
+    const missingFinding = {
+      id: "finding-missing",
+      severity: "warning" as const,
+      code: "recipient_missing_address",
+      message: "Example Speaker has no email address.",
+      recoveryGuidance: "Add a deliverable address or exclude this recipient before creating drafts.",
+      entityRef: "recipient-missing",
+    };
+    const issuePlan: CourseCheckPlan = {
+      ...communicationPlan,
+      state: "Needs attention",
+      body: {
+        ...communicationBody,
+        findings: [missingFinding],
+        recipientGroups: [
+          {
+            groupId: "group-missing",
+            proposalId: body.proposalId,
+            sessionId: null,
+            label: "A complete speaker profile",
+            outcome: "accepted",
+            recipients: [
+              {
+                recipientId: "recipient-missing",
+                address: "",
+                name: "Example Speaker",
+                role: "primary",
+                speakerId: null,
+                inclusion: "missing",
+                inclusionReason: "No deliverable address is available.",
+                deliverability: "missing",
+                selected: false,
+                priorCommunications: [],
+              },
+            ],
+          },
+        ],
+      },
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(issuePlan));
+    renderCourseCheck(
+      "/e/pacific-open-data-summit-2026/course-checks/plan-1?stage=communication-plan-1",
+    );
+
+    expect(await screen.findByRole("heading", { name: "Message issues" })).toBeVisible();
+    expect(screen.getByText(/Applied decisions and internal records stay committed/)).toBeVisible();
+    expect(screen.getByRole("link", { name: "Correct speaker email" })).toHaveAttribute(
+      "href",
+      expect.stringContaining("field=speakerEmail"),
+    );
+    expect(screen.getByText("No draft will be created for this recipient.")).toBeVisible();
+  });
+
   it("keeps a clean fast-path receipt persistent without implicitly drafting or sending", async () => {
     const cleanBody: DecisionPlanBody = {
       ...body,

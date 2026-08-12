@@ -84,6 +84,44 @@ test("decision review stays truthful before and after commit", async ({ page }) 
   );
 });
 
+test("decision result advances to draft preparation without leaving the workspace", async ({ page }) => {
+  const proposalsResponse = await page.request.get(
+    "/api/events/pacific-open-data-summit-2026/proposals",
+  );
+  const proposals = (await proposalsResponse.json()) as {
+    proposals: Array<{ id: string; programOutcome: string | null }>;
+  };
+  const proposal = proposals.proposals.find((row) => !row.programOutcome);
+  expect(proposal).toBeTruthy();
+  const key = `cc18-browser-${Date.now()}`;
+  const createResponse = await page.request.post(
+    "/api/events/pacific-open-data-summit-2026/course-checks/decisions",
+    {
+      headers: { "idempotency-key": key },
+      data: {
+        items: [{ proposalId: proposal!.id, outcome: "declined" }],
+        idempotencyKey: key,
+      },
+    },
+  );
+  expect(createResponse.status()).toBe(201);
+  const plan = (await createResponse.json()) as { id: string };
+
+  await page.goto(`/e/pacific-open-data-summit-2026/course-checks/${plan.id}`);
+  await page.getByRole("button", { name: "Decline 1 submission" }).click();
+  await expect(page.getByRole("heading", { name: "Decline decision applied" })).toBeVisible();
+  await page.getByRole("button", { name: "Prepare communication drafts" }).click();
+
+  await expect(page.getByRole("heading", { name: "Prepare decline messages" })).toBeVisible();
+  await expect(page.getByText("Decision applied")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create drafts" })).toBeEnabled();
+  await expect(page).toHaveURL(
+    new RegExp(`/course-checks/${plan.id}\\?stage=[^&]+$`),
+  );
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Prepare decline messages" })).toBeVisible();
+});
+
 test("batch decision review reports exact scope before and after commit", async ({
   page,
 }) => {

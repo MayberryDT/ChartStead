@@ -2554,6 +2554,45 @@ table.grid tbody tr[aria-selected="true"] td:first-child {
   font-size: 13px;
 }
 
+.connected-course-check-progress ol {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.connected-course-check-progress li {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--outline);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+}
+
+.connected-course-check-progress li[data-state="complete"] {
+  border-color: var(--success);
+}
+
+.connected-course-check-progress li[data-state="current"] {
+  border-color: var(--primary);
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+
+.connected-course-check-progress li span {
+  color: var(--on-surface-variant);
+  font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  .connected-course-check-progress ol {
+    grid-template-columns: 1fr;
+  }
+}
+
 .course-check-changed-inputs {
   margin-bottom: 12px;
   padding: 12px;
