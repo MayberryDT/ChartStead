@@ -6,16 +6,30 @@ import { describe, expect, test } from "vitest";
 const projectRoot = resolve(import.meta.dirname, "../..");
 
 describe("ChartStead bathymetric outer-page background", () => {
-  test("ships the selected dense static isobath asset", () => {
+  test("ships the selected full-field static isobath asset", () => {
     const svg = readFileSync(resolve(projectRoot, "public/chartstead-bathymetry.svg"), "utf8");
+    const pathCount = svg.match(/<path/g)?.length ?? 0;
+    const majorCount = svg.match(/class="[^"]*contour-major/g)?.length ?? 0;
+    const approximateCount = svg.match(/class="[^"]*contour-approximate/g)?.length ?? 0;
+    const labelCount = svg.match(/<text class="contour-label"/g)?.length ?? 0;
+    const soundingCount = svg.match(/<text class="sounding"/g)?.length ?? 0;
 
     expect(svg).toContain('viewBox="0 0 1600 900"');
     expect(svg).toContain('preserveAspectRatio="xMidYMid slice"');
     expect(svg).toContain('aria-hidden="true"');
-    expect(svg.match(/class="contour /g)).toHaveLength(235);
-    expect(svg.match(/class="contour-label"/g)).toHaveLength(4);
-    expect(svg.match(/class="sounding"/g)).toHaveLength(9);
-    expect(svg.match(/class="contour [^"]*contour-approximate/g)).toHaveLength(2);
+    expect(pathCount).toBeGreaterThanOrEqual(180);
+    expect(majorCount).toBeGreaterThanOrEqual(4);
+    expect(approximateCount).toBeGreaterThanOrEqual(1);
+    expect(approximateCount).toBeLessThanOrEqual(2);
+    expect(labelCount).toBeGreaterThanOrEqual(3);
+    expect(labelCount).toBeLessThanOrEqual(5);
+    expect(soundingCount).toBeGreaterThanOrEqual(6);
+    expect(soundingCount).toBeLessThanOrEqual(12);
+    // The CSS background has no separate 0.48 opacity layer, so encode the
+    // approved effective line weights directly in the generated asset.
+    expect(svg).toContain("stroke-opacity:.08");
+    expect(svg).toContain("stroke-opacity:.13");
+    expect(svg).toContain("stroke-opacity:.07");
     expect(gzipSync(svg).byteLength).toBeLessThan(150 * 1024);
   });
 

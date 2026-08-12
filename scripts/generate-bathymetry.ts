@@ -14,9 +14,9 @@ const GRID_WIDTH = 225;
 const GRID_HEIGHT = 138;
 const CROP_X = (GRID_WIDTH - VISIBLE_GRID_WIDTH) / 2;
 const CROP_Y = (GRID_HEIGHT - VISIBLE_GRID_HEIGHT) / 2;
-const SEED = "chartstead-auth-basin-archipelago-v2";
+const SEED = "chartstead-outer-page-basin-v1";
 const PRIMARY_THRESHOLDS = [2, 5, 10, 15, 20, 30, 50];
-const SUPPLEMENTAL_INTERVAL = 0.82;
+const SUPPLEMENTAL_INTERVAL = 0.9;
 const MAJOR_THRESHOLDS = new Set([10, 20, 50]);
 const OUTPUT_PATH = resolve("public/chartstead-bathymetry.svg");
 
@@ -54,8 +54,8 @@ function buildThresholds() {
 function createTerrainFeatures(): TerrainFeature[] {
   const random = alea(`${SEED}-features`);
   const anchors: Point[] = [
-    [0.09, 0.16], [0.31, 0.12], [0.58, 0.17], [0.85, 0.2],
-    [0.12, 0.73], [0.38, 0.82], [0.67, 0.76], [0.89, 0.69],
+    [0.08, 0.14], [0.3, 0.12], [0.57, 0.16], [0.86, 0.2],
+    [0.13, 0.72], [0.38, 0.83], [0.67, 0.74], [0.9, 0.7],
   ];
 
   const features = anchors.map(([anchorX, anchorY], index): TerrainFeature => {
@@ -71,12 +71,12 @@ function createTerrainFeatures(): TerrainFeature[] {
   });
 
   features.push({
-    x: 0.24 + random() * 0.52,
-    y: 0.27 + random() * 0.46,
-    amplitude: random() > 0.5 ? 0.58 : -0.58,
-    sigmaX: 0.2 + random() * 0.09,
-    sigmaY: 0.035 + random() * 0.035,
-    angle: -0.9 + random() * 1.8,
+    x: 0.5,
+    y: 0.48,
+    amplitude: -0.6,
+    sigmaX: 0.26,
+    sigmaY: 0.045,
+    angle: -0.45,
   });
   return features;
 }
@@ -105,8 +105,8 @@ function generateDepthField() {
     for (let x = 0; x < GRID_WIDTH; x += 1) {
       const normalizedX = (x - CROP_X) / VISIBLE_GRID_WIDTH;
       const normalizedY = (y - CROP_Y) / VISIBLE_GRID_HEIGHT;
-      const warpedX = normalizedX + warpXNoise(normalizedX * 1.1 - 7.3, normalizedY * 1.1 + 2.7) * 0.13;
-      const warpedY = normalizedY + warpYNoise(normalizedX * 1.1 + 11.8, normalizedY * 1.1 - 5.1) * 0.13;
+      const warpedX = normalizedX + warpXNoise(normalizedX * 1.08 - 7.3, normalizedY * 1.08 + 2.7) * 0.13;
+      const warpedY = normalizedY + warpYNoise(normalizedX * 1.08 + 11.8, normalizedY * 1.08 - 5.1) * 0.13;
 
       let fractionalBrownianMotion = 0;
       let amplitude = 0.2;
@@ -296,7 +296,7 @@ export function generateBathymetrySvg() {
     `<text class="sounding" x="${sounding.x}" y="${sounding.y}">${sounding.value}</text>`,
   ).join("");
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${OUTPUT_WIDTH} ${OUTPUT_HEIGHT}" preserveAspectRatio="xMidYMid slice" role="presentation" aria-hidden="true"><style>.contour{fill:none;stroke:#2f5d98;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}.contour-minor{stroke-width:.7;stroke-opacity:.17}.contour-major{stroke-width:1;stroke-opacity:.26}.contour-approximate{stroke-dasharray:11 8;stroke-opacity:.15}.contour-label,.sounding{fill:#526f8d;font-family:ui-monospace,"IBM Plex Mono",monospace;paint-order:stroke;stroke:#f3f5f7;stroke-width:4;stroke-linejoin:round}.contour-label{font-size:14px;font-weight:600;letter-spacing:.06em}.sounding{font-size:12px;font-weight:500;fill-opacity:.58}</style><g>${paths}${labelText}${soundingText}</g></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${OUTPUT_WIDTH} ${OUTPUT_HEIGHT}" preserveAspectRatio="xMidYMid slice" role="presentation" aria-hidden="true"><style>.contour{fill:none;stroke:#2f5d98;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}.contour-minor{stroke-width:.7;stroke-opacity:.08}.contour-major{stroke-width:1;stroke-opacity:.13}.contour-approximate{stroke-dasharray:11 8;stroke-opacity:.07}.contour-label,.sounding{fill:#526f8d;font-family:ui-monospace,"IBM Plex Mono",monospace;paint-order:stroke;stroke:#f3f5f7;stroke-width:4;stroke-linejoin:round}.contour-label{font-size:14px;font-weight:600;letter-spacing:.06em}.sounding{font-size:12px;font-weight:500;fill-opacity:.28}</style><g>${paths}${labelText}${soundingText}</g></svg>`;
 }
 
 async function main() {
