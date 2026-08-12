@@ -130,3 +130,122 @@ test("batch decision review reports exact scope before and after commit", async 
   await expect(page.getByText("No emails were sent.")).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`/course-checks/${plan.id}$`));
 });
+
+test("clean decision fast path preserves keyboard focus, history, and batch selection", async ({
+  page,
+}) => {
+  const proposalsResponse = await page.request.get(
+    "/api/events/pacific-open-data-summit-2026/proposals",
+  );
+  const proposals = (await proposalsResponse.json()) as {
+    proposals: Array<{ id: string; programOutcome: string | null }>;
+  };
+  const proposal = proposals.proposals.find((row) => !row.programOutcome);
+  expect(proposal).toBeTruthy();
+
+  const key = `cc15-browser-fast-${Date.now()}`;
+  const createResponse = await page.request.post(
+    "/api/events/pacific-open-data-summit-2026/course-checks/decisions",
+    {
+      headers: { "idempotency-key": key },
+      data: {
+        items: [{ proposalId: proposal!.id, outcome: "declined" }],
+        idempotencyKey: key,
+      },
+    },
+  );
+  expect(createResponse.status()).toBe(201);
+  const durablePlan = (await createResponse.json()) as Record<string, any>;
+  const cleanPlan = {
+    ...durablePlan,
+    body: {
+      ...durablePlan.body,
+      findings: [],
+      evidenceSections: [],
+      followUpQueue: [],
+      linkedPlanIds: [],
+      parentPlanId: null,
+      batchGroupId: null,
+      items: durablePlan.body.items.map((item: Record<string, any>) => ({
+        ...item,
+        status: "active",
+        findings: [],
+      })),
+      airtable: {
+        configured: false,
+        disposition: "removed",
+        summary: "No mapped Airtable writes.",
+        effects: [],
+      },
+    },
+    decisionReview: {
+      ...durablePlan.decisionReview,
+      courseCheckSummary: "Course Check found no issues.",
+      counts: {
+        ...durablePlan.decisionReview.counts,
+        needsAction: 0,
+        warning: 0,
+        skipped: 0,
+      },
+      issues: [],
+      freshness: {
+        ...durablePlan.decisionReview.freshness,
+        state: "current",
+      },
+      effectGroups: durablePlan.decisionReview.effectGroups.filter(
+        (group: { key: string }) => group.key !== "integration",
+      ),
+      permittedCommits: durablePlan.decisionReview.permittedCommits.filter(
+        (commit: { stageId: string }) => commit.stageId === "apply-decision",
+      ),
+    },
+  };
+  await page.addInitScript(
+    ({ eventId, proposalId }) => {
+      sessionStorage.setItem(
+        `chartstead:decision-batch:${eventId}`,
+        JSON.stringify([proposalId]),
+      );
+    },
+    {
+      eventId: "pacific-open-data-summit-2026",
+      proposalId: proposal!.id,
+    },
+  );
+  await page.route(
+    `**/api/events/pacific-open-data-summit-2026/course-checks/${durablePlan.id}`,
+    async (route) => route.fulfill({ json: cleanPlan }),
+  );
+  const mutationRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.method() !== "GET") mutationRequests.push(request.url());
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    `/e/pacific-open-data-summit-2026/course-checks/${durablePlan.id}?q=${proposal!.id}&sort=oldest`,
+  );
+
+  const dialog = page.getByRole("dialog", { name: "Review 1 decline decision" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "Review 1 decline decision" })).toBeFocused();
+  await expect(dialog.getByText("Course Check found no issues.")).toHaveCount(1);
+  await expect(dialog.locator("details")).toHaveCount(0);
+  await expect(dialog.getByText("0 communication drafts")).toBeVisible();
+  await expect(dialog.getByText("0 external effects")).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Decline 1 submission" })).toBeVisible();
+
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+
+  await expect(page).toHaveURL(
+    new RegExp(`/submissions\\?q=${proposal!.id}&sort=oldest$`),
+  );
+  await expect(
+    page.getByRole("checkbox", {
+      name: `Select ${proposal!.id} for batch decision`,
+    }),
+  ).toBeChecked();
+  expect(mutationRequests).toEqual([]);
+
+  await page.goBack();
+  await expect(dialog).toBeVisible();
+});

@@ -92,6 +92,25 @@ function proposalHref(
   return `/e/${eventId}/submissions/${proposalId}${suffix}`;
 }
 
+function decisionBatchStorageKey(eventId: string) {
+  return `chartstead:decision-batch:${eventId}`;
+}
+
+function restoredDecisionBatch(eventId: string) {
+  try {
+    const stored = sessionStorage.getItem(decisionBatchStorageKey(eventId));
+    if (!stored) return new Set<string>();
+    const ids = JSON.parse(stored) as unknown;
+    return new Set(
+      Array.isArray(ids)
+        ? ids.filter((id): id is string => typeof id === "string")
+        : [],
+    );
+  } catch {
+    return new Set<string>();
+  }
+}
+
 export function SubmissionsWorkspace({
   event,
   principal,
@@ -115,11 +134,18 @@ export function SubmissionsWorkspace({
   const [search, setSearch] = useState(queue.query);
   const [routingOpen, setRoutingOpen] = useState(false);
   const [inspectorWidth, setInspectorWidth] = useState(460);
-  const [batchIds, setBatchIds] = useState<Set<string>>(new Set());
+  const [batchIds, setBatchIds] = useState<Set<string>>(() =>
+    restoredDecisionBatch(event.id),
+  );
   const [batchOutcome, setBatchOutcome] = useState<ProgramOutcome>("accepted");
   const [batchMessage, setBatchMessage] = useState<string | null>(null);
 
   useEffect(() => setSearch(queue.query), [queue.query]);
+  useEffect(() => {
+    const key = decisionBatchStorageKey(event.id);
+    if (batchIds.size === 0) sessionStorage.removeItem(key);
+    else sessionStorage.setItem(key, JSON.stringify([...batchIds]));
+  }, [batchIds, event.id]);
   useEffect(() => {
     if (search === queue.query) return;
     const handle = window.setTimeout(
@@ -157,11 +183,16 @@ export function SubmissionsWorkspace({
         idempotencyKey: `ui-batch-${[...batchIds].sort().join("-")}-${batchOutcome}-${createClientId()}`,
       }),
     onSuccess: (plan) => {
-      setBatchIds(new Set());
       setBatchMessage(null);
       void navigate({
         to: "/e/$eventId/course-checks/$planId",
         params: { eventId: event.id, planId: plan.id },
+        search: {
+          q: queue.query || undefined,
+          status: queue.status === "all" ? undefined : queue.status,
+          track: queue.track || undefined,
+          sort: queue.sort === "newest" ? undefined : queue.sort,
+        },
       });
     },
     onError: (error) => {

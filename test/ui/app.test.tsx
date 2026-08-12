@@ -204,6 +204,7 @@ describe("organizer application", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     localStorage.clear();
+    sessionStorage.clear();
   });
 
   it("shows the seeded event in the locked organizer shell", async () => {
@@ -586,6 +587,58 @@ describe("organizer application", () => {
     await userEvent.click(proposalLinks[0]!);
     expect(await screen.findByText("Committee only")).toBeVisible();
     expect(screen.getByText("SUB-ABCD12")).toBeVisible();
+  });
+
+  it("restores a selected decision batch after browser history returns to submissions", async () => {
+    const proposal = {
+      id: "SUB-ABCD12",
+      eventId: "pacific-open-data-summit-2026",
+      formId: "main-cfp",
+      formDefinitionVersion: 1,
+      answers: {},
+      title: "Open charts for harbor operations",
+      abstract: "Abstract text",
+      trackId: "platform",
+      trackName: "Platform",
+      speakerName: "Ada Harbor",
+      speakerEmail: "ada@example.com",
+      biography: "Bio",
+      supportingLink: "https://example.com",
+      sessionFormat: "talk",
+      workshopDuration: "",
+      coSpeakers: [],
+      supportingFile: null,
+      status: "unreviewed",
+      committeeNote: "",
+      privateNote: "",
+      reviewVersion: 0,
+      confirmationEmailStatus: null,
+      submittedAt: "2026-08-10T12:00:00.000Z",
+      programOutcome: null,
+    };
+    sessionStorage.setItem(
+      "chartstead:decision-batch:pacific-open-data-summit-2026",
+      JSON.stringify([proposal.id]),
+    );
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/api/events")) {
+        return new Response(JSON.stringify(eventsPayload), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("/proposals")) {
+        return new Response(JSON.stringify({ proposals: [proposal] }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderAt("/e/pacific-open-data-summit-2026/submissions");
+
+    expect(await screen.findByRole("region", { name: "Batch final decisions" })).toHaveTextContent("1 selected");
+    expect(await screen.findByRole("checkbox", { name: `Select ${proposal.id} for batch decision` })).toBeChecked();
   });
 
   it("preserves review queue context while saving notes and reversible decisions", async () => {

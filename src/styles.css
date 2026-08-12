@@ -2246,6 +2246,85 @@ table.grid tbody tr[aria-selected="true"] td:first-child {
   color: var(--on-surface-variant);
 }
 
+.course-check-fast-path-page {
+  width: min(760px, 100%);
+  padding-top: clamp(24px, 7vh, 72px);
+}
+
+.course-check-fast-path {
+  display: grid;
+  gap: 20px;
+  padding: clamp(20px, 4vw, 32px);
+  border-top: 4px solid var(--primary);
+  box-shadow: var(--shadow-1);
+}
+
+.course-check-fast-path h1 {
+  margin: 4px 0 8px;
+  font-size: clamp(24px, 4vw, 32px);
+  line-height: 1.2;
+}
+
+.course-check-fast-path h1:focus { outline: none; }
+
+.course-check-fast-path h1:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 4px;
+}
+
+.course-check-fast-path h2 {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.course-check-fast-path-clear {
+  margin: 0;
+  color: var(--on-surface-variant);
+}
+
+.course-check-fast-path-result {
+  padding: 13px 15px;
+  border-left: 3px solid var(--success);
+  background: var(--success-container);
+}
+
+.course-check-fast-path-result p { margin: 0; }
+.course-check-fast-path-result p + p { margin-top: 6px; }
+
+.course-check-fast-path-counts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  padding: 1px;
+  list-style: none;
+  background: var(--outline);
+}
+
+.course-check-fast-path-counts li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  background: var(--surface);
+}
+
+.course-check-fast-path-counts strong { font-size: 13px; }
+
+.course-check-fast-path-counts span {
+  color: var(--on-surface-variant);
+  font-size: 13px;
+  text-align: right;
+}
+
+.course-check-fast-path-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--outline);
+}
+
 .course-check-review-effects {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4551,6 +4630,9 @@ details[open] > summary .course-check-chevron { transform: rotate(180deg); }
   .course-check-defer { align-items: stretch; }
   .course-check-actions > .btn,
   .course-check-defer .btn { width: 100%; }
+  .course-check-fast-path-counts { grid-template-columns: 1fr; }
+  .course-check-fast-path-actions { align-items: stretch; }
+  .course-check-fast-path-actions .btn { width: 100%; }
 }
 
 @media (max-width: 900px) {

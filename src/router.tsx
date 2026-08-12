@@ -82,6 +82,7 @@ const courseCheckRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/e/$eventId/course-checks/$planId",
   component: CourseCheckPage,
+  validateSearch: validateProposalQueueSearch,
 });
 
 const agendaRoute = createRoute({
@@ -110,7 +111,9 @@ const programEmbedRoute = createRoute({
   validateSearch: validateProgramSearch,
 });
 
-function validateProposalQueueSearch(search: Record<string, unknown>) {
+function validateProposalQueueSearch(
+  search: Record<string, unknown>,
+): { q?: string; status?: string; track?: string; sort?: string } {
   return {
     q: typeof search.q === "string" ? search.q : undefined,
     status: typeof search.status === "string" ? search.status : undefined,

@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   CommunicationPlanBody,
   CourseCheckPlan,
+  DecisionReviewProjection,
   DecisionPlanBody,
 } from "../../shared/course-check";
 import { CourseCheckPage } from "../../src/CourseCheckPage";
@@ -359,7 +360,7 @@ function jsonResponse(value: unknown, status = 200) {
   });
 }
 
-function renderCourseCheck() {
+function renderCourseCheck(initialEntry = "/e/pacific-open-data-summit-2026/course-checks/plan-1") {
   const rootRoute = createRootRoute({ component: () => <Outlet /> });
   const courseCheckRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -375,9 +376,7 @@ function renderCourseCheck() {
   const router = createRouter({
     routeTree: rootRoute.addChildren([courseCheckRoute, submissionsRoute]),
     history: createMemoryHistory({
-      initialEntries: [
-        "/e/pacific-open-data-summit-2026/course-checks/plan-1",
-      ],
+      initialEntries: [initialEntry],
     }),
   });
   const queryClient = new QueryClient({
@@ -425,6 +424,187 @@ describe("Course Check review workspace", () => {
     expect(container).not.toHaveTextContent("Mutation history");
     expect(container).not.toHaveTextContent(plan.id.slice(0, 8));
     expect(container).not.toHaveTextContent(plan.digest);
+  });
+
+  it.each([
+    {
+      name: "accepted",
+      outcomes: ["accepted"] as const,
+      title: "Review 1 acceptance decision",
+      action: "Accept 1 submission, create 1 session, link 1 speaker record, and create 2 onboarding tasks",
+      decisionText: "1 accepted · 0 declined",
+    },
+    {
+      name: "declined",
+      outcomes: ["declined"] as const,
+      title: "Review 1 decline decision",
+      action: "Decline 1 submission",
+      decisionText: "0 accepted · 1 declined",
+    },
+    {
+      name: "mixed",
+      outcomes: ["accepted", "declined"] as const,
+      title: "Review 2 decisions",
+      action: "Accept 1 submission, decline 1 submission, create 1 session, link 1 speaker record, and create 2 onboarding tasks",
+      decisionText: "1 accepted · 1 declined",
+    },
+  ])("uses the compact clean fast path for a $name decision batch", async ({ outcomes, title, action, decisionText }) => {
+    const speaker = {
+      plannedId: "speaker-1",
+      role: "primary" as const,
+      name: "Alex Rivera",
+      email: "alex@example.test",
+      biography: "Data practitioner",
+      match: "reuse" as const,
+      existingSpeakerId: "speaker-existing-1",
+    };
+    const session = {
+      plannedId: "session-1",
+      title: "Open data in practice",
+      format: "talk",
+      trackId: "platform",
+      roomId: null,
+      startsAt: null,
+      endsAt: null,
+    };
+    const acceptedItem = {
+      ...body.items[0]!,
+      itemId: "item-accepted",
+      proposalId: "SUB-ACCEPTED",
+      outcome: "accepted" as const,
+      speakers: [speaker],
+      session,
+      tasks: [
+        { plannedId: "task-1", title: "Add biography", kind: "biography", speakerPlannedId: speaker.plannedId },
+        { plannedId: "task-2", title: "Add headshot", kind: "headshot", speakerPlannedId: speaker.plannedId },
+      ],
+      findings: [],
+    };
+    const declinedItem = {
+      ...body.items[0]!,
+      itemId: "item-declined",
+      proposalId: "SUB-DECLINED",
+      outcome: "declined" as const,
+      speakers: [],
+      session: null,
+      tasks: [],
+      findings: [],
+    };
+    const items = outcomes.map((outcome) =>
+      outcome === "accepted" ? acceptedItem : declinedItem,
+    );
+    const accepted = outcomes.filter((outcome) => outcome === "accepted").length;
+    const declined = outcomes.length - accepted;
+    const cleanPlan = {
+      ...plan,
+      body: {
+        ...body,
+        outcome: outcomes[0],
+        speakers: accepted ? [speaker] : [],
+        session: accepted ? session : null,
+        tasks: accepted ? acceptedItem.tasks : [],
+        findings: [],
+        items,
+        evidenceSections: [],
+        aggregateProgress: { total: items.length, active: items.length, deferred: 0, applied: 0 },
+        airtable: { configured: false, disposition: "removed", summary: "No mapped Airtable writes.", effects: [] },
+      },
+      decisionReview: {
+        ...proposedDecisionReview,
+        title,
+        courseCheckSummary: "Course Check found no issues.",
+        counts: { selected: items.length, ready: items.length, needsAction: 0, warning: 0, skipped: 0 },
+        issues: [],
+        effectGroups: proposedDecisionReview.effectGroups.map((group) =>
+          group.key === "decisions"
+            ? { ...group, count: items.length, summary: `${accepted} accepted and ${declined} declined.` }
+            : group.key === "records"
+              ? { ...group, count: accepted ? 5 : 0 }
+              : group,
+        ),
+        primaryActionLabel: action,
+        permittedCommits: [{ stageId: "apply-decision", label: action, effectSummary: "Exact decision effects." }],
+      },
+    } satisfies CourseCheckPlan;
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(cleanPlan));
+    const { container } = renderCourseCheck();
+
+    expect(await screen.findByRole("heading", { name: title })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: title })).toBeVisible();
+    expect(screen.getByText(decisionText)).toBeVisible();
+    expect(screen.getByText(`${accepted} ${accepted === 1 ? "session" : "sessions"}`)).toBeVisible();
+    expect(screen.getByText(`${accepted} ${accepted === 1 ? "speaker record or link" : "speaker records or links"}`)).toBeVisible();
+    expect(screen.getByText(`${accepted * 2} onboarding tasks`)).toBeVisible();
+    expect(screen.getByText("0 communication drafts")).toBeVisible();
+    expect(screen.getByText("0 external effects")).toBeVisible();
+    expect(screen.getAllByText("Course Check found no issues.")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: action })).toBeEnabled();
+    expect(screen.getByRole("heading", { name: title })).toHaveFocus();
+    expect(container.querySelectorAll("details")).toHaveLength(0);
+    expect(container).not.toHaveTextContent("Selected decisions");
+    expect(container).not.toHaveTextContent("Prioritized issues");
+  });
+
+  it("keeps issue-free but interaction-complex decision work in the full workspace", async () => {
+    const cleanButComplex = {
+      ...projectedPlan,
+      body: { ...body, findings: [], items: body.items.map((item) => ({ ...item, findings: [] })) },
+      decisionReview: {
+        ...proposedDecisionReview,
+        courseCheckSummary: "Course Check found no issues.",
+        counts: { selected: 1, ready: 1, needsAction: 0, warning: 0, skipped: 0 },
+        issues: [],
+        effectGroups: [...proposedDecisionReview.effectGroups],
+        permittedCommits: [...proposedDecisionReview.permittedCommits],
+      } as DecisionReviewProjection,
+    } satisfies CourseCheckPlan;
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(cleanButComplex));
+    renderCourseCheck();
+
+    await screen.findByRole("heading", { name: "Review 1 acceptance decision" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Review summary" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Write to Airtable" })).toBeVisible();
+  });
+
+  it("cancels to the originating submissions filters without applying anything", async () => {
+    const cleanPlan = {
+      ...projectedPlan,
+      body: {
+        ...body,
+        findings: [],
+        items: body.items.map((item) => ({ ...item, findings: [] })),
+        airtable: { configured: false, disposition: "removed", summary: "No mapped Airtable writes.", effects: [] },
+      },
+      decisionReview: {
+        ...proposedDecisionReview,
+        courseCheckSummary: "Course Check found no issues.",
+        counts: { selected: 1, ready: 1, needsAction: 0, warning: 0, skipped: 0 },
+        issues: [],
+        effectGroups: [...proposedDecisionReview.effectGroups],
+        permittedCommits: [...proposedDecisionReview.permittedCommits],
+      } as DecisionReviewProjection,
+    } satisfies CourseCheckPlan;
+    const requests: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      requests.push(`${init?.method ?? "GET"} ${String(input)}`);
+      return jsonResponse(cleanPlan);
+    });
+    const user = userEvent.setup();
+    const { router } = renderCourseCheck(
+      "/e/pacific-open-data-summit-2026/course-checks/plan-1?q=data&status=unreviewed&track=platform&sort=oldest",
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Cancel" }));
+
+    expect(router.state.location.pathname).toBe("/e/pacific-open-data-summit-2026/submissions");
+    expect(router.state.location.search).toMatchObject({
+      q: "data",
+      status: "unreviewed",
+      track: "platform",
+      sort: "oldest",
+    });
+    expect(requests.filter((request) => request.startsWith("POST "))).toHaveLength(0);
   });
 
   it("expands warning evidence by default and surfaces risk in the summary", async () => {
@@ -487,6 +667,68 @@ describe("Course Check review workspace", () => {
     expect(router.state.location.pathname).toBe(
       "/e/pacific-open-data-summit-2026/course-checks/plan-1",
     );
+  });
+
+  it("keeps a clean fast-path receipt persistent without implicitly drafting or sending", async () => {
+    const cleanBody: DecisionPlanBody = {
+      ...body,
+      findings: [],
+      items: body.items.map((item) => ({ ...item, findings: [] })),
+      evidenceSections: [],
+      airtable: { configured: false, disposition: "removed", summary: "No mapped Airtable writes.", effects: [] },
+    };
+    const cleanProposed: CourseCheckPlan = {
+      ...plan,
+      body: cleanBody,
+      decisionReview: {
+        ...proposedDecisionReview,
+        courseCheckSummary: "Course Check found no issues.",
+        counts: { selected: 1, ready: 1, needsAction: 0, warning: 0, skipped: 0 },
+        issues: [],
+        effectGroups: [...proposedDecisionReview.effectGroups],
+        permittedCommits: [...proposedDecisionReview.permittedCommits],
+      },
+    };
+    const cleanApplied: CourseCheckPlan = {
+      ...appliedPlan,
+      body: {
+        ...cleanBody,
+        items: cleanBody.items.map((item) => ({ ...item, status: "applied" as const })),
+        aggregateProgress: { total: 1, active: 0, deferred: 0, applied: 1 },
+      },
+      decisionReview: {
+        ...projectedAppliedPlan.decisionReview,
+        courseCheckSummary: "Course Check found no issues.",
+        counts: { selected: 1, ready: 0, needsAction: 0, warning: 0, skipped: 0 },
+        issues: [],
+        effectGroups: [...projectedAppliedPlan.decisionReview.effectGroups],
+        permittedCommits: [],
+      },
+    };
+    const requests: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      requests.push(`${method} ${url}`);
+      if (method === "GET") return jsonResponse(cleanProposed);
+      if (method === "POST" && url.endsWith("/course-checks/plan-1/apply")) {
+        return jsonResponse(cleanApplied);
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    });
+    const user = userEvent.setup();
+    renderCourseCheck();
+
+    await user.click(await screen.findByRole("button", { name: "Accept 1 submission" }));
+
+    expect(await screen.findByRole("heading", { name: "Acceptance decision applied" })).toBeVisible();
+    expect(screen.getByText("1 submission was accepted.")).toBeVisible();
+    expect(screen.getByText(/No drafts were prepared\. No emails were sent\./)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Return to submissions" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Prepare communication drafts" })).toBeEnabled();
+    expect(requests.filter((request) => request.startsWith("POST "))).toEqual([
+      "POST /api/events/pacific-open-data-summit-2026/course-checks/plan-1/apply",
+    ]);
   });
 
   it("defers blocked batch items and keeps the partial result truthful", async () => {

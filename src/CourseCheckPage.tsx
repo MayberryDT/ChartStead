@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
 import type {
@@ -34,6 +34,10 @@ import {
   setCourseCheckAirtableDisposition,
 } from "./api";
 import { createClientId } from "./id";
+import {
+  DecisionFastPath,
+  isDecisionFastPathEligible,
+} from "./course-check/DecisionFastPath";
 
 function findingTone(severity: CourseCheckFinding["severity"]) {
   if (severity === "blocker") return "error";
@@ -1224,6 +1228,9 @@ export function CourseCheckPage() {
   });
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const originSearch = useSearch({
+    from: "/e/$eventId/course-checks/$planId",
+  });
   const [message, setMessage] = useState<string | null>(null);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [deferReason, setDeferReason] = useState("");
@@ -1597,6 +1604,57 @@ export function CourseCheckPage() {
   const applyStage = currentPlan.body.stages.find(
     (stage) => stage.id === "apply-decision",
   );
+
+  if (
+    isDecision &&
+    decisionReview &&
+    isDecisionFastPathEligible(currentPlan, decisionReview)
+  ) {
+    const returnToSubmissions = (clearSelection: boolean) => {
+      if (clearSelection) {
+        sessionStorage.removeItem(`chartstead:decision-batch:${eventId}`);
+      }
+      void navigate({
+        to: "/e/$eventId/submissions",
+        params: { eventId },
+        search: {
+          q: originSearch.q,
+          status: originSearch.status,
+          track: originSearch.track,
+          sort: originSearch.sort,
+        },
+      });
+    };
+    const applyError = applyMutation.error;
+    const fastPathError = applyMutation.isError
+      ? applyError instanceof ApiError
+        ? applyError.message
+        : "Unable to apply these decisions."
+      : linkCommunicationMutation.isError
+        ? linkCommunicationMutation.error instanceof ApiError
+          ? linkCommunicationMutation.error.message
+          : "Unable to prepare communication drafts."
+        : null;
+
+    return (
+      <DecisionFastPath
+        plan={currentPlan}
+        review={decisionReview}
+        busy={applyMutation.isPending || linkCommunicationMutation.isPending}
+        error={fastPathError}
+        onCancel={() => returnToSubmissions(false)}
+        onConfirm={() => {
+          setMessage(null);
+          applyMutation.mutate(currentPlan);
+        }}
+        onPrepareDrafts={() => {
+          setMessage(null);
+          linkCommunicationMutation.mutate(currentPlan);
+        }}
+        onReturnToSubmissions={() => returnToSubmissions(true)}
+      />
+    );
+  }
 
   return (
     <main className="course-check-page">
