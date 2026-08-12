@@ -4,7 +4,7 @@
 
 **Blocked by:** Course Check 14 — Truthful decision review projection and receipts; Course Check 17 — Direct repair actions and preserved review context.
 
-**Status:** blocked
+**Status:** ready-for-agent
 
 ## Source
 
@@ -27,4 +27,4 @@
 
 - 2026-08-12 — Can proceed after the shared projection and direct-action contracts; it is deliberately not blocked by visual-polish tickets 11 or 12.
 
-- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 17 (in-progress).
+- 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.

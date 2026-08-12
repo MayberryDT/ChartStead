@@ -4,7 +4,7 @@
 
 **Blocked by:** Course Check 15 — Clean Decision Course Check fast path; Course Check 16 — Exception-first batches and partial processing; Course Check 17 — Direct repair actions and preserved review context.
 
-**Status:** blocked
+**Status:** ready-for-agent
 
 ## Source
 
@@ -27,4 +27,4 @@
 
 - 2026-08-12 — **One coherent workspace** intentionally does not mean one commit. This implements the research direction without weakening ChartStead's locked safety boundaries.
 
-- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 17 (in-progress).
+- 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.

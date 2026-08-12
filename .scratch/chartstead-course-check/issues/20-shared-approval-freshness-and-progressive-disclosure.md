@@ -27,4 +27,4 @@
 
 - 2026-08-12 — This ticket makes the research compatible with the already-shipped team-policy and durable-operation kernel (`sessions/2026/08/chartstead-course-check-09-team-policy`).
 
-- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 17 (in-progress); Course Check 18 (blocked).
+- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 18 (blocked).
