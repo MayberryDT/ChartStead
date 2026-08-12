@@ -1027,6 +1027,106 @@ export async function createCommunicationDrafts(
   return body;
 }
 
+async function updateCommunicationEffect(
+  eventId: string,
+  path: string,
+  input: Record<string, unknown> & { idempotencyKey: string },
+  fallback: string,
+): Promise<CourseCheckPlan> {
+  const response = await fetch(`/api/events/${eventId}/${path}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": input.idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<
+    CourseCheckPlan | { error: string; recoveryGuidance?: string }
+  >(response);
+  if (!response.ok || !("id" in body)) {
+    const message =
+      "error" in body
+        ? body.recoveryGuidance
+          ? `${body.error} ${body.recoveryGuidance}`
+          : body.error
+        : fallback;
+    throw new ApiError(message, response.status, body);
+  }
+  return body;
+}
+
+export async function sendCommunication(
+  eventId: string,
+  planId: string,
+  input: {
+    planVersion: number;
+    digest: string;
+    stageId?: "send-messages";
+    idempotencyKey: string;
+  },
+): Promise<CourseCheckPlan> {
+  return updateCommunicationEffect(
+    eventId,
+    `course-checks/${planId}/send`,
+    { ...input, stageId: input.stageId ?? "send-messages" },
+    "Unable to start communication delivery",
+  );
+}
+
+export async function retryCommunicationEffect(
+  eventId: string,
+  planId: string,
+  effectId: string,
+  idempotencyKey: string,
+): Promise<CourseCheckPlan> {
+  return updateCommunicationEffect(
+    eventId,
+    `course-checks/${planId}/effects/${effectId}/retry`,
+    { idempotencyKey },
+    "Unable to retry communication delivery",
+  );
+}
+
+export async function reconcileCommunicationEffect(
+  eventId: string,
+  planId: string,
+  effectId: string,
+  input: {
+    outcome: "delivered" | "not_delivered";
+    note: string;
+    providerReference?: string;
+    idempotencyKey: string;
+  },
+): Promise<CourseCheckPlan> {
+  return updateCommunicationEffect(
+    eventId,
+    `course-checks/${planId}/effects/${effectId}/reconcile`,
+    input,
+    "Unable to reconcile communication delivery",
+  );
+}
+
+export async function createCommunicationCorrection(
+  eventId: string,
+  planId: string,
+  effectId: string,
+  input: {
+    reason: string;
+    subject: string;
+    bodyText: string;
+    bodyHtml?: string;
+    idempotencyKey: string;
+  },
+): Promise<CourseCheckPlan> {
+  return updateCommunicationEffect(
+    eventId,
+    `course-checks/${planId}/effects/${effectId}/correction`,
+    input,
+    "Unable to create a communication correction",
+  );
+}
+
 export async function createPublicationCourseCheck(
   eventId: string,
   input: {

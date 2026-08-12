@@ -392,6 +392,16 @@ export function planCommunicationCascade(
     recipientGroups,
     recipients: [],
     drafts: input.drafts ?? [],
+    effects: [],
+    deliverySummary: {
+      total: 0,
+      queued: 0,
+      sending: 0,
+      succeeded: 0,
+      retryScheduled: 0,
+      failed: 0,
+      unknown: 0,
+    },
     calendarOps: [],
     deltas,
     findings,
@@ -406,6 +416,7 @@ export function planCommunicationCascade(
     },
     linkedPlanIds: input.linkedPlanIds ?? [],
     parentPlanId: input.parentPlanId ?? null,
+    compensation: null,
     batchGroupId: null,
     splitExplanation: null,
     relevantRevisions: {
@@ -474,6 +485,7 @@ export function communicationBodyDigestPayload(body: CommunicationPlanBody): unk
     })),
     linkedPlanIds: body.linkedPlanIds,
     parentPlanId: body.parentPlanId,
+    compensation: body.compensation,
     softWarningOverrides: body.softWarningOverrides,
     relevantRevisions: body.relevantRevisions,
   };
@@ -492,9 +504,13 @@ export function freezeCommunicationDrafts(input: {
   drafts: FrozenCommunicationDraft[];
 } {
   const drafts: FrozenCommunicationDraft[] = [];
+  const frozenAddresses = new Set<string>();
   for (const group of input.body.recipientGroups) {
     for (const recipient of group.recipients) {
       if (!recipient.selected || recipient.deliverability !== "ok") continue;
+      const addressIdentity = normalizeEmail(recipient.address);
+      if (frozenAddresses.has(addressIdentity)) continue;
+      frozenAddresses.add(addressIdentity);
       const draftId = `draft_${recipient.recipientId}`;
       drafts.push({
         draftId,
@@ -594,6 +610,11 @@ export function redactCommunicationBody(body: CommunicationPlanBody): Communicat
       subject: "[redacted]",
       bodyText: "[redacted]",
       bodyHtml: "[redacted]",
+    })),
+    effects: body.effects.map((effect) => ({
+      ...effect,
+      toEmail: "[redacted]",
+      lastError: effect.lastError ? "[redacted]" : null,
     })),
     deltas: body.deltas.map((delta) =>
       delta.entityType === "recipient" || delta.entityType === "message_draft"

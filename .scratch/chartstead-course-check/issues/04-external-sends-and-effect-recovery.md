@@ -4,24 +4,26 @@
 
 **Blocked by:** 03 — Communication drafts and recipient reasoning.
 
-**Status:** ready-for-agent
+**Status:** in-review
 
-- [ ] `Send messages` approves and begins delivery of the exact frozen Communication Course Check version.
-- [ ] Internal send intent, audit history, idempotency receipts, and address-level outbox effects commit atomically before network delivery.
-- [ ] Each deliverable address has stable effect identity, frozen payload identity, provider reference, attempts, last error, and next eligible retry.
-- [ ] Delivery continues durably after browser navigation, Worker eviction, or alarm replay.
-- [ ] Successful effects never repeat when the stage, alarm, API request, or manual retry is replayed.
-- [ ] Classified transient failures retry with bounded backoff; permanent recipient, authorization, and payload failures surface immediately.
-- [ ] Exhausted retries remain durable failures with a manual recovery action.
-- [ ] Ambiguous provider outcomes become `Needs attention` and cannot retry blindly.
-- [ ] Provider webhook or staff reconciliation can resolve an unknown effect before retry or compensation.
-- [ ] Batch status distinguishes In progress, Partially complete, Needs attention, and Complete from address-level truth.
-- [ ] A sent message cannot be undone; correction creates a linked compensating Communication Course Check with a reason and original-effect reference.
-- [ ] Staff can leave and return to exact live effect state through the shared workspace and event activity history.
-- [ ] Tests cover provider idempotency, at-least-once alarms, crash windows, partial failure, retry classification, unknown reconciliation, permanent failure, correction compensation, and no green batch optimism.
+- [x] `Send messages` approves and begins delivery of the exact frozen Communication Course Check version.
+- [x] Internal send intent, audit history, idempotency receipts, and address-level outbox effects commit atomically before network delivery.
+- [x] Each deliverable address has stable effect identity, frozen payload identity, provider reference, attempts, last error, and next eligible retry.
+- [x] Delivery continues durably after browser navigation, Worker eviction, or alarm replay.
+- [x] Successful effects never repeat when the stage, alarm, API request, or manual retry is replayed.
+- [x] Classified transient failures retry with bounded backoff; permanent recipient, authorization, and payload failures surface immediately.
+- [x] Exhausted retries remain durable failures with a manual recovery action.
+- [x] Ambiguous provider outcomes become `Needs attention` and cannot retry blindly.
+- [x] Provider webhook or staff reconciliation can resolve an unknown effect before retry or compensation.
+- [x] Batch status distinguishes In progress, Partially complete, Needs attention, and Complete from address-level truth.
+- [x] A sent message cannot be undone; correction creates a linked compensating Communication Course Check with a reason and original-effect reference.
+- [x] Staff can leave and return to exact live effect state through the shared workspace and event activity history.
+- [x] Tests cover provider idempotency, at-least-once alarms, crash windows, partial failure, retry classification, unknown reconciliation, permanent failure, correction compensation, and no green batch optimism.
 
 ## Comments
 
 Blocked by Course Check 03 — Communication drafts and recipient reasoning.
 
 - 2026-08-11 — frontier-reconcile: All blockers done → ready-for-agent.
+- 2026-08-11 — Claimed for implementation in a dedicated worktree. Course Check 03 is done; both ticket tracks were rescanned and no additional blocked ticket has all blockers cleared.
+- 2026-08-11 — Ready for human QA on branch `course-check-04-external-sends` in `/home/halla/ChartStead/.worktrees/course-check-04-external-sends`. Demo: `http://100.105.117.93:5184/e/pacific-open-data-summit-2026/course-checks/65dde626-adb0-4c2f-835e-3f0f7629247a`. Verify exact frozen send intent, address-level state after reload, truthful failure/recovery controls, and linked correction creation. Automated evidence: typecheck/build, 123 worker tests, 61 UI tests, and 5 E2E tests pass.

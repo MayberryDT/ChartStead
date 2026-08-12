@@ -3,6 +3,7 @@ import { Link, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
 import type {
+  CommunicationEffect,
   CommunicationPlanBody,
   CourseCheckEvidenceSection,
   CourseCheckFinding,
@@ -14,10 +15,14 @@ import {
   ApiError,
   applyCourseCheckPlan,
   createCommunicationCourseCheck,
+  createCommunicationCorrection,
   createCommunicationDrafts,
   deferCourseCheckItems,
   fetchCourseCheckPlan,
+  reconcileCommunicationEffect,
+  retryCommunicationEffect,
   reviseCommunicationCourseCheck,
+  sendCommunication,
 } from "./api";
 import { createClientId } from "./id";
 
@@ -406,6 +411,201 @@ function PublicationBody({
   );
 }
 
+function effectStatusLabel(status: CommunicationEffect["status"]): string {
+  return status.replaceAll("_", " ");
+}
+
+function CommunicationEffectCard({
+  effect,
+  originalSubject,
+  busy,
+  onRetry,
+  onReconcile,
+  onCorrection,
+}: {
+  effect: CommunicationEffect;
+  originalSubject: string;
+  busy: boolean;
+  onRetry: (effectId: string) => void;
+  onReconcile: (
+    effectId: string,
+    outcome: "delivered" | "not_delivered",
+    note: string,
+    providerReference: string,
+  ) => void;
+  onCorrection: (
+    effectId: string,
+    input: { reason: string; subject: string; bodyText: string },
+  ) => void;
+}) {
+  const [reconciliationNote, setReconciliationNote] = useState("");
+  const [providerReference, setProviderReference] = useState("");
+  const [correctionReason, setCorrectionReason] = useState("");
+  const [correctionSubject, setCorrectionSubject] = useState(
+    `Correction: ${originalSubject}`,
+  );
+  const [correctionBody, setCorrectionBody] = useState("");
+  const canRetry =
+    effect.status === "permanent_failure" || effect.status === "exhausted";
+
+  return (
+    <li className="course-check-effect" data-status={effect.status}>
+      <div className="course-check-effect-heading">
+        <div>
+          <strong>{effect.toEmail}</strong>
+          <span className="course-check-effect-status" role="status">
+            {effectStatusLabel(effect.status)}
+          </span>
+        </div>
+        <span className="mono">{effect.effectId.slice(0, 18)}</span>
+      </div>
+      <dl className="course-check-effect-meta">
+        <div>
+          <dt>Attempts</dt>
+          <dd>{effect.attemptCount}</dd>
+        </div>
+        <div>
+          <dt>Provider reference</dt>
+          <dd className="mono">{effect.providerReference ?? "Not recorded"}</dd>
+        </div>
+        <div>
+          <dt>Last attempt</dt>
+          <dd>{effect.lastAttemptAt ?? "Not attempted"}</dd>
+        </div>
+        <div>
+          <dt>Next attempt</dt>
+          <dd>{effect.nextAttemptAt ?? "None scheduled"}</dd>
+        </div>
+      </dl>
+      {effect.lastError ? (
+        <p className="form-message" data-tone="error" role="alert">
+          {effect.lastError}
+        </p>
+      ) : null}
+      {canRetry ? (
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          disabled={busy}
+          onClick={() => onRetry(effect.effectId)}
+        >
+          Retry this address
+        </button>
+      ) : null}
+      {effect.status === "unknown" ? (
+        <div className="course-check-effect-recovery">
+          <p>
+            Provider outcome is unknown. Check the provider before choosing an outcome;
+            this address cannot be retried blindly.
+          </p>
+          <label className="stack-field">
+            Investigation note
+            <textarea
+              rows={2}
+              value={reconciliationNote}
+              onChange={(event) => setReconciliationNote(event.target.value)}
+            />
+          </label>
+          <label className="stack-field">
+            Provider reference (required if delivered)
+            <input
+              type="text"
+              value={providerReference}
+              onChange={(event) => setProviderReference(event.target.value)}
+            />
+          </label>
+          <div className="button-row">
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={busy || !reconciliationNote.trim() || !providerReference.trim()}
+              onClick={() =>
+                onReconcile(
+                  effect.effectId,
+                  "delivered",
+                  reconciliationNote,
+                  providerReference,
+                )
+              }
+            >
+              Mark delivered
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={busy || !reconciliationNote.trim()}
+              onClick={() =>
+                onReconcile(
+                  effect.effectId,
+                  "not_delivered",
+                  reconciliationNote,
+                  providerReference,
+                )
+              }
+            >
+              Mark not delivered
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {effect.status === "succeeded" ? (
+        <details className="course-check-correction">
+          <summary>Create a reviewed correction</summary>
+          <div>
+            <p className="muted">
+              The original delivery remains immutable. This creates a linked plan that
+              must be reviewed, frozen, and sent separately.
+            </p>
+            <label className="stack-field">
+              Why a correction is needed
+              <input
+                type="text"
+                value={correctionReason}
+                onChange={(event) => setCorrectionReason(event.target.value)}
+              />
+            </label>
+            <label className="stack-field">
+              Subject
+              <input
+                type="text"
+                value={correctionSubject}
+                onChange={(event) => setCorrectionSubject(event.target.value)}
+              />
+            </label>
+            <label className="stack-field">
+              Body
+              <textarea
+                rows={4}
+                value={correctionBody}
+                onChange={(event) => setCorrectionBody(event.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={
+                busy ||
+                !correctionReason.trim() ||
+                !correctionSubject.trim() ||
+                !correctionBody.trim()
+              }
+              onClick={() =>
+                onCorrection(effect.effectId, {
+                  reason: correctionReason,
+                  subject: correctionSubject,
+                  bodyText: correctionBody,
+                })
+              }
+            >
+              Create correction Course Check
+            </button>
+          </div>
+        </details>
+      ) : null}
+    </li>
+  );
+}
+
 function CommunicationBody({
   plan,
   subject,
@@ -414,6 +614,10 @@ function CommunicationBody({
   onSubjectChange,
   onBodyTextChange,
   onToggleRecipient,
+  effectActionPending,
+  onRetryEffect,
+  onReconcileEffect,
+  onCreateCorrection,
 }: {
   plan: CourseCheckPlan;
   subject: string;
@@ -422,6 +626,18 @@ function CommunicationBody({
   onSubjectChange: (value: string) => void;
   onBodyTextChange: (value: string) => void;
   onToggleRecipient: (recipientId: string) => void;
+  effectActionPending: boolean;
+  onRetryEffect: (effectId: string) => void;
+  onReconcileEffect: (
+    effectId: string,
+    outcome: "delivered" | "not_delivered",
+    note: string,
+    providerReference: string,
+  ) => void;
+  onCreateCorrection: (
+    effectId: string,
+    input: { reason: string; subject: string; bodyText: string },
+  ) => void;
 }) {
   const body = plan.body as CommunicationPlanBody;
   const draftsFrozen = body.stageVisibility.draft === "complete";
@@ -443,7 +659,11 @@ function CommunicationBody({
             <dd>
               {body.source.kind === "linked_decision"
                 ? `Linked decision ${body.source.decisionPlanId?.slice(0, 8) ?? ""}`
-                : "Direct selection"}
+                : body.source.kind === "compensation"
+                  ? `Correction to ${body.compensation?.originalPlanId.slice(0, 8) ?? "delivery"}`
+                  : body.source.kind === "publication"
+                    ? "Program publication"
+                    : "Direct selection"}
             </dd>
           </div>
           <div>
@@ -455,8 +675,14 @@ function CommunicationBody({
           </div>
         </dl>
         <p className="muted">
-          Creating drafts never sends email. Send messages is a separate later action.
+          Creating drafts never sends email. Send messages separately approves the exact
+          frozen payloads and creates one durable effect per address.
         </p>
+        {body.compensation ? (
+          <p className="form-message" data-tone="warning">
+            Correction for effect {body.compensation.originalEffectId}: {body.compensation.reason}
+          </p>
+        ) : null}
       </section>
 
       <section className="panel">
@@ -554,6 +780,32 @@ function CommunicationBody({
         </section>
       ) : null}
 
+      {body.effects.length > 0 ? (
+        <section className="panel">
+          <h2>Delivery effects</h2>
+          <p className="lede">
+            {body.deliverySummary.succeeded} succeeded · {body.deliverySummary.queued}{" "}
+            queued · {body.deliverySummary.sending} sending ·{" "}
+            {body.deliverySummary.retryScheduled} retry scheduled ·{" "}
+            {body.deliverySummary.failed} failed · {body.deliverySummary.unknown}{" "}
+            unknown
+          </p>
+          <ul className="course-check-effects">
+            {body.effects.map((effect) => (
+              <CommunicationEffectCard
+                key={effect.effectId}
+                effect={effect}
+                originalSubject={body.subject}
+                busy={effectActionPending}
+                onRetry={onRetryEffect}
+                onReconcile={onReconcileEffect}
+                onCorrection={onCreateCorrection}
+              />
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       <section className="panel">
         <h2>Evidence</h2>
         <div className="course-check-evidence-list">
@@ -616,10 +868,22 @@ export function CourseCheckPage() {
     () => `ui-link-comm-${planId}-${createClientId()}`,
     [planId],
   );
+  const sendKey = useMemo(
+    () => `ui-send-${planId}-${createClientId()}`,
+    [planId],
+  );
 
   const planQuery = useQuery({
     queryKey: ["course-check", eventId, planId],
     queryFn: () => fetchCourseCheckPlan(eventId, planId),
+    refetchInterval: (query) => {
+      const current = query.state.data;
+      if (!current || current.body.actionType !== "communication") return false;
+      const summary = current.body.deliverySummary;
+      return summary.queued + summary.sending + summary.retryScheduled > 0
+        ? 2_000
+        : false;
+    },
   });
 
   useEffect(() => {
@@ -771,6 +1035,77 @@ export function CourseCheckPage() {
     },
   });
 
+  const sendMutation = useMutation({
+    mutationFn: (current: CourseCheckPlan) => {
+      if (current.body.actionType !== "communication") {
+        throw new Error("Not a communication plan");
+      }
+      return sendCommunication(eventId, current.id, {
+        planVersion: current.version,
+        digest: current.digest,
+        stageId: "send-messages",
+        idempotencyKey: sendKey,
+      });
+    },
+    onSuccess: (next) => {
+      queryClient.setQueryData(["course-check", eventId, planId], next);
+      setMessage(
+        "Delivery intent is durable. Each address now has an independent effect record.",
+      );
+    },
+  });
+
+  const retryEffectMutation = useMutation({
+    mutationFn: (effectId: string) =>
+      retryCommunicationEffect(
+        eventId,
+        planId,
+        effectId,
+        `ui-retry-${effectId}-${createClientId()}`,
+      ),
+    onSuccess: (next) => {
+      queryClient.setQueryData(["course-check", eventId, planId], next);
+      setMessage("The selected address is queued for a new bounded delivery attempt.");
+    },
+  });
+
+  const reconcileEffectMutation = useMutation({
+    mutationFn: (input: {
+      effectId: string;
+      outcome: "delivered" | "not_delivered";
+      note: string;
+      providerReference: string;
+    }) =>
+      reconcileCommunicationEffect(eventId, planId, input.effectId, {
+        outcome: input.outcome,
+        note: input.note,
+        providerReference: input.providerReference || undefined,
+        idempotencyKey: `ui-reconcile-${input.effectId}-${createClientId()}`,
+      }),
+    onSuccess: (next) => {
+      queryClient.setQueryData(["course-check", eventId, planId], next);
+      setMessage("The unknown provider outcome was reconciled and recorded.");
+    },
+  });
+
+  const correctionMutation = useMutation({
+    mutationFn: (input: {
+      effectId: string;
+      reason: string;
+      subject: string;
+      bodyText: string;
+    }) =>
+      createCommunicationCorrection(eventId, planId, input.effectId, {
+        reason: input.reason,
+        subject: input.subject,
+        bodyText: input.bodyText,
+        idempotencyKey: `ui-correction-${input.effectId}-${createClientId()}`,
+      }),
+    onSuccess: (next) => {
+      window.location.assign(`/e/${eventId}/course-checks/${next.id}`);
+    },
+  });
+
   const linkCommunicationMutation = useMutation({
     mutationFn: (current: CourseCheckPlan) =>
       createCommunicationCourseCheck(eventId, {
@@ -828,6 +1163,7 @@ export function CourseCheckPage() {
     Boolean(communicationBody) &&
     communicationBody!.stageVisibility.draft === "complete" &&
     communicationBody!.drafts.length > 0;
+  const deliveryStarted = Boolean(communicationBody?.effects.length);
   const createDraftsStage = currentPlan.body.stages.find(
     (stage) => stage.id === "create-drafts",
   );
@@ -851,7 +1187,7 @@ export function CourseCheckPage() {
           </h1>
           <p className="lede">
             {isCommunication
-              ? "Review recipients and freeze message drafts. Sending remains a separate approved action."
+              ? "Review exact recipients, approve delivery, and recover every address from a durable effect ledger."
               : isPublication
                 ? "Inspect the public program delta before publish, unpublish, or restore. Communication stays separate."
                 : "Resumable event resource. Another authorized administrator can inspect and continue this exact versioned batch."}
@@ -895,6 +1231,28 @@ export function CourseCheckPage() {
               else next.add(recipientId);
               return next;
             });
+          }}
+          effectActionPending={
+            retryEffectMutation.isPending ||
+            reconcileEffectMutation.isPending ||
+            correctionMutation.isPending
+          }
+          onRetryEffect={(effectId) => {
+            setMessage(null);
+            retryEffectMutation.mutate(effectId);
+          }}
+          onReconcileEffect={(effectId, outcome, note, providerReference) => {
+            setMessage(null);
+            reconcileEffectMutation.mutate({
+              effectId,
+              outcome,
+              note,
+              providerReference,
+            });
+          }}
+          onCreateCorrection={(effectId, input) => {
+            setMessage(null);
+            correctionMutation.mutate({ effectId, ...input });
           }}
         />
       ) : isPublication ? (
@@ -1007,11 +1365,42 @@ export function CourseCheckPage() {
           </>
         ) : null}
 
-        {isCommunication && draftsComplete ? (
-          <p className="form-message" data-tone="success" role="status">
-            Drafts frozen
-            {currentPlan.receipt?.appliedAt ? ` at ${currentPlan.receipt.appliedAt}` : ""}
-            . Send messages remains a separate stage.
+        {isCommunication && draftsComplete && !deliveryStarted ? (
+          <>
+            <p className="form-message" data-tone="success" role="status">
+              Drafts frozen. Sending will approve these exact payloads and create one
+              durable effect per address.
+            </p>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={sendMutation.isPending || Boolean(communicationBody?.redacted)}
+              onClick={() => {
+                setMessage(null);
+                sendMutation.mutate(currentPlan);
+              }}
+            >
+              Send messages
+            </button>
+          </>
+        ) : null}
+
+        {isCommunication && deliveryStarted ? (
+          <p
+            className="form-message"
+            data-tone={
+              currentPlan.state === "Complete"
+                ? "success"
+                : currentPlan.state === "Needs attention"
+                  ? "error"
+                  : "warning"
+            }
+            role="status"
+          >
+            Delivery {communicationBody?.stageVisibility.delivery.replaceAll("_", " ")}
+            {communicationBody
+              ? ` · ${communicationBody.deliverySummary.succeeded}/${communicationBody.deliverySummary.total} succeeded`
+              : ""}
           </p>
         ) : null}
 
@@ -1076,6 +1465,10 @@ export function CourseCheckPage() {
         deferMutation.isError ||
         reviseMutation.isError ||
         draftsMutation.isError ||
+        sendMutation.isError ||
+        retryEffectMutation.isError ||
+        reconcileEffectMutation.isError ||
+        correctionMutation.isError ||
         linkCommunicationMutation.isError ? (
           <p className="form-message" data-tone="error" role="alert">
             {(
@@ -1083,6 +1476,10 @@ export function CourseCheckPage() {
               deferMutation.error ??
               reviseMutation.error ??
               draftsMutation.error ??
+              sendMutation.error ??
+              retryEffectMutation.error ??
+              reconcileEffectMutation.error ??
+              correctionMutation.error ??
               linkCommunicationMutation.error
             ) instanceof ApiError
               ? (
@@ -1090,6 +1487,10 @@ export function CourseCheckPage() {
                     deferMutation.error ??
                     reviseMutation.error ??
                     draftsMutation.error ??
+                    sendMutation.error ??
+                    retryEffectMutation.error ??
+                    reconcileEffectMutation.error ??
+                    correctionMutation.error ??
                     linkCommunicationMutation.error) as ApiError
                 ).message
               : "Unable to update Course Check."}
