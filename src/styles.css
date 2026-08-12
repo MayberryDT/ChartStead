@@ -3768,6 +3768,69 @@ table.grid tbody tr[aria-selected="true"] td:first-child {
   cursor: not-allowed;
 }
 
+.course-check-airtable {
+  margin: 24px 0;
+  padding: 20px;
+  border: 1px solid var(--outline);
+  border-radius: var(--r-card);
+  background: var(--surface);
+}
+
+.course-check-airtable-effects {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.course-check-airtable-effects > li {
+  padding: 14px;
+  border: 1px solid var(--outline-subtle);
+  border-radius: var(--r-control);
+  background: var(--surface-subtle);
+}
+
+.course-check-airtable-effects > li > div:first-child,
+.course-check-airtable-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.course-check-airtable-state {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--warning-container);
+  color: var(--on-warning-container);
+  text-transform: capitalize;
+}
+
+.course-check-airtable-state[data-state="succeeded"],
+.course-check-airtable-state[data-state="compensated"] {
+  background: var(--success-container);
+  color: var(--on-success-container);
+}
+
+.course-check-airtable-effects dl > div {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.4fr) 1fr;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--outline-subtle);
+}
+
+.course-check-airtable-effects dt {
+  color: var(--on-surface-muted);
+}
+
+.course-check-airtable-effects dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 900px) {
   .program-filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));

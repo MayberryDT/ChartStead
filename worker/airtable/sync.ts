@@ -122,6 +122,7 @@ export async function pullAirtableForEvent(input: {
       health: "unconfigured",
       pulledAt,
       changes: [],
+      rejectedChanges: [],
       error: null,
       guidance: state.guidance,
     };
@@ -146,7 +147,16 @@ export async function pullAirtableForEvent(input: {
       allChanges.push(...mapAirtableRecordsToChanges(kind, records));
     }
 
-    const applied = await input.store.applyAirtablePullChanges({
+    const { applied, rejected } = await (input.store as unknown as {
+      applyAirtablePullChanges(args: {
+        changes: import("../../shared/airtable").AirtablePullChange[];
+        pulledAt: string;
+        baseId: string;
+      }): Promise<{
+        applied: import("../../shared/airtable").AirtablePullChange[];
+        rejected: import("../../shared/airtable").AirtableRejectedPullChange[];
+      }>;
+    }).applyAirtablePullChanges({
       changes: allChanges,
       pulledAt,
       baseId: input.baseId,
@@ -160,7 +170,7 @@ export async function pullAirtableForEvent(input: {
       lastSuccessAt: pulledAt,
       lastError: null,
       guidance: AIRTABLE_HEALTH_GUIDANCE.healthy,
-      pendingChangeCount: 0,
+      pendingChangeCount: rejected.length,
       baseId: input.baseId,
     };
     await input.store.setAirtableSyncState(state);
@@ -170,6 +180,7 @@ export async function pullAirtableForEvent(input: {
       health: "healthy",
       pulledAt,
       changes: applied,
+      rejectedChanges: rejected,
       error: null,
       guidance: state.guidance,
     };
@@ -192,6 +203,7 @@ export async function pullAirtableForEvent(input: {
       health: classified.health,
       pulledAt,
       changes: [],
+      rejectedChanges: [],
       error: classified.message,
       guidance: state.guidance,
     };

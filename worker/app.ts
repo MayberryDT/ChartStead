@@ -53,6 +53,7 @@ import {
   type SignedPortalTokenPayload,
 } from "./signed-links";
 import type { AppBindings } from "./types";
+import { AIRTABLE_HEALTH_GUIDANCE } from "../shared/airtable";
 import {
   assignedTrackIds,
   canAccessEvent,
@@ -69,6 +70,10 @@ import {
   type AirtableClientFactory,
   type AirtableCredentialClientFactory,
 } from "./airtable/sync";
+import {
+  executeAirtableEffects,
+  reconcileUnknownAirtableEffects,
+} from "./airtable/effects";
 
 
 const MAX_PROPOSAL_BODY_BYTES = 64 * 1_024;
@@ -3088,6 +3093,234 @@ export function createApp(options: AppOptions = {}) {
         );
       }
       return c.json(result.plan);
+    },
+  );
+
+  app.post(
+    "/api/events/:eventId/course-checks/:planId/airtable/execute",
+    async (c) => {
+      const principal = await resolvePrincipal(c.req.raw, c.env);
+      const eventId = c.req.param("eventId");
+      const planId = c.req.param("planId");
+      if (!canAccessEvent(principal, eventId)) {
+        return c.json({ error: "Unauthorized" }, 401);
+      }
+      if (!isEventAdmin(principal, eventId)) {
+        return c.json(
+          {
+            error: "Administrator access is required to write to Airtable.",
+            code: "missing_authority",
+          },
+          403,
+        );
+      }
+      const seed = findSeed(eventId);
+      if (!seed) return c.json({ error: "Event not found" }, 404);
+      await loadEvent(c.env, seed);
+      const body = (await c.req.json().catch(() => null)) as {
+        planVersion?: unknown;
+        digest?: unknown;
+        idempotencyKey?: unknown;
+      } | null;
+      const headerKey = c.req.header("idempotency-key");
+      const idempotencyKey =
+        (typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim()) ||
+        (typeof headerKey === "string" && headerKey.trim()) ||
+        "";
+      if (
+        !body ||
+        !Number.isInteger(body.planVersion) ||
+        typeof body.digest !== "string" ||
+        !idempotencyKey
+      ) {
+        return c.json(
+          { error: "planVersion, digest, and idempotencyKey are required." },
+          400,
+        );
+      }
+      const store = c.env.EVENT_STORE.getByName(eventId);
+      const plan = (await store.getCourseCheckPlan(planId)) as
+        | import("../shared/course-check").CourseCheckPlan
+        | null;
+      if (!plan) return c.json({ error: "Course Check not found" }, 404);
+      if (plan.version !== body.planVersion || plan.digest !== body.digest) {
+        return c.json(
+          {
+            error: "This Course Check changed since you loaded it.",
+            code: "plan_version_mismatch",
+          },
+          409,
+        );
+      }
+      if (!plan.receipt || plan.body.airtable.disposition !== "active") {
+        return c.json(
+          {
+            error: "The Write to Airtable stage is not ready.",
+            code: "airtable_stage_not_ready",
+          },
+          409,
+        );
+      }
+      const connection = await resolveAirtableConnection({
+        store,
+        env: c.env,
+        clientFactory: airtableFactory,
+        credentialClientFactory: airtableCredentialFactory,
+      });
+      if (!connection) {
+        return c.json({
+          plan,
+          effects: plan.body.airtable.effects,
+          degraded: true,
+          guidance: AIRTABLE_HEALTH_GUIDANCE.unconfigured,
+        });
+      }
+      const result = await executeAirtableEffects({
+        store,
+        client: connection.client,
+        planId,
+        actor: { id: principal.id, displayName: principal.displayName },
+      });
+      return c.json({ ...result, degraded: false });
+    },
+  );
+
+  app.post(
+    "/api/events/:eventId/course-checks/:planId/airtable/reconcile",
+    async (c) => {
+      const principal = await resolvePrincipal(c.req.raw, c.env);
+      const eventId = c.req.param("eventId");
+      const planId = c.req.param("planId");
+      if (!canAccessEvent(principal, eventId)) {
+        return c.json({ error: "Unauthorized" }, 401);
+      }
+      if (!isEventAdmin(principal, eventId)) {
+        return c.json(
+          { error: "Administrator access is required to reconcile Airtable writes." },
+          403,
+        );
+      }
+      const seed = findSeed(eventId);
+      if (!seed) return c.json({ error: "Event not found" }, 404);
+      await loadEvent(c.env, seed);
+      const body = (await c.req.json().catch(() => null)) as {
+        planVersion?: unknown;
+        digest?: unknown;
+        idempotencyKey?: unknown;
+      } | null;
+      if (
+        !body ||
+        !Number.isInteger(body.planVersion) ||
+        typeof body.digest !== "string" ||
+        typeof body.idempotencyKey !== "string" ||
+        !body.idempotencyKey.trim()
+      ) {
+        return c.json(
+          { error: "planVersion, digest, and idempotencyKey are required." },
+          400,
+        );
+      }
+      const store = c.env.EVENT_STORE.getByName(eventId);
+      const plan = await (store as unknown as {
+        getCourseCheckPlan(id: string): Promise<import("../shared/course-check").CourseCheckPlan | null>;
+      }).getCourseCheckPlan(planId);
+      if (!plan) return c.json({ error: "Course Check not found" }, 404);
+      if (plan.version !== body.planVersion || plan.digest !== body.digest) {
+        return c.json(
+          { error: "This Course Check changed since you loaded it.", code: "plan_version_mismatch" },
+          409,
+        );
+      }
+      const connection = await resolveAirtableConnection({
+        store,
+        env: c.env,
+        clientFactory: airtableFactory,
+        credentialClientFactory: airtableCredentialFactory,
+      });
+      if (!connection) {
+        return c.json({
+          plan,
+          effects: plan.body.airtable.effects,
+          degraded: true,
+          guidance: AIRTABLE_HEALTH_GUIDANCE.unconfigured,
+        });
+      }
+      const result = await reconcileUnknownAirtableEffects({
+        store,
+        client: connection.client,
+        planId,
+        actor: { id: principal.id, displayName: principal.displayName },
+      });
+      return c.json({ ...result, degraded: false });
+    },
+  );
+
+  app.post(
+    "/api/events/:eventId/course-checks/:planId/airtable/effects/:effectId/compensations",
+    async (c) => {
+      const principal = await resolvePrincipal(c.req.raw, c.env);
+      const eventId = c.req.param("eventId");
+      if (!canAccessEvent(principal, eventId)) {
+        return c.json({ error: "Unauthorized" }, 401);
+      }
+      if (!isEventAdmin(principal, eventId)) {
+        return c.json(
+          { error: "Administrator access is required to create a compensation." },
+          403,
+        );
+      }
+      const seed = findSeed(eventId);
+      if (!seed) return c.json({ error: "Event not found" }, 404);
+      await loadEvent(c.env, seed);
+      const body = (await c.req.json().catch(() => null)) as {
+        planVersion?: unknown;
+        digest?: unknown;
+        reason?: unknown;
+        idempotencyKey?: unknown;
+      } | null;
+      if (
+        !body ||
+        !Number.isInteger(body.planVersion) ||
+        typeof body.digest !== "string" ||
+        typeof body.reason !== "string" ||
+        !body.reason.trim() ||
+        typeof body.idempotencyKey !== "string" ||
+        !body.idempotencyKey.trim()
+      ) {
+        return c.json(
+          { error: "planVersion, digest, reason, and idempotencyKey are required." },
+          400,
+        );
+      }
+      const store = c.env.EVENT_STORE.getByName(eventId);
+      const compensationStore = store as unknown as {
+        getCourseCheckPlan(id: string): Promise<import("../shared/course-check").CourseCheckPlan | null>;
+        createAirtableCompensation(args: Record<string, unknown>): Promise<{
+          plan: import("../shared/course-check").CourseCheckPlan;
+          effect: import("../shared/airtable").AirtableEffect;
+          created: boolean;
+        }>;
+      };
+      const plan = await compensationStore.getCourseCheckPlan(c.req.param("planId"));
+      if (!plan) return c.json({ error: "Course Check not found" }, 404);
+      if (plan.version !== body.planVersion || plan.digest !== body.digest) {
+        return c.json(
+          { error: "This Course Check changed since you loaded it.", code: "plan_version_mismatch" },
+          409,
+        );
+      }
+      try {
+        const result = await compensationStore.createAirtableCompensation({
+          planId: plan.id,
+          effectId: c.req.param("effectId"),
+          reason: body.reason,
+          idempotencyKey: body.idempotencyKey,
+          actor: { id: principal.id, displayName: principal.displayName },
+        });
+        return c.json(result, result.created ? 201 : 200);
+      } catch (error) {
+        return c.json({ error: errorMessage(error), code: "compensation_unavailable" }, 409);
+      }
     },
   );
 

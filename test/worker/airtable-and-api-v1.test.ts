@@ -293,6 +293,9 @@ describe("Ticket 10 Airtable foundation", () => {
         async listTable() {
           throw new AirtableClientError("Airtable rate limited the request.", "rate_limited", 429);
         },
+        async upsertRecord() {
+          throw new AirtableClientError("Airtable rate limited the request.", "rate_limited", 429);
+        },
       },
       baseId: "appTestBase",
     });

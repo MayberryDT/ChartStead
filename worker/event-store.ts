@@ -35,6 +35,7 @@ import {
 import type {
   AirtableEffect,
   AirtablePullChange,
+  AirtableRejectedPullChange,
   AirtableStageDisposition,
   AirtableSyncState,
 } from "../shared/airtable";
@@ -5162,6 +5163,26 @@ export class EventStore extends DurableObject<AppBindings> {
               ...plan.body.airtable,
               effects: persistedEffects,
             },
+            stages: plan.body.stages.map((stage) => {
+              if (stage.id !== "write-airtable" || plan.body.airtable.disposition !== "active") {
+                return stage;
+              }
+              const states = persistedEffects.map((effect) => effect.state);
+              const status = states.every(
+                (state) => state === "succeeded" || state === "compensated",
+              )
+                ? "complete"
+                : states.some((state) => state === "attempting")
+                  ? "approved"
+                  : states.some((state) =>
+                        state === "retryable_failure" ||
+                        state === "permanent_failure" ||
+                        state === "unknown",
+                    )
+                    ? "blocked"
+                    : "ready";
+              return { ...stage, status };
+            }),
           }
         : plan.body;
     const ageWarning = computeAgeWarning({
@@ -5388,6 +5409,42 @@ export class EventStore extends DurableObject<AppBindings> {
     return digestPayload(body);
   }
 
+  private decorateAirtableEffects<T extends CourseCheckPlanBody>(body: T): T {
+    if (body.airtable.effects.length === 0) return body;
+    const effects = body.airtable.effects.map((effect) => {
+      const link = this.ctx.storage.sql
+        .exec<{ airtable_record_id: string }>(
+          `SELECT airtable_record_id FROM airtable_record_links
+           WHERE chartstead_kind = ? AND chartstead_id = ? LIMIT 1`,
+          effect.kind,
+          effect.chartsteadId,
+        )
+        .toArray()[0];
+      if (!link) return effect;
+      const prior = this.ctx.storage.sql
+        .exec<{ fields_json: string }>(
+          `SELECT fields_json FROM airtable_effects
+           WHERE kind = ? AND chartstead_id = ? AND state IN ('succeeded', 'compensated')
+           ORDER BY updated_at DESC LIMIT 1`,
+          effect.kind,
+          effect.chartsteadId,
+        )
+        .toArray()[0];
+      return {
+        ...effect,
+        operation: "update" as const,
+        providerRecordId: link.airtable_record_id,
+        beforeFields: prior
+          ? (JSON.parse(prior.fields_json) as Record<string, unknown>)
+          : effect.beforeFields,
+      };
+    });
+    return {
+      ...body,
+      airtable: { ...body.airtable, effects },
+    } as T;
+  }
+
   async setAirtableStageDisposition(input: {
     planId: string;
     planVersion: number;
@@ -5572,7 +5629,7 @@ export class EventStore extends DurableObject<AppBindings> {
         chunks.length > 1
           ? `Batch exceeded the safe limit of ${settings.batchLimit} decisions. Split into ${chunks.length} linked exact plans (part ${chunkIndex + 1} of ${chunks.length}).`
           : null;
-      const body = planDecisionBatch({
+      let body = planDecisionBatch({
         planId,
         batchGroupId,
         selections: chunk,
@@ -5582,6 +5639,7 @@ export class EventStore extends DurableObject<AppBindings> {
         linkedPlanIds: [],
         splitExplanation,
       });
+      body = this.decorateAirtableEffects(body);
       const digest = await digestPayload(decisionBodyDigestPayload(body));
       const state: CourseCheckPlanState = hasBlockerFindings(body.findings)
         ? "Needs attention"
@@ -5850,7 +5908,7 @@ export class EventStore extends DurableObject<AppBindings> {
     }
 
     const planId = crypto.randomUUID();
-    const body = planGuaranteedSpeaker({
+    let body = planGuaranteedSpeaker({
       planId,
       sourceLabel: input.sourceLabel,
       title: input.title,
@@ -5859,6 +5917,7 @@ export class EventStore extends DurableObject<AppBindings> {
       speakers: input.speakers,
       existingSpeakersByEmail: this.listExistingSpeakersByEmail(),
     });
+    body = this.decorateAirtableEffects(body);
     const digest = await digestPayload(body);
     const now = new Date().toISOString();
     const state: CourseCheckPlanState = hasBlockerFindings(body.findings)
@@ -6743,16 +6802,35 @@ export class EventStore extends DurableObject<AppBindings> {
     plan: CourseCheckPlan,
     options: { canViewCommunicationEvidence: boolean },
   ): CourseCheckPlan {
+    let projected = plan;
     if (
       plan.body.actionType === "communication" &&
       !options.canViewCommunicationEvidence
     ) {
-      return {
+      projected = {
         ...plan,
         body: redactCommunicationBody(plan.body),
       };
     }
-    return plan;
+    if (!options.canViewCommunicationEvidence && projected.body.airtable.effects.length > 0) {
+      projected = {
+        ...projected,
+        body: {
+          ...projected.body,
+          airtable: {
+            ...projected.body.airtable,
+            redacted: true,
+            effects: projected.body.airtable.effects.map((effect) => ({
+              ...effect,
+              fields: { redacted: true },
+              beforeFields: null,
+              lastError: effect.lastError ? "Integration delivery requires administrator review." : null,
+            })),
+          },
+        },
+      };
+    }
+    return projected;
   }
 
   async createPublicationCourseCheck(input: {
@@ -6805,7 +6883,7 @@ export class EventStore extends DurableObject<AppBindings> {
     }
 
     const planId = crypto.randomUUID();
-    const body = planPublication({
+    let body = planPublication({
       planId,
       operation,
       workingFingerprint: this.computeWorkingProgramFingerprint(),
@@ -6826,6 +6904,7 @@ export class EventStore extends DurableObject<AppBindings> {
       })),
       ageWarningHours: settings.ageWarningHours,
     });
+    body = this.decorateAirtableEffects(body);
     const digest = await digestPayload(publicationBodyDigestPayload(body));
     const now = new Date().toISOString();
     const state: CourseCheckPlanState = hasBlockerFindings(body.findings)
@@ -7748,6 +7827,279 @@ export class EventStore extends DurableObject<AppBindings> {
       }));
   }
 
+  beginAirtableEffectAttempts(input: {
+    planId: string;
+    actor: CourseCheckActor;
+    now?: string;
+  }): AirtableEffect[] {
+    const plan = this.getCourseCheckPlan(input.planId);
+    if (!plan?.receipt || plan.body.airtable.disposition !== "active") return [];
+    const now = input.now ?? new Date().toISOString();
+    const eligible = this.listAirtableEffects(plan.id).filter(
+      (effect) =>
+        effect.state === "pending" ||
+        (effect.state === "retryable_failure" &&
+          (!effect.nextAttemptAt || effect.nextAttemptAt <= now)),
+    );
+    this.ctx.storage.transactionSync(() => {
+      for (const effect of eligible) {
+        this.ctx.storage.sql.exec(
+          `UPDATE airtable_effects
+           SET state = 'attempting', attempt_count = attempt_count + 1,
+               last_error = NULL, next_attempt_at = NULL, updated_at = ?
+           WHERE id = ? AND state IN ('pending', 'retryable_failure')`,
+          now,
+          effect.id,
+        );
+        this.ctx.storage.sql.exec(
+          `INSERT INTO airtable_effect_events
+            (id, effect_id, plan_id, type, from_state, to_state, actor_id,
+             actor_name, detail, created_at)
+           VALUES (?, ?, ?, 'attempt_started', ?, 'attempting', ?, ?, ?, ?)`,
+          crypto.randomUUID(),
+          effect.id,
+          plan.id,
+          effect.state,
+          input.actor.id,
+          input.actor.displayName,
+          `Attempt ${effect.attemptCount + 1}`,
+          now,
+        );
+      }
+    });
+    const eligibleIds = new Set(eligible.map((effect) => effect.id));
+    return this.listAirtableEffects(plan.id).filter((effect) => eligibleIds.has(effect.id));
+  }
+
+  recordAirtableEffectResult(input: {
+    effectId: string;
+    state: Extract<
+      AirtableEffect["state"],
+      "succeeded" | "retryable_failure" | "permanent_failure" | "unknown"
+    >;
+    providerRecordId?: string | null;
+    error?: string | null;
+    nextAttemptAt?: string | null;
+    actor: CourseCheckActor;
+    now?: string;
+  }): AirtableEffect | null {
+    const effect = this.ctx.storage.sql
+      .exec<{
+        plan_id: string;
+        state: string;
+        kind: string;
+        chartstead_id: string;
+        compensates_effect_id: string | null;
+      }>(
+        `SELECT plan_id, state, kind, chartstead_id, compensates_effect_id
+         FROM airtable_effects WHERE id = ?`,
+        input.effectId,
+      )
+      .one();
+    if (!effect) return null;
+    const now = input.now ?? new Date().toISOString();
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        `UPDATE airtable_effects
+         SET state = ?, provider_record_id = COALESCE(?, provider_record_id),
+             last_error = ?, next_attempt_at = ?, updated_at = ?
+         WHERE id = ?`,
+        input.state,
+        input.providerRecordId ?? null,
+        input.error ?? null,
+        input.nextAttemptAt ?? null,
+        now,
+        input.effectId,
+      );
+      if (input.state === "succeeded" && input.providerRecordId) {
+        this.ctx.storage.sql.exec(
+          `INSERT INTO airtable_record_links
+            (chartstead_kind, chartstead_id, airtable_record_id, updated_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(chartstead_kind, chartstead_id) DO UPDATE SET
+             airtable_record_id = excluded.airtable_record_id,
+             updated_at = excluded.updated_at`,
+          effect.kind,
+          effect.chartstead_id,
+          input.providerRecordId,
+          now,
+        );
+      }
+      if (input.state === "succeeded" && effect.compensates_effect_id) {
+        this.ctx.storage.sql.exec(
+          `UPDATE airtable_effects
+           SET state = 'compensated', updated_at = ?
+           WHERE id = ? AND state = 'succeeded'`,
+          now,
+          effect.compensates_effect_id,
+        );
+        this.ctx.storage.sql.exec(
+          `INSERT INTO airtable_effect_events
+            (id, effect_id, plan_id, type, from_state, to_state, actor_id,
+             actor_name, detail, created_at)
+           VALUES (?, ?, ?, 'compensation_succeeded', 'succeeded', 'compensated',
+                   ?, ?, ?, ?)`,
+          crypto.randomUUID(),
+          effect.compensates_effect_id,
+          effect.plan_id,
+          input.actor.id,
+          input.actor.displayName,
+          `Reversed by ${input.effectId}`,
+          now,
+        );
+      }
+      this.ctx.storage.sql.exec(
+        `INSERT INTO airtable_effect_events
+          (id, effect_id, plan_id, type, from_state, to_state, actor_id,
+           actor_name, detail, created_at)
+         VALUES (?, ?, ?, 'attempt_finished', ?, ?, ?, ?, ?, ?)`,
+        crypto.randomUUID(),
+        input.effectId,
+        effect.plan_id,
+        effect.state,
+        input.state,
+        input.actor.id,
+        input.actor.displayName,
+        input.error ?? input.providerRecordId ?? input.state,
+        now,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT INTO audit_events
+          (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+           committee_note_changed, created_at)
+         VALUES (?, ?, 'course_check.airtable.effect_result', ?, ?, ?, ?, 0, ?)`,
+        crypto.randomUUID(),
+        effect.plan_id,
+        input.actor.id,
+        input.actor.displayName,
+        effect.state,
+        input.state,
+        now,
+      );
+    });
+    return this.listAirtableEffects(effect.plan_id).find(
+      (candidate) => candidate.id === input.effectId,
+    ) ?? null;
+  }
+
+  createAirtableCompensation(input: {
+    planId: string;
+    effectId: string;
+    reason: string;
+    idempotencyKey: string;
+    actor: CourseCheckActor;
+  }): { plan: CourseCheckPlan; effect: AirtableEffect; created: boolean } {
+    const command = "airtable-compensate";
+    const existing = this.readIdempotency(command, input.idempotencyKey);
+    if (existing) {
+      const plan = this.getCourseCheckPlan(existing.planId);
+      const effect = plan?.body.airtable.effects.find(
+        (candidate) => candidate.compensatesEffectId === input.effectId,
+      );
+      if (!plan || !effect) throw new Error("Idempotent Airtable compensation is missing.");
+      return { plan, effect, created: false };
+    }
+    const reason = input.reason.trim();
+    if (!reason) throw new Error("A compensation reason is required.");
+    const plan = this.getCourseCheckPlan(input.planId);
+    const original = plan?.body.airtable.effects.find(
+      (effect) => effect.id === input.effectId,
+    );
+    if (!plan || !original) throw new Error("Airtable effect not found.");
+    if (
+      original.state !== "succeeded" ||
+      !original.providerRecordId ||
+      !original.beforeFields
+    ) {
+      throw new Error(
+        "Only a succeeded update with frozen before-fields can be compensated.",
+      );
+    }
+    const already = plan.body.airtable.effects.find(
+      (effect) => effect.compensatesEffectId === original.id,
+    );
+    if (already) return { plan, effect: already, created: false };
+    const now = new Date().toISOString();
+    const compensation: AirtableEffect = {
+      id: `air_comp_${original.id}`,
+      planId: plan.id,
+      planVersion: plan.version,
+      kind: original.kind,
+      chartsteadId: original.chartsteadId,
+      tableName: original.tableName,
+      operation: "update",
+      fields: original.beforeFields,
+      beforeFields: original.fields,
+      providerRecordId: original.providerRecordId,
+      state: "pending",
+      attemptCount: 0,
+      lastError: null,
+      nextAttemptAt: null,
+      compensatesEffectId: original.id,
+    };
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        `INSERT INTO airtable_effects
+          (id, plan_id, plan_version, kind, chartstead_id, table_name, operation,
+           fields_json, before_fields_json, provider_record_id, state,
+           attempt_count, last_error, next_attempt_at, compensates_effect_id,
+           created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'update', ?, ?, ?, 'pending', 0, NULL, NULL, ?, ?, ?)`,
+        compensation.id,
+        compensation.planId,
+        compensation.planVersion,
+        compensation.kind,
+        compensation.chartsteadId,
+        compensation.tableName,
+        JSON.stringify(compensation.fields),
+        JSON.stringify(compensation.beforeFields),
+        compensation.providerRecordId,
+        compensation.compensatesEffectId,
+        now,
+        now,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT INTO airtable_effect_events
+          (id, effect_id, plan_id, type, from_state, to_state, actor_id,
+           actor_name, detail, created_at)
+         VALUES (?, ?, ?, 'compensation_created', NULL, 'pending', ?, ?, ?, ?)`,
+        crypto.randomUUID(),
+        compensation.id,
+        plan.id,
+        input.actor.id,
+        input.actor.displayName,
+        reason,
+        now,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT INTO audit_events
+          (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+           committee_note_changed, created_at)
+         VALUES (?, ?, 'course_check.airtable.compensation_created', ?, ?,
+                 'succeeded', ?, 0, ?)`,
+        crypto.randomUUID(),
+        plan.id,
+        input.actor.id,
+        input.actor.displayName,
+        reason,
+        now,
+      );
+    });
+    const updated = this.getCourseCheckPlan(plan.id);
+    if (!updated) throw new Error("Course Check disappeared after compensation creation.");
+    this.writeIdempotency({
+      command,
+      key: input.idempotencyKey,
+      planId: plan.id,
+      response: updated,
+    });
+    const saved = updated.body.airtable.effects.find(
+      (effect) => effect.id === compensation.id,
+    );
+    if (!saved) throw new Error("Airtable compensation was not persisted.");
+    return { plan: updated, effect: saved, created: true };
+  }
+
   private persistAirtableEffectIntents(
     plan: CourseCheckPlan,
     actor: CourseCheckActor,
@@ -7978,10 +8330,33 @@ export class EventStore extends DurableObject<AppBindings> {
     changes: AirtablePullChange[];
     pulledAt: string;
     baseId: string;
-  }): AirtablePullChange[] {
+  }): { applied: AirtablePullChange[]; rejected: AirtableRejectedPullChange[] } {
     const applied: AirtablePullChange[] = [];
+    const rejected: AirtableRejectedPullChange[] = [];
     this.ctx.storage.transactionSync(() => {
       for (const change of input.changes) {
+        const consequentialReason = this.airtableConsequenceReason(change);
+        if (consequentialReason) {
+          rejected.push({
+            change,
+            reason: consequentialReason,
+            recoveryGuidance:
+              "Create a Course Check from the current ChartStead record, review the consequences, and approve there.",
+          });
+          this.ctx.storage.sql.exec(
+            `INSERT INTO audit_events
+              (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+               committee_note_changed, created_at)
+             VALUES (?, ?, 'airtable.pull.rejected_consequential', 'airtable',
+                     'Airtable pull', ?, ?, 0, ?)`,
+            crypto.randomUUID(),
+            change.chartsteadId,
+            change.kind,
+            consequentialReason,
+            input.pulledAt,
+          );
+          continue;
+        }
         const didApply = this.applyOneAirtableChange(change);
         if (!didApply) continue;
         this.ctx.storage.sql.exec(
@@ -7996,10 +8371,52 @@ export class EventStore extends DurableObject<AppBindings> {
           change.airtableRecordId,
           input.pulledAt,
         );
+        this.ctx.storage.sql.exec(
+          `INSERT INTO audit_events
+            (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+             committee_note_changed, created_at)
+           VALUES (?, ?, 'airtable.pull.applied', 'airtable', 'Airtable pull',
+                   ?, 'mapped fields applied', 0, ?)`,
+          crypto.randomUUID(),
+          change.chartsteadId,
+          change.kind,
+          input.pulledAt,
+        );
         applied.push(change);
       }
     });
-    return applied;
+    return { applied, rejected };
+  }
+
+  private airtableConsequenceReason(change: AirtablePullChange): string | null {
+    if (change.kind === "event") {
+      return "Event-level changes can affect public program output and require a Course Check.";
+    }
+    if (change.kind === "submission") {
+      const proposal = this.getProposal(change.chartsteadId);
+      if (proposal?.programOutcome != null) {
+        return "This submission is already decided; changing it requires a Course Check.";
+      }
+      return null;
+    }
+    if (change.kind === "speaker") {
+      const participation = this.ctx.storage.sql
+        .exec<{ count: number }>(
+          `SELECT COUNT(*) AS count FROM speaker_participations WHERE speaker_id = ?`,
+          change.chartsteadId,
+        )
+        .one();
+      return Number(participation?.count ?? 0) > 0
+        ? "This speaker participates in program sessions; changing them requires a Course Check."
+        : null;
+    }
+    if (change.kind === "session") {
+      return "Session changes can affect scheduling or publication and require a Course Check.";
+    }
+    if (change.kind === "task" && Object.hasOwn(change.mappedValues, "status")) {
+      return "Task completion changes trigger operational consequences and require a Course Check.";
+    }
+    return null;
   }
 
   private applyOneAirtableChange(change: AirtablePullChange): boolean {

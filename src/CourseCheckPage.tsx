@@ -16,8 +16,11 @@ import {
   createCommunicationCourseCheck,
   createCommunicationDrafts,
   deferCourseCheckItems,
+  executeCourseCheckAirtable,
   fetchCourseCheckPlan,
+  reconcileCourseCheckAirtable,
   reviseCommunicationCourseCheck,
+  setCourseCheckAirtableDisposition,
 } from "./api";
 import { createClientId } from "./id";
 
@@ -616,6 +619,10 @@ export function CourseCheckPage() {
     () => `ui-link-comm-${planId}-${createClientId()}`,
     [planId],
   );
+  const airtableKey = useMemo(
+    () => `ui-airtable-${planId}-${createClientId()}`,
+    [planId],
+  );
 
   const planQuery = useQuery({
     queryKey: ["course-check", eventId, planId],
@@ -782,6 +789,26 @@ export function CourseCheckPage() {
     },
   });
 
+  const airtableMutation = useMutation({
+    mutationFn: (input: {
+      plan: CourseCheckPlan;
+      action: "execute" | "reconcile" | "deferred" | "removed";
+    }) => {
+      const key = `${airtableKey}-${input.action}`;
+      if (input.action === "execute") {
+        return executeCourseCheckAirtable(eventId, input.plan, key);
+      }
+      if (input.action === "reconcile") {
+        return reconcileCourseCheckAirtable(eventId, input.plan, key);
+      }
+      return setCourseCheckAirtableDisposition(eventId, input.plan, input.action, key);
+    },
+    onSuccess: (next) => {
+      queryClient.setQueryData(["course-check", eventId, planId], next);
+      setMessage("Airtable stage updated. Internal ChartStead work remains committed.");
+    },
+  });
+
   if (planQuery.isLoading) {
     return (
       <main className="app course-check-page">
@@ -908,6 +935,69 @@ export function CourseCheckPage() {
       ) : (
         <GuaranteedBody plan={currentPlan} />
       )}
+
+      {currentPlan.body.airtable.effects.length > 0 ? (
+        <section className="course-check-airtable" aria-labelledby="airtable-effects-title">
+          <div>
+            <p className="eyebrow">Optional integration stage</p>
+            <h2 id="airtable-effects-title">Write to Airtable</h2>
+            <p className="muted">{currentPlan.body.airtable.summary}</p>
+          </div>
+          <ul className="course-check-airtable-effects">
+            {currentPlan.body.airtable.effects.map((effect) => (
+              <li key={effect.id}>
+                <div>
+                  <strong>{effect.operation} {effect.tableName}</strong>
+                  <span className="mono">{effect.chartsteadId}</span>
+                </div>
+                <span className="course-check-airtable-state" data-state={effect.state}>
+                  {effect.state.replaceAll("_", " ")}
+                </span>
+                <dl>
+                  {Object.entries(effect.fields).map(([field, value]) => (
+                    <div key={field}>
+                      <dt>{field}</dt>
+                      <dd>{String(value ?? "—")}</dd>
+                    </div>
+                  ))}
+                </dl>
+                {effect.providerRecordId ? (
+                  <p className="muted">Provider record <span className="mono">{effect.providerRecordId}</span></p>
+                ) : null}
+                {effect.lastError ? <p className="form-message" data-tone="error">{effect.lastError}</p> : null}
+              </li>
+            ))}
+          </ul>
+          {currentPlan.receipt && currentPlan.body.airtable.disposition === "active" ? (
+            <div className="course-check-airtable-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={airtableMutation.isPending}
+                onClick={() => airtableMutation.mutate({ plan: currentPlan, action: "execute" })}
+              >
+                Write to Airtable
+              </button>
+              {currentPlan.body.airtable.effects.some((effect) => effect.state === "unknown") ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={airtableMutation.isPending}
+                  onClick={() => airtableMutation.mutate({ plan: currentPlan, action: "reconcile" })}
+                >
+                  Reconcile unknown writes
+                </button>
+              ) : null}
+              <button type="button" className="btn btn-secondary" disabled={airtableMutation.isPending} onClick={() => airtableMutation.mutate({ plan: currentPlan, action: "deferred" })}>
+                Defer
+              </button>
+              <button type="button" className="btn btn-ghost" disabled={airtableMutation.isPending} onClick={() => airtableMutation.mutate({ plan: currentPlan, action: "removed" })}>
+                Remove stage
+              </button>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <footer className="course-check-actions">
         {isDecision && decisionComplete ? (
@@ -1076,21 +1166,24 @@ export function CourseCheckPage() {
         deferMutation.isError ||
         reviseMutation.isError ||
         draftsMutation.isError ||
-        linkCommunicationMutation.isError ? (
+        linkCommunicationMutation.isError ||
+        airtableMutation.isError ? (
           <p className="form-message" data-tone="error" role="alert">
             {(
               applyMutation.error ??
               deferMutation.error ??
               reviseMutation.error ??
               draftsMutation.error ??
-              linkCommunicationMutation.error
+              linkCommunicationMutation.error ??
+              airtableMutation.error
             ) instanceof ApiError
               ? (
                   (applyMutation.error ??
                     deferMutation.error ??
                     reviseMutation.error ??
                     draftsMutation.error ??
-                    linkCommunicationMutation.error) as ApiError
+                    linkCommunicationMutation.error ??
+                    airtableMutation.error) as ApiError
                 ).message
               : "Unable to update Course Check."}
           </p>

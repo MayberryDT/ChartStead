@@ -66,6 +66,7 @@ describe("Settings Airtable sync", () => {
         health: "healthy",
         pulledAt: "2026-08-11T12:05:00.000Z",
         changes: [{ kind: "submission", chartsteadId: "SUB-1", airtableRecordId: "rec1", mappedValues: {} }],
+        rejectedChanges: [],
         error: null,
         guidance: "Airtable pull is up to date.",
       },

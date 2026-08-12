@@ -57,6 +57,12 @@ export interface AirtablePullChange {
   mappedValues: Record<string, unknown>;
 }
 
+export interface AirtableRejectedPullChange {
+  change: AirtablePullChange;
+  reason: string;
+  recoveryGuidance: string;
+}
+
 export type AirtableEffectState =
   | "pending"
   | "attempting"
@@ -100,6 +106,7 @@ export interface AirtablePullResult {
   health: AirtableSyncHealth;
   pulledAt: string;
   changes: AirtablePullChange[];
+  rejectedChanges: AirtableRejectedPullChange[];
   error: string | null;
   guidance: string | null;
 }

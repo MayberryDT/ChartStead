@@ -1091,6 +1091,59 @@ export async function applyCourseCheckPlan(
   return body;
 }
 
+async function mutateCourseCheckAirtable(
+  eventId: string,
+  plan: CourseCheckPlan,
+  action: "execute" | "reconcile" | "disposition",
+  input: { idempotencyKey: string; disposition?: "deferred" | "removed" },
+): Promise<CourseCheckPlan> {
+  const response = await fetch(
+    `/api/events/${eventId}/course-checks/${plan.id}/airtable/${action}`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": input.idempotencyKey,
+      },
+      body: JSON.stringify({
+        planVersion: plan.version,
+        digest: plan.digest,
+        ...input,
+      }),
+    },
+  );
+  const body = await readJson<
+    CourseCheckPlan | { plan: CourseCheckPlan; error?: string; guidance?: string }
+  >(response);
+  if (!response.ok) {
+    throw new ApiError(
+      "error" in body && body.error ? body.error : "Unable to update Airtable stage",
+      response.status,
+      body,
+    );
+  }
+  return "plan" in body ? body.plan : body;
+}
+
+export const executeCourseCheckAirtable = (
+  eventId: string,
+  plan: CourseCheckPlan,
+  idempotencyKey: string,
+) => mutateCourseCheckAirtable(eventId, plan, "execute", { idempotencyKey });
+
+export const reconcileCourseCheckAirtable = (
+  eventId: string,
+  plan: CourseCheckPlan,
+  idempotencyKey: string,
+) => mutateCourseCheckAirtable(eventId, plan, "reconcile", { idempotencyKey });
+
+export const setCourseCheckAirtableDisposition = (
+  eventId: string,
+  plan: CourseCheckPlan,
+  disposition: "deferred" | "removed",
+  idempotencyKey: string,
+) => mutateCourseCheckAirtable(eventId, plan, "disposition", { disposition, idempotencyKey });
+
 export async function fetchAgenda(eventId: string): Promise<AgendaWorkspaceResponse> {
   const response = await fetch(`/api/events/${eventId}/sessions`);
   const body = await readJson<AgendaWorkspaceResponse | { error: string }>(response);
