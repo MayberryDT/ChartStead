@@ -2,7 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useEffect, useId, useRef, useState } from "react";
 import { Link, useParams } from "@tanstack/react-router";
 
-import type { PortalOnboardingTask, SpeakerPortalSession } from "../shared/events";
+import type {
+  PortalMessage,
+  PortalMessageStatus,
+  PortalOnboardingTask,
+  SpeakerPortalSession,
+} from "../shared/events";
 import {
   ApiError,
   completePortalTask,
@@ -20,6 +25,39 @@ function formatWhen(value: string | null | undefined): string {
     dateStyle: "medium",
     timeStyle: "short",
   });
+}
+
+function messageStatusLabel(status: PortalMessageStatus): string {
+  switch (status) {
+    case "draft":
+      return "Preparing";
+    case "queued":
+      return "Queued";
+    case "sent":
+      return "Sending";
+    case "delivered":
+      return "Delivered";
+    case "failed":
+      return "Needs attention";
+    default:
+      return status;
+  }
+}
+
+function calendarOpLabel(message: PortalMessage): string | null {
+  if (!message.calendar) return null;
+  const op =
+    message.calendar.operation === "create"
+      ? "Invite"
+      : message.calendar.operation === "update"
+        ? "Update"
+        : "Cancellation";
+  const location = message.calendar.locationPending
+    ? " · Location pending"
+    : message.calendar.location
+      ? ` · ${message.calendar.location}`
+      : "";
+  return `${op}${location}`;
 }
 
 function portalAssetUrl(eventId: string, token: string, assetId: string): string {
@@ -293,6 +331,13 @@ export function SpeakerPortalPage() {
             <p className="portal-muted">No session yet</p>
           )}
         </article>
+        <article className="portal-card">
+          <h2>Messages</h2>
+          <p className="portal-metric">{data.messages?.length ?? 0}</p>
+          <p className="portal-muted">
+            Independent of acceptance — a decision does not mean a message was sent.
+          </p>
+        </article>
       </section>
 
       <div className="portal-grid">
@@ -388,6 +433,38 @@ export function SpeakerPortalPage() {
               <dd>{data.participation.organizationAtEvent || "—"}</dd>
             </div>
           </dl>
+        </section>
+
+        <section className="portal-card portal-span" aria-labelledby="messages-title">
+          <h2 id="messages-title">Messages &amp; calendar</h2>
+          <p className="portal-muted">
+            Delivery state is separate from your acceptance. Drafts are not yet sent.
+          </p>
+          {(data.messages ?? []).length === 0 ? (
+            <p className="portal-muted">No organizer messages yet.</p>
+          ) : (
+            <ul className="portal-message-list">
+              {(data.messages ?? []).map((message) => (
+                <li key={message.id} className="portal-message-item">
+                  <div className="portal-message-main">
+                    <strong>{message.subject}</strong>
+                    <span
+                      className={`portal-status-chip portal-status-${message.status}`}
+                    >
+                      {messageStatusLabel(message.status)}
+                    </span>
+                  </div>
+                  <p className="portal-muted">
+                    {message.kind === "calendar_invite"
+                      ? calendarOpLabel(message)
+                      : "Message"}
+                    {" · "}
+                    {formatWhen(message.updatedAt)}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section className="portal-card portal-span" aria-labelledby="tasks-title">

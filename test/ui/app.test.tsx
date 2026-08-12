@@ -1960,6 +1960,23 @@ describe("guided CFP builder", () => {
                 startsAt: null,
                 endsAt: null,
               },
+              messages: [
+                {
+                  id: "msg_1",
+                  subject: "Your session calendar invite",
+                  status: "delivered",
+                  kind: "calendar_invite",
+                  createdAt: "2026-08-11T12:00:00.000Z",
+                  updatedAt: "2026-08-11T12:05:00.000Z",
+                  calendar: {
+                    operation: "create",
+                    uid: "cal_ses_1",
+                    sequence: 0,
+                    locationPending: true,
+                    location: "Location pending",
+                  },
+                },
+              ],
               tasks: [
                 {
                   id: "tsk_1",
@@ -1987,6 +2004,11 @@ describe("guided CFP builder", () => {
     expect(screen.getByText("Historic Org")).toBeVisible();
     expect(screen.getByText("Upload headshot")).toBeVisible();
     expect(screen.getByText(/SUB-PODS0099/)).toBeVisible();
+    expect(screen.getByRole("heading", { name: /Messages & calendar/i })).toBeVisible();
+    expect(screen.getByText("Your session calendar invite")).toBeVisible();
+    expect(screen.getByText("Delivered")).toBeVisible();
+    expect(screen.getByText(/Location pending/i)).toBeVisible();
+    expect(screen.getByText(/Independent of acceptance/i)).toBeVisible();
     expect(screen.queryByText(/committee|private note|digest/i)).not.toBeInTheDocument();
   });
 });

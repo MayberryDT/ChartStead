@@ -136,10 +136,19 @@ export interface OrganizerProposal extends PublicProposal {
   confirmationEmailStatus: OutboxDeliveryStatus | null;
 }
 
+export type ProposalAuditEventType =
+  | "proposal.review.changed"
+  | "course_check.decision.applied"
+  | "course_check.communication.drafts_created"
+  | "course_check.communication.send_started"
+  | "course_check.communication.effect_retry"
+  | "course_check.communication.effect_reconciled"
+  | "course_check.communication.correction_created";
+
 export interface ProposalAuditEvent {
   id: string;
   proposalId: string;
-  type: "proposal.review.changed" | "course_check.decision.applied";
+  type: ProposalAuditEventType;
   actorId: string;
   actorName: string;
   fromStatus: ProposalStatus | string;
@@ -333,6 +342,35 @@ export interface SubmitterEditSession {
   };
 }
 
+/** Speaker-facing delivery status — independent of proposal/program outcome. */
+export type PortalMessageStatus =
+  | "draft"
+  | "queued"
+  | "sent"
+  | "delivered"
+  | "failed";
+
+export type PortalMessageKind = "message" | "calendar_invite";
+
+export interface PortalMessageCalendar {
+  operation: "create" | "update" | "cancel";
+  uid: string;
+  sequence: number;
+  locationPending: boolean;
+  location: string | null;
+}
+
+/** Safe speaker-visible message/calendar invite row (no plan digests or findings). */
+export interface PortalMessage {
+  id: string;
+  subject: string;
+  status: PortalMessageStatus;
+  kind: PortalMessageKind;
+  createdAt: string;
+  updatedAt: string;
+  calendar: PortalMessageCalendar | null;
+}
+
 /** Safe speaker-facing portal payload — never includes committee/Course Check evidence. */
 export interface SpeakerPortalSession {
   eventId: string;
@@ -369,6 +407,8 @@ export interface SpeakerPortalSession {
     startsAt: string | null;
     endsAt: string | null;
   } | null;
+  /** Independent message + calendar invite delivery state for this speaker. */
+  messages: PortalMessage[];
   tasks: PortalOnboardingTask[];
   nextDeadline: string | null;
 }

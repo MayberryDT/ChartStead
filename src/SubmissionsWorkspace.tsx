@@ -19,6 +19,7 @@ import type {
   ProposalStatus,
   SubmissionAnswers,
 } from "../shared/events";
+import { auditEventLabel } from "../shared/portal-lifecycle";
 import {
   createDecisionCourseCheck,
   fetchOrganizerProposal,
@@ -976,20 +977,18 @@ function ProposalInspector({
             <details>
               <summary>
                 <strong>{auditEvents[0]!.actorName}</strong>{" "}
-                {auditEvents[0]!.type === "course_check.decision.applied"
-                  ? `applied final outcome ${String(auditEvents[0]!.toStatus)}`
-                  : `set ${statusLabel(auditEvents[0]!.toStatus as ProposalStatus)}`}
+                {auditEvents[0]!.type === "proposal.review.changed"
+                  ? `set ${statusLabel(auditEvents[0]!.toStatus as ProposalStatus)}`
+                  : auditEventLabel(
+                      auditEvents[0]!.type,
+                      String(auditEvents[0]!.toStatus),
+                    )}
                 <span>{formatSubmittedAt(auditEvents[0]!.createdAt)}</span>
               </summary>
               <ol>
                 {auditEvents.map((audit) => (
                   <li key={audit.id}>
-                    {audit.type === "course_check.decision.applied" ? (
-                      <>
-                        <strong>{audit.actorName}</strong> applied final outcome{" "}
-                        {String(audit.toStatus)}.
-                      </>
-                    ) : (
+                    {audit.type === "proposal.review.changed" ? (
                       <>
                         <strong>{audit.actorName}</strong> set{" "}
                         {statusLabel(audit.toStatus as ProposalStatus)}
@@ -997,6 +996,11 @@ function ProposalInspector({
                           ? " and updated the committee note"
                           : ""}
                         .
+                      </>
+                    ) : (
+                      <>
+                        <strong>{audit.actorName}</strong>{" "}
+                        {auditEventLabel(audit.type, String(audit.toStatus))}.
                       </>
                     )}
                     <time dateTime={audit.createdAt}>{formatSubmittedAt(audit.createdAt)}</time>

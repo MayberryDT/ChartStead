@@ -62,6 +62,7 @@ import type {
   OutboxDeliveryStatus,
   OutboxMessage,
   OutboxMessageKind,
+  PortalMessage,
   PortalOnboardingTask,
   ProposalAuditEvent,
   ProposalInput,
@@ -78,6 +79,7 @@ import type {
   SpeakerPortalSession,
   SubmissionAnswers,
 } from "../shared/events";
+import { toPortalFacingDeliveryStatus } from "../shared/portal-lifecycle";
 import {
   buildSessionIcs,
   selectValidPublicSubset,
@@ -780,11 +782,20 @@ function mapCourseCheckPlan(row: CourseCheckPlanRow, eventId: string): CourseChe
   };
 }
 
+const PROPOSAL_AUDIT_TYPES = new Set([
+  "proposal.review.changed",
+  "course_check.decision.applied",
+  "course_check.communication.drafts_created",
+  "course_check.communication.send_started",
+  "course_check.communication.effect_retry",
+  "course_check.communication.effect_reconciled",
+  "course_check.communication.correction_created",
+]);
+
 function mapAuditEvent(row: AuditEventRow): ProposalAuditEvent {
-  const type =
-    row.type === "course_check.decision.applied"
-      ? "course_check.decision.applied"
-      : "proposal.review.changed";
+  const type = PROPOSAL_AUDIT_TYPES.has(row.type)
+    ? (row.type as ProposalAuditEvent["type"])
+    : "proposal.review.changed";
   return {
     id: row.id,
     proposalId: row.proposal_id,
@@ -3156,6 +3167,7 @@ export class EventStore extends DurableObject<AppBindings> {
       .sort();
 
     const headshot = this.getTaskAsset(speaker.headshot_asset_id);
+    const messages = this.listPortalMessagesForSpeaker(speaker.email);
 
     return {
       eventId: event.id,
@@ -3189,9 +3201,103 @@ export class EventStore extends DurableObject<AppBindings> {
             endsAt: sessionRow.ends_at,
           }
         : null,
+      messages,
       tasks,
       nextDeadline: openDeadlines[0] ?? null,
     };
+  }
+
+  /** Speaker-safe message + calendar invite projection (no plan digests/findings). */
+  listPortalMessagesForSpeaker(speakerEmail: string): PortalMessage[] {
+    const email = speakerEmail.trim().toLowerCase();
+    if (!email) return [];
+
+    const draftRows = this.ctx.storage.sql
+      .exec<{
+        id: string;
+        subject: string;
+        status: string;
+        created_at: string;
+        frozen_at: string | null;
+        calendar_intent_json: string | null;
+        proposal_id: string | null;
+        session_id: string | null;
+        to_email: string;
+      }>(
+        `SELECT id, subject, status, created_at, frozen_at, calendar_intent_json,
+                proposal_id, session_id, to_email
+         FROM communication_drafts
+         WHERE lower(to_email) = ?
+         ORDER BY created_at DESC, id DESC`,
+        email,
+      )
+      .toArray();
+
+    const effectByDraft = new Map(
+      this.ctx.storage.sql
+        .exec<{
+          draft_id: string;
+          status: string;
+          updated_at: string;
+          created_at: string;
+          succeeded_at: string | null;
+        }>(
+          `SELECT draft_id, status, updated_at, created_at, succeeded_at
+           FROM communication_effects
+           WHERE lower(to_email) = ?`,
+          email,
+        )
+        .toArray()
+        .map((row) => [row.draft_id, row] as const),
+    );
+
+    const messages: PortalMessage[] = [];
+    for (const draft of draftRows) {
+      const effect = effectByDraft.get(draft.id);
+      const status = toPortalFacingDeliveryStatus(
+        (effect?.status as CommunicationEffectStatus | undefined) ?? null,
+      );
+
+      let calendar: PortalMessage["calendar"] = null;
+      if (draft.calendar_intent_json) {
+        try {
+          const intent = JSON.parse(draft.calendar_intent_json) as {
+            operation?: string;
+            uid?: string;
+            sequence?: number;
+            locationPending?: boolean;
+            location?: string | null;
+          };
+          if (
+            intent.operation === "create" ||
+            intent.operation === "update" ||
+            intent.operation === "cancel"
+          ) {
+            calendar = {
+              operation: intent.operation,
+              uid: intent.uid ?? "",
+              sequence: intent.sequence ?? 0,
+              locationPending: Boolean(intent.locationPending),
+              location: intent.location ?? null,
+            };
+          }
+        } catch {
+          calendar = null;
+        }
+      }
+
+      messages.push({
+        id: draft.id,
+        subject: draft.subject,
+        status,
+        kind: calendar ? "calendar_invite" : "message",
+        createdAt: draft.created_at,
+        updatedAt: effect?.updated_at ?? draft.frozen_at ?? draft.created_at,
+        calendar,
+      });
+    }
+
+    return messages;
   }
 
   updateSpeakerPortalProfile(input: {
