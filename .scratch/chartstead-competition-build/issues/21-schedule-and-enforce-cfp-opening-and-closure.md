@@ -1,6 +1,6 @@
 # 21 — Schedule and enforce CFP opening and closure
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Blocked by:** None — can start immediately.
 
@@ -26,3 +26,6 @@ Complete the lifecycle of each submission form with organizer-controlled opening
 
 None — can start immediately.
 
+## Comments
+
+- 2026-08-12 — Started for agent implementation after Tyler authorized the incoming Competition Build frontier; demos, reviews, and human QA are deferred while automated acceptance verification remains required.
