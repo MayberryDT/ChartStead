@@ -1581,7 +1581,7 @@ table.grid tbody tr[aria-selected="true"] td:first-child {
   font-size: 0.75rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--muted, #6b7280);
+  color: var(--muted-strong, #4b5563);
 }
 
 .inspector-meta dd {
@@ -2530,7 +2530,8 @@ details[open] > summary .course-check-chevron { transform: rotate(180deg); }
   background: var(--surface);
 }
 
-.course-check-mutations {
+.course-check-mutations,
+.course-check-activity {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -2538,6 +2539,38 @@ details[open] > summary .course-check-chevron { transform: rotate(180deg); }
   gap: 6px;
   font-size: 13px;
   color: var(--on-surface-variant);
+}
+
+.course-check-activity-role {
+  display: inline-block;
+  min-width: 4.5rem;
+  font-weight: 600;
+  color: var(--on-surface);
+  text-transform: capitalize;
+}
+
+.course-check-operation-history ul {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+@media (max-width: 720px) {
+  .course-check-page footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .course-check-page footer .btn {
+    width: 100%;
+  }
+
+  .course-check-activity-role {
+    display: block;
+    margin-bottom: 2px;
+  }
 }
 
 .batch-decision-bar {

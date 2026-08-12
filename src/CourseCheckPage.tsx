@@ -11,7 +11,11 @@ import type {
   DecisionPlanBody,
   PublicationPlanBody,
 } from "../shared/course-check";
-import { formatCourseCheckActorLabel } from "../shared/course-check";
+import {
+  formatCourseCheckActorLabel,
+  linkedPlanIdsFromBody,
+  parentPlanIdFromBody,
+} from "../shared/course-check";
 import {
   ApiError,
   applyCourseCheckPlan,
@@ -66,6 +70,7 @@ function EvidenceSectionView({
       className="course-check-evidence"
       data-kind={section.kind}
       data-severity={severity}
+      open={section.defaultExpanded}
     >
       <summary>
         <span className="course-check-disclosure-main">
@@ -338,6 +343,74 @@ function DecisionBatchBody({
         </section>
       ) : null}
 
+      <OperationHistoryPanel plan={plan} />
+
+      <section className="panel">
+        <h2>External effects</h2>
+        <p>
+          No message, calendar, public-program, or integration delivery is created by
+          Apply decision.
+        </p>
+      </section>
+    </div>
+  );
+}
+
+function OperationHistoryPanel({ plan }: { plan: CourseCheckPlan }) {
+  const linked = linkedPlanIdsFromBody(plan.body);
+  const parentId = parentPlanIdFromBody(plan.body);
+  const activity = plan.activity ?? [];
+  return (
+    <>
+      {linked.length > 0 || parentId ? (
+        <section className="panel course-check-operation-history" aria-label="Linked operation history">
+          <h2>Operation history</h2>
+          <p className="muted">
+            Linked plans stay navigable as one history. Approval never transfers between them.
+          </p>
+          <ul>
+            {parentId ? (
+              <li>
+                Parent{" "}
+                <Link
+                  to="/e/$eventId/course-checks/$planId"
+                  params={{ eventId: plan.eventId, planId: parentId }}
+                >
+                  {parentId.slice(0, 8)}
+                </Link>
+              </li>
+            ) : null}
+            {linked.map((id) => (
+              <li key={id}>
+                Linked{" "}
+                <Link
+                  to="/e/$eventId/course-checks/$planId"
+                  params={{ eventId: plan.eventId, planId: id }}
+                >
+                  {id.slice(0, 8)}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {activity.length > 0 ? (
+        <section className="panel" aria-label="Shared activity">
+          <h2>Shared activity</h2>
+          <ul className="course-check-activity">
+            {activity.map((entry) => (
+              <li key={entry.id} data-role={entry.role}>
+                <span className="course-check-activity-role">{entry.role}</span>
+                {" · "}
+                {entry.actor ? formatCourseCheckActorLabel(entry.actor) : "system"}
+                {": "}
+                {entry.summary}
+                {entry.outcome ? ` → ${entry.outcome}` : ""}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       {plan.mutations && plan.mutations.length > 0 ? (
         <section className="panel">
           <h2>Mutation history</h2>
@@ -351,15 +424,7 @@ function DecisionBatchBody({
           </ul>
         </section>
       ) : null}
-
-      <section className="panel">
-        <h2>External effects</h2>
-        <p>
-          No message, calendar, public-program, or integration delivery is created by
-          Apply decision.
-        </p>
-      </section>
-    </div>
+    </>
   );
 }
 
@@ -388,6 +453,7 @@ function GuaranteedBody({ plan }: { plan: CourseCheckPlan }) {
       {(body.evidenceSections ?? []).map((section) => (
         <EvidenceSectionView key={section.kind} section={section} plan={plan} />
       ))}
+      <OperationHistoryPanel plan={plan} />
     </div>
   );
 }
@@ -525,6 +591,7 @@ function PublicationBody({
       {(body.evidenceSections ?? []).map((section) => (
         <EvidenceSectionView key={section.kind} section={section} plan={plan} />
       ))}
+      <OperationHistoryPanel plan={plan} />
     </div>
   );
 }
@@ -671,7 +738,7 @@ function CommunicationEffectCard({
           <summary>Create a reviewed correction</summary>
           <div>
             <p className="muted">
-              The original delivery remains immutable. This creates a linked plan that
+              The original delivery stays on record. This creates a linked plan that
               must be reviewed, frozen, and sent separately.
             </p>
             <label className="stack-field">
@@ -986,19 +1053,7 @@ function CommunicationBody({
         </div>
       </section>
 
-      {plan.mutations && plan.mutations.length > 0 ? (
-        <section className="panel">
-          <h2>Mutation history</h2>
-          <ul className="course-check-mutations">
-            {plan.mutations.map((mutation) => (
-              <li key={mutation.id}>
-                v{mutation.fromVersion}→v{mutation.toVersion} · {mutation.kind} ·{" "}
-                {formatCourseCheckActorLabel(mutation.actor)}: {mutation.summary}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      <OperationHistoryPanel plan={plan} />
     </div>
   );
 }
@@ -1175,7 +1230,7 @@ export function CourseCheckPage() {
     },
     onSuccess: (next) => {
       queryClient.setQueryData(["course-check", eventId, planId], next);
-      setMessage("Saved a new immutable communication plan version. Draft approval cleared.");
+      setMessage("Saved a new communication plan version. Draft approval cleared.");
     },
   });
 
@@ -1404,10 +1459,10 @@ export function CourseCheckPage() {
           </h1>
           <p className="lede">
             {isCommunication
-              ? "Review exact recipients, approve delivery, and recover every address from a durable effect ledger."
+              ? "Review exact recipients, approve delivery, and recover every address from the delivery results."
               : isPublication
-                ? "Inspect the public program delta before publish, unpublish, or restore. Communication stays separate."
-                : "Resumable event resource. Another authorized administrator can inspect and continue this exact versioned batch."}
+                ? "Inspect the public program changes before you publish, unpublish, or restore. Communication stays separate."
+                : "Shared Course Check workspace. Another authorized administrator can open this exact batch and continue."}
           </p>
         </div>
         <div className="course-check-header-tools">
@@ -1427,6 +1482,14 @@ export function CourseCheckPage() {
           </Link>
         </div>
       </header>
+
+      {currentPlan.state === "Out of date" ? (
+        <p className="form-message" data-tone="warning" role="status">
+          This Course Check is out of date. A relevant input changed after it was
+          reviewed. Refresh the plan or open a new Course Check, then approve the
+          updated exact result before applying.
+        </p>
+      ) : null}
 
       {isDecision ? (
         <DecisionBatchBody
@@ -1602,8 +1665,8 @@ export function CourseCheckPage() {
         {isCommunication && draftsComplete && !deliveryStarted ? (
           <>
             <p className="form-message" data-tone="success" role="status">
-              Drafts frozen. Sending will approve these exact payloads and create one
-              durable effect per address.
+              Drafts frozen. Sending will approve these exact messages and track one
+              delivery result per address.
             </p>
             <button
               type="button"

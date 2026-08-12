@@ -67,9 +67,15 @@ import {
 import {
   authorizeCourseCheck,
   capabilityForStage,
+  isAgentPrincipal,
   parseInitiatingHumanHeader,
   toCourseCheckActor,
 } from "./course-check/agent-authz";
+import {
+  assertPolicyDoesNotWeakenBaseline,
+  mergeCourseCheckPolicy,
+  type EventCourseCheckPolicy,
+} from "../shared/course-check";
 import {
   createApiKey,
   extractBearerToken,
@@ -306,6 +312,7 @@ async function loadEvent(
   await store.seedIfEmpty(seed);
   await store.seedPublishedFormIfEmpty(createSeedCfp(seed));
   await store.seedProposalsIfNeeded(createSeedProposals(seed));
+  await store.seedCourseCheckDemoIfNeeded();
   const event = await store.getEvent();
   if (!event) {
     throw new Error(`Event ${seed.id} was not initialized.`);
@@ -2422,6 +2429,80 @@ export function createApp(options: AppOptions = {}) {
     }
   });
 
+  function courseCheckProjectionOptions(
+    principal: OrganizerPrincipal,
+    eventId: string,
+  ) {
+    const role = eventRole(principal, eventId);
+    const canViewCommunicationEvidence =
+      role === "admin" ||
+      authorizeCourseCheck(principal, eventId, "propose_communication") === null ||
+      authorizeCourseCheck(principal, eventId, "send") === null;
+    const projectionRole =
+      role === "admin" || isAgentPrincipal(principal)
+        ? role === "admin"
+          ? ("admin" as const)
+          : ("agent" as const)
+        : role === "reviewer"
+          ? ("reviewer" as const)
+          : ("none" as const);
+    return {
+      role: projectionRole,
+      trackIds: assignedTrackIds(principal, eventId),
+      canViewCommunicationEvidence,
+      canViewFullDecisionEvidence: role === "admin" || isAgentPrincipal(principal),
+    };
+  }
+
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.get(
+    `${__ccBase}/policy`,
+    async (c) => {
+      const principal = await resolvePrincipal(c.req.raw, c.env);
+      const eventId = param(c, "eventId");
+      {
+        const denial = authorizeCourseCheck(principal, eventId, "read");
+        if (denial) return c.json(denial.body, denial.status);
+      }
+      const seed = findSeed(eventId);
+      if (!seed) return c.json({ error: "Event not found" }, 404);
+      await loadEvent(c.env, seed);
+      const policy = (await c.env.EVENT_STORE.getByName(eventId).getCourseCheckPolicy()) as EventCourseCheckPolicy;
+      return c.json({ policy });
+    },
+  );
+
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.put(
+    `${__ccBase}/policy`,
+    async (c) => {
+      const principal = await resolvePrincipal(c.req.raw, c.env);
+      const eventId = param(c, "eventId");
+      if (!isEventAdmin(principal, eventId)) {
+        return c.json(
+          {
+            error: "Administrator access is required to change Course Check policy.",
+            code: "missing_authority",
+          },
+          403,
+        );
+      }
+      const seed = findSeed(eventId);
+      if (!seed) return c.json({ error: "Event not found" }, 404);
+      await loadEvent(c.env, seed);
+      const body = (await c.req.json().catch(() => null)) as {
+        policy?: Partial<EventCourseCheckPolicy>;
+      } | null;
+      const merged = mergeCourseCheckPolicy(body?.policy ?? null);
+      const safe = assertPolicyDoesNotWeakenBaseline(merged);
+      if (!safe.ok) {
+        return c.json({ error: safe.error, code: "policy_weakens_baseline" }, 400);
+      }
+      const policy = (await c.env.EVENT_STORE.getByName(eventId).setCourseCheckPolicy(
+        merged,
+      )) as EventCourseCheckPolicy;
+      return c.json({ policy });
+    },
+  );
+
   for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.get(`${__ccBase}`, async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
     const eventId = param(c, "eventId");
@@ -2434,17 +2515,13 @@ export function createApp(options: AppOptions = {}) {
     if (!seed) return c.json({ error: "Event not found" }, 404);
     await loadEvent(c.env, seed);
     const store = c.env.EVENT_STORE.getByName(eventId);
-    const role = eventRole(principal, eventId);
-    const canViewCommunicationEvidence =
-      role === "admin" ||
-      authorizeCourseCheck(principal, eventId, "propose_communication") === null ||
-      authorizeCourseCheck(principal, eventId, "send") === null;
+    const options = courseCheckProjectionOptions(principal, eventId);
     const listed = (await store.listCourseCheckPlans()) as import("../shared/course-check").CourseCheckPlan[];
-    const plans = await Promise.all(
-      listed.map((plan) =>
-        store.projectCourseCheckPlan(plan, { canViewCommunicationEvidence }),
-      ),
-    );
+    const plans = (
+      await Promise.all(
+        listed.map(async (plan) => store.projectCourseCheckPlan(plan, options)),
+      )
+    ).filter(Boolean);
     return c.json({ plans });
   });
 
@@ -2697,18 +2774,21 @@ export function createApp(options: AppOptions = {}) {
     if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
-    {
-      const denial = authorizeCourseCheck(principal, eventId, "send");
-      if (denial) return c.json(denial.body, denial.status);
-    }
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
     await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const sendPolicy = (await store.getCourseCheckPolicy()) as EventCourseCheckPolicy;
+    {
+      const denial = authorizeCourseCheck(principal, eventId, "send", sendPolicy);
+      if (denial) return c.json(denial.body, denial.status);
+    }
     const body = (await c.req.json().catch(() => null)) as {
       planVersion?: unknown;
       digest?: unknown;
       stageId?: unknown;
       idempotencyKey?: unknown;
+      reason?: unknown;
     } | null;
     const headerKey = c.req.header("idempotency-key");
     const idempotencyKey =
@@ -2729,7 +2809,6 @@ export function createApp(options: AppOptions = {}) {
         400,
       );
     }
-    const store = c.env.EVENT_STORE.getByName(eventId);
     const result = (await store.startCommunicationSend({
       planId,
       planVersion: body.planVersion as number,
@@ -2737,6 +2816,7 @@ export function createApp(options: AppOptions = {}) {
       stageId: typeof body.stageId === "string" ? body.stageId : "send-messages",
       idempotencyKey,
       actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
+      reason: typeof body.reason === "string" ? body.reason : null,
     })) as
       | {
           ok: true;
@@ -2745,7 +2825,7 @@ export function createApp(options: AppOptions = {}) {
         }
       | {
           ok: false;
-          status: 400 | 409;
+          status: 400 | 403 | 409;
           code: string;
           error: string;
           recoveryGuidance: string;
@@ -3220,21 +3300,83 @@ export function createApp(options: AppOptions = {}) {
       if (denial) return c.json(denial.body, denial.status);
     }
     if (!principal) return c.json({ error: "Unauthorized" }, 401);
-    const role = eventRole(principal, eventId);
-    const canViewCommunicationEvidence =
-      role === "admin" ||
-      authorizeCourseCheck(principal, eventId, "propose_communication") === null ||
-      authorizeCourseCheck(principal, eventId, "send") === null;
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
     await loadEvent(c.env, seed);
     const store = c.env.EVENT_STORE.getByName(eventId);
     const plan = await store.getCourseCheckPlan(planId);
     if (!plan) return c.json({ error: "Course Check not found" }, 404);
-    return c.json(
-      await store.projectCourseCheckPlan(plan, { canViewCommunicationEvidence }),
+    const projected = await store.projectCourseCheckPlan(
+      plan,
+      courseCheckProjectionOptions(principal, eventId),
     );
+    if (!projected) return c.json({ error: "Course Check not found" }, 404);
+    return c.json(projected);
   });
+
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(
+    `${__ccBase}/:planId/privacy-erase`,
+    async (c) => {
+      const principal = await resolvePrincipal(c.req.raw, c.env);
+      const eventId = param(c, "eventId");
+      const planId = param(c, "planId");
+      if (!isEventAdmin(principal, eventId)) {
+        return c.json(
+          {
+            error: "Administrator access is required for privacy erasure.",
+            code: "missing_authority",
+          },
+          403,
+        );
+      }
+      const seed = findSeed(eventId);
+      if (!seed) return c.json({ error: "Event not found" }, 404);
+      await loadEvent(c.env, seed);
+      const body = (await c.req.json().catch(() => null)) as {
+        reason?: unknown;
+        idempotencyKey?: unknown;
+      } | null;
+      const headerKey = c.req.header("idempotency-key");
+      const idempotencyKey =
+        (typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim()) ||
+        (typeof headerKey === "string" && headerKey.trim()) ||
+        "";
+      const reason = typeof body?.reason === "string" ? body.reason : "";
+      if (!idempotencyKey) {
+        return c.json({ error: "idempotencyKey is required." }, 400);
+      }
+      const result = (await c.env.EVENT_STORE.getByName(eventId).eraseCourseCheckPersonalPayloads({
+        planId,
+        actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
+        reason,
+        idempotencyKey,
+      })) as
+        | {
+            ok: true;
+            plan: import("../shared/course-check").CourseCheckPlan;
+            result: import("../shared/course-check").PrivacyErasureResult;
+            created: boolean;
+          }
+        | {
+            ok: false;
+            status: 400 | 404;
+            code: string;
+            error: string;
+            recoveryGuidance: string;
+          };
+      if (!result.ok) {
+        return c.json(
+          {
+            error: result.error,
+            code: result.code,
+            recoveryGuidance: result.recoveryGuidance,
+          },
+          result.status,
+        );
+      }
+      return c.json({ plan: result.plan, erasure: result.result }, result.created ? 200 : 200);
+    },
+  );
 
   for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(`${__ccBase}/:planId/apply`, async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
@@ -3252,6 +3394,7 @@ export function createApp(options: AppOptions = {}) {
       digest?: unknown;
       stageId?: unknown;
       idempotencyKey?: unknown;
+      reason?: unknown;
       softWarningOverrides?: unknown;
     } | null;
     const headerKey = c.req.header("idempotency-key");
@@ -3286,27 +3429,31 @@ export function createApp(options: AppOptions = {}) {
           })
           .filter((row): row is { findingId: string; reason: string | null } => Boolean(row))
       : undefined;
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const policy = (await store.getCourseCheckPolicy()) as EventCourseCheckPolicy;
     {
       const denial = authorizeCourseCheck(
         principal,
         eventId,
         capabilityForStage(body.stageId),
+        policy,
       );
       if (denial) return c.json(denial.body, denial.status);
     }
-    const result = (await c.env.EVENT_STORE.getByName(eventId).applyCourseCheck({
+    const result = (await store.applyCourseCheck({
       planId,
       planVersion: body.planVersion as number,
       digest: body.digest,
       stageId: body.stageId,
       idempotencyKey,
       actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
+      reason: typeof body.reason === "string" ? body.reason : null,
       softWarningOverrides,
     })) as
       | { ok: true; plan: import("../shared/course-check").CourseCheckPlan; created: boolean }
       | {
           ok: false;
-          status: 400 | 409;
+          status: 400 | 403 | 409;
           code: string;
           error: string;
           recoveryGuidance: string;
@@ -3326,7 +3473,6 @@ export function createApp(options: AppOptions = {}) {
       );
     }
 
-    const store = c.env.EVENT_STORE.getByName(eventId);
     const secret = signingSecret(c.env, options.signingSecret);
     if (secret) {
       const grants = await store.listPortalTokensForPlan(planId);

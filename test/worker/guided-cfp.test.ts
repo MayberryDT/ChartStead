@@ -103,6 +103,7 @@ describe("guided CFP publishing and submitter follow-up", () => {
         { value: "program-ops", text: "Program Ops" },
         { value: "design-systems", text: "Design Systems" },
         { value: "community", text: "Community" },
+        { value: "course-check-demo", text: "Course Check Demo" },
       ],
     });
   });

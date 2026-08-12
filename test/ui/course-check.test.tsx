@@ -281,7 +281,7 @@ describe("Course Check review workspace", () => {
     expect(main).not.toHaveClass("app");
   });
 
-  it("keeps warning evidence collapsed while exposing its risk in the summary", async () => {
+  it("expands warning evidence by default and surfaces risk in the summary", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify(plan), {
         headers: { "content-type": "application/json" },
@@ -293,7 +293,8 @@ describe("Course Check review workspace", () => {
     const evidence = container.querySelector<HTMLDetailsElement>(
       'details.course-check-evidence[data-kind="operational"]',
     );
-    expect(evidence?.open).toBe(false);
+    // Spec: warnings/unknowns expand automatically; clean sections stay collapsed.
+    expect(evidence?.open).toBe(true);
     expect(evidence?.querySelector("summary")).toHaveTextContent("1 warning");
   });
 

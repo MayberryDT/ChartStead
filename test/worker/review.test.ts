@@ -105,7 +105,7 @@ describe("shared track review queue", () => {
       env,
     );
     const queueBody = await queue.json<{ proposals: Array<{ id: string }> }>();
-    expect(queueBody.proposals).toHaveLength(47);
+    expect(queueBody.proposals).toHaveLength(57);
 
     const reviewerForms = await reviewerApp.request(
       `https://chartstead.test/api/events/${eventId}/forms`,

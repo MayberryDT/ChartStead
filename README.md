@@ -1,6 +1,17 @@
 # ChartStead
 
-Conference programming and speaker management.
+Conference programming and speaker management: CFP → shared review → Course Check acceptance → speaker portal → agenda → public program, with optional Airtable sync and an authenticated HTTP API for scoped agents.
+
+## Live demos
+
+| Environment | URL | Auth |
+| --- | --- | --- |
+| **Demo (judges)** | https://chartstead-demo.mayberrydt.workers.dev | Isolated demo-admin (no login) |
+| Production | https://chartstead.mayberrydt.workers.dev | Better Auth (Google / magic link) |
+
+**Competition walkthrough:** [docs/competition-walkthrough.md](docs/competition-walkthrough.md)  
+**Submission package (form blurbs):** [docs/competition-submission.md](docs/competition-submission.md)  
+**Course Check deep dive:** [docs/course-check-killer-walkthrough.md](docs/course-check-killer-walkthrough.md)
 
 ## Requirements
 
@@ -11,7 +22,7 @@ Conference programming and speaker management.
 ## App entry points
 
 - React client: `src/main.tsx` → `src/App.tsx`
-- Production Worker: `worker/index.ts` (Better Auth + membership checks; no demo bypass)
+- Production Worker: `worker/index.ts` (Better Auth + membership checks; **no** demo bypass)
 - Demo Worker: `worker/demo.ts` (isolated disposable demo-admin principal)
 - Shared event contract: `shared/events.ts`
 - Durable Object event store: `worker/event-store.ts`
@@ -67,8 +78,77 @@ After first sign-in, grant organizer access by inserting the Better Auth user id
 The production entrypoint has no demo bypass. For the isolated demo path:
 
 ```bash
-npm run dev:demo
+npm run dev:demo -- --host 0.0.0.0 --port 5173
 ```
+
+Share Tailscale URLs as `http://100.105.117.93:5173/…` — never localhost — for human review.
+
+## Remote deploy and migrations
+
+```bash
+# Typecheck + validate package without publishing
+npm run deploy:dry
+
+# Production Worker (worker/index.ts)
+npx wrangler d1 migrations apply chartstead-auth --remote
+npm run deploy
+# secrets (once per env):
+# npx wrangler secret put BETTER_AUTH_SECRET
+# npx wrangler secret put GOOGLE_CLIENT_ID
+# npx wrangler secret put GOOGLE_CLIENT_SECRET
+# npx wrangler secret put RESEND_API_KEY
+# npx wrangler secret put AUTH_EMAIL_FROM
+# optional: AIRTABLE_ACCESS_TOKEN, AIRTABLE_BASE_ID
+
+# Demo Worker (worker/demo.ts, separate D1/R2/DO namespace)
+npx wrangler d1 migrations apply chartstead-auth-demo --remote --env demo
+npm run deploy:demo
+# same secret names under --env demo
+```
+
+### Seed and reset
+
+- Event operational data is seeded **once per Durable Object** via `seedIfEmpty` / `seedProposalsIfNeeded` / Course Check demo fixtures. Later operational writes are not overwritten by seed.
+- **Local reset:** stop the dev server and remove `.wrangler/state`, then restart `npm run dev:demo`.
+- **Remote reset:** Durable Object SQLite is not wiped by redeploy. To force a fresh seed, use a new DO namespace / binding in `wrangler.jsonc` (deliberate ops change) or delete the DO via Cloudflare dashboard tooling. Prefer a new demo namespace only when you intend to discard live demo state.
+- D1 holds auth users, sessions, memberships, and API keys — apply migrations before expecting sign-in or API keys.
+
+### Provider setup notes
+
+| Provider | Setup |
+| --- | --- |
+| Resend | Verify sending domain; set `AUTH_EMAIL_FROM` to an allowed from-address |
+| Google OAuth | Web client; authorized redirect URIs for each public origin |
+| R2 | Create `chartstead-assets` and `chartstead-assets-demo`; bindings already named in `wrangler.jsonc` |
+| Airtable | Optional base from `docs/airtable-base-template.md`; PAT with base access |
+
+## Verification checklist
+
+```bash
+# Automated
+npm test
+npm run typecheck
+npm run deploy:dry
+
+# Live demo smoke (no secrets required for health)
+curl -sS https://chartstead-demo.mayberrydt.workers.dev/api/health
+curl -sS https://chartstead-demo.mayberrydt.workers.dev/api/v1/health
+curl -sS https://chartstead-demo.mayberrydt.workers.dev/api/events | head -c 200   # demo principal lists events
+curl -sS -o /dev/null -w "%{http_code}\n" \
+  https://chartstead-demo.mayberrydt.workers.dev/e/pacific-open-data-summit-2026/cfp
+curl -sS -o /dev/null -w "%{http_code}\n" \
+  https://chartstead-demo.mayberrydt.workers.dev/e/pacific-open-data-summit-2026/program
+
+# Production must not expose organizer data unauthenticated
+curl -sS -o /dev/null -w "%{http_code}\n" https://chartstead.mayberrydt.workers.dev/api/events
+# expect 401
+```
+
+Manual UI path: [docs/competition-walkthrough.md](docs/competition-walkthrough.md).
+
+Optional live Resend: submit a proposal with Resend configured and confirm delivery (or outbox **queued** if keys missing — both are honest).
+
+Optional Airtable: leave unset and confirm Settings shows unconfigured while submissions still work.
 
 ## Commands
 
@@ -90,10 +170,17 @@ npm run dev:demo
 
 Production and demo use distinct checked-in D1 resource IDs and separate Durable Object namespaces. Keep all secrets in `.dev.vars` locally and Cloudflare secrets remotely.
 
-## Project sources
+## Documentation map
 
-- Product requirements: `context.md`
-- Locked build plan: `context/BUILD-PLAN.md`
-- Design system: `design/DESIGN.md`
-- Visual source of truth: `design/source-of-truth/organizer-submissions.html`
-- Current implementation ticket: `.scratch/chartstead-competition-build/issues/01-walking-skeleton-and-seeded-event.md`
+| Doc | Purpose |
+| --- | --- |
+| [docs/competition-walkthrough.md](docs/competition-walkthrough.md) | Judge path CFP → program |
+| [docs/competition-submission.md](docs/competition-submission.md) | Form blurbs + links |
+| [docs/course-check-killer-walkthrough.md](docs/course-check-killer-walkthrough.md) | Course Check fixtures |
+| [docs/http-api-v1.md](docs/http-api-v1.md) | Authenticated vertical-slice API |
+| [docs/course-check-agent-api-v1.md](docs/course-check-agent-api-v1.md) | Agent Course Check parity |
+| [docs/airtable-base-template.md](docs/airtable-base-template.md) | Airtable template + field map |
+| [context.md](context.md) | Product requirements |
+| [context/BUILD-PLAN.md](context/BUILD-PLAN.md) | Locked architecture |
+| [design/DESIGN.md](design/DESIGN.md) | Design system |
+| [design/source-of-truth/organizer-submissions.html](design/source-of-truth/organizer-submissions.html) | Visual SOT |

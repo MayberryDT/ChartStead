@@ -1,4 +1,5 @@
 import type { EventRecord } from "../shared/events";
+import { COURSE_CHECK_DEMO_TRACK } from "./seed-course-check-demo";
 
 export const seedEvents: EventRecord[] = [
   {
@@ -6,7 +7,7 @@ export const seedEvents: EventRecord[] = [
     name: "Pacific Open Data Summit 2026",
     startsOn: "2026-10-07",
     endsOn: "2026-10-08",
-    submissionCount: 47,
+    submissionCount: 57,
     unreviewedCount: 18,
     themeAccent: "#2f5d98",
     tracks: [
@@ -14,6 +15,11 @@ export const seedEvents: EventRecord[] = [
       { id: "program-ops", name: "Program Ops", proposalCount: 12 },
       { id: "design-systems", name: "Design Systems", proposalCount: 11 },
       { id: "community", name: "Community", proposalCount: 10 },
+      {
+        id: COURSE_CHECK_DEMO_TRACK.id,
+        name: COURSE_CHECK_DEMO_TRACK.name,
+        proposalCount: COURSE_CHECK_DEMO_TRACK.proposalCount,
+      },
     ],
     rooms: [
       { id: "harbor-hall", name: "Harbor Hall", readiness: "ready" },

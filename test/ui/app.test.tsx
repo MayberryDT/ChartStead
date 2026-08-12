@@ -172,7 +172,7 @@ const eventsPayload = {
       name: "Pacific Open Data Summit 2026",
       startsOn: "2026-10-07",
       endsOn: "2026-10-08",
-      submissionCount: 47,
+      submissionCount: 57,
       unreviewedCount: 18,
       tracks: [
         { id: "platform", name: "Platform", proposalCount: 14 },

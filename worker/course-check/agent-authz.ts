@@ -5,9 +5,10 @@ import {
   type CourseCheckCapability,
   type CourseCheckScope,
 } from "../../shared/agent-api";
-import type { CourseCheckActor } from "../../shared/course-check";
+import type { CourseCheckActor, EventCourseCheckPolicy } from "../../shared/course-check";
 import type { OrganizerPrincipal } from "../../shared/events";
 import { canAccessEvent, eventRole, isEventAdmin } from "../authz";
+import { agentModeAllowedByPolicy, agentModePolicyDenial } from "./policy";
 
 export function isAgentPrincipal(
   principal: OrganizerPrincipal | null | undefined,
@@ -43,7 +44,7 @@ export function agentHasCapability(
 }
 
 export type CourseCheckAuthDenial = {
-  status: 401 | 403;
+  status: 401 | 403 | 400 | 409;
   body: {
     error: string;
     code: string;
@@ -61,6 +62,7 @@ export function authorizeCourseCheck(
   principal: OrganizerPrincipal | null,
   eventId: string,
   capability: CourseCheckCapability,
+  policy?: EventCourseCheckPolicy | null,
 ): CourseCheckAuthDenial | null {
   if (!canAccessEvent(principal, eventId)) {
     return {
@@ -74,6 +76,17 @@ export function authorizeCourseCheck(
   }
 
   if (isAgentPrincipal(principal)) {
+    if (policy && !agentModeAllowedByPolicy(agentModeOf(principal), policy)) {
+      const denial = agentModePolicyDenial(agentModeOf(principal), policy);
+      return {
+        status: denial.status,
+        body: {
+          error: denial.error,
+          code: denial.code,
+          recoveryGuidance: denial.recoveryGuidance,
+        },
+      };
+    }
     if (agentHasCapability(principal, eventId, capability)) {
       return null;
     }

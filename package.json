@@ -42,6 +42,7 @@
     "survey-react-ui": "^2.5.38"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@cloudflare/vite-plugin": "1.51.1",
     "@cloudflare/vitest-pool-workers": "0.20.3",
     "@playwright/test": "^1.62.1",

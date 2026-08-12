@@ -1,5 +1,6 @@
 import type {
   CourseCheckPlan,
+  EventCourseCheckPolicy,
   ProgramOutcome,
   PublicationOperation,
 } from "../shared/course-check";
@@ -841,6 +842,45 @@ export async function createDecisionCourseCheck(
   return body;
 }
 
+export async function fetchCourseCheckPolicy(
+  eventId: string,
+): Promise<EventCourseCheckPolicy> {
+  const response = await fetch(`/api/events/${eventId}/course-checks/policy`);
+  const body = await readJson<{ policy: EventCourseCheckPolicy } | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("policy" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to load Course Check policy",
+      response.status,
+      body,
+    );
+  }
+  return body.policy;
+}
+
+export async function updateCourseCheckPolicy(
+  eventId: string,
+  policy: Partial<EventCourseCheckPolicy>,
+): Promise<EventCourseCheckPolicy> {
+  const response = await fetch(`/api/events/${eventId}/course-checks/policy`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ policy }),
+  });
+  const body = await readJson<{ policy: EventCourseCheckPolicy } | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("policy" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to update Course Check policy",
+      response.status,
+      body,
+    );
+  }
+  return body.policy;
+}
+
 export async function fetchCourseCheckPlans(
   eventId: string,
 ): Promise<CourseCheckPlan[]> {
@@ -1162,6 +1202,7 @@ export async function applyCourseCheckPlan(
     digest: string;
     stageId: string;
     idempotencyKey: string;
+    reason?: string | null;
     softWarningOverrides?: Array<{ findingId: string; reason?: string | null }>;
   },
 ): Promise<CourseCheckPlan> {
@@ -1177,14 +1218,29 @@ export async function applyCourseCheckPlan(
     },
   );
   const body = await readJson<
-    CourseCheckPlan | { error: string; recoveryGuidance?: string }
+    | CourseCheckPlan
+    | {
+        error: string;
+        recoveryGuidance?: string;
+        changedInputs?: string[];
+        code?: string;
+      }
   >(response);
   if (!response.ok || !("id" in body)) {
+    const err = body as {
+      error?: string;
+      recoveryGuidance?: string;
+      changedInputs?: string[];
+    };
+    const changed =
+      err.changedInputs && err.changedInputs.length > 0
+        ? ` Changed inputs: ${err.changedInputs.join("; ")}.`
+        : "";
     const message =
-      "error" in body
-        ? body.recoveryGuidance
-          ? `${body.error} ${body.recoveryGuidance}`
-          : body.error
+      err.error != null
+        ? err.recoveryGuidance
+          ? `${err.error} ${err.recoveryGuidance}${changed}`
+          : `${err.error}${changed}`
         : "Unable to apply Course Check";
     throw new ApiError(message, response.status, body);
   }

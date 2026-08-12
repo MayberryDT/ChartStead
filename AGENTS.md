@@ -59,6 +59,8 @@ Use the single-context domain-doc layout. See [docs/agents/domain.md](docs/agent
 - Cloudflare bindings and environments: [`wrangler.jsonc`](wrangler.jsonc)
 - Implementation work: [`.scratch/chartstead-competition-build/`](.scratch/chartstead-competition-build/)
 - Course Check specification and implementation work: [`.scratch/chartstead-course-check/`](.scratch/chartstead-course-check/)
+- Course Check killer walkthrough: [`docs/course-check-killer-walkthrough.md`](docs/course-check-killer-walkthrough.md) + seed fixtures in [`worker/seed-course-check-demo.ts`](worker/seed-course-check-demo.ts)
+- Competition walkthrough / submission package: [`docs/competition-walkthrough.md`](docs/competition-walkthrough.md), [`docs/competition-submission.md`](docs/competition-submission.md)
 - Automation access (API keys + MCP): [`docs/ai-connections.md`](docs/ai-connections.md)
 
 ## Private / bulk source material

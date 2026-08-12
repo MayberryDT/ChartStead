@@ -13,9 +13,9 @@ test("demo administrator signs in, selects a persisted event, and keeps shell ch
   await expect(page.getByText("Demo Administrator")).toBeVisible();
   await expect(page.locator(".app")).toBeVisible();
   await expect(page.locator(".sidebar .brand-name")).toHaveText("ChartStead");
-  // Seed starts at 47; later e2e may add real proposals without reseeding.
+  // Seed starts at 57 (47 generic + 10 Course Check Demo); later e2e may add more.
   await expect(page.getByLabel(/submissions$/)).toBeVisible();
-  await expect(page.getByLabel("4 tracks")).toBeVisible();
+  await expect(page.getByLabel("5 tracks")).toBeVisible();
   await expect(page.getByLabel("3 rooms")).toBeVisible();
 
   const events = await page.request.get("/api/events");

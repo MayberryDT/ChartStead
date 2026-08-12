@@ -33,9 +33,29 @@ import type {
   PublicationPlanBody,
 } from "../shared/course-check";
 import {
+  buildCourseCheckActivity,
   DEFAULT_AGE_WARNING_HOURS,
+  DEFAULT_COURSE_CHECK_POLICY,
   DEFAULT_DECISION_BATCH_LIMIT,
+  mergeCourseCheckPolicy,
+  type CourseCheckStageEndorsement,
+  type EventCourseCheckPolicy,
+  type PrivacyErasureResult,
 } from "../shared/course-check";
+import {
+  agentModeAllowedByPolicy,
+  agentModePolicyDenial,
+  evaluateStagePolicy,
+} from "./course-check/policy";
+import {
+  projectCourseCheckForViewer,
+  reviewerCanSeePlan,
+  type CourseCheckProjectionOptions,
+} from "./course-check/projection";
+import {
+  assertSafePlanStorage,
+  erasePersonalPlanPayloads,
+} from "./course-check/privacy";
 import type {
   AirtableEffect,
   AirtablePullChange,
@@ -45,6 +65,12 @@ import type {
 } from "../shared/airtable";
 import { AIRTABLE_HEALTH_GUIDANCE } from "../shared/airtable";
 import { applyPullWinsToLocalRecord } from "../shared/airtable-field-map";
+import {
+  buildCourseCheckDemoProposals,
+  COURSE_CHECK_DEMO_EVENT_ID,
+  COURSE_CHECK_DEMO_IDENTITY,
+  COURSE_CHECK_DEMO_PRIOR_OUTBOX,
+} from "./seed-course-check-demo";
 import type {
   AgendaWorkspaceResponse,
   CalendarIntentRecord,
@@ -190,6 +216,8 @@ interface CourseCheckPlanRow {
   created_by_json: string | null;
   approval_json: string | null;
   receipt_id: string | null;
+  stage_endorsements_json: string | null;
+  privacy_erased_at: string | null;
 }
 
 function serializeCourseCheckActor(actor: CourseCheckActor): string {
@@ -774,6 +802,16 @@ function normalizeCourseCheckBody(body: CourseCheckPlanBody): CourseCheckPlanBod
   };
 }
 
+function parseStageEndorsements(json: string | null | undefined): CourseCheckStageEndorsement[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json) as CourseCheckStageEndorsement[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function mapCourseCheckPlan(row: CourseCheckPlanRow, eventId: string): CourseCheckPlan {
   let receipt: CourseCheckReceipt | null = null;
   let approval: CourseCheckPlan["approval"] = null;
@@ -801,6 +839,9 @@ function mapCourseCheckPlan(row: CourseCheckPlanRow, eventId: string): CourseChe
     body: normalizeCourseCheckBody(JSON.parse(row.body_json) as CourseCheckPlanBody),
     approval,
     receipt,
+    stageEndorsements: parseStageEndorsements(row.stage_endorsements_json),
+    privacyErased: Boolean(row.privacy_erased_at),
+    privacyErasedAt: row.privacy_erased_at ?? null,
   };
 }
 
@@ -1304,6 +1345,9 @@ export class EventStore extends DurableObject<AppBindings> {
         "course_check_batch_limit",
         `INTEGER NOT NULL DEFAULT ${DEFAULT_DECISION_BATCH_LIMIT}`,
       );
+      this.ensureColumn("events", "course_check_policy_json", "TEXT");
+      this.ensureColumn("course_check_plans", "stage_endorsements_json", "TEXT");
+      this.ensureColumn("course_check_plans", "privacy_erased_at", "TEXT");
       this.ensureColumn("events", "unreviewed_count", "INTEGER NOT NULL DEFAULT 0");
       this.ensureColumn(
         "events",
@@ -1505,16 +1549,69 @@ export class EventStore extends DurableObject<AppBindings> {
 
   async alarm(): Promise<void> {
     const sender = createResendCommunicationSender(this.appEnv);
-    if (!sender) {
+    if (sender) {
+      await flushCommunicationEffects({
+        store: this,
+        sender,
+        now: new Date(),
+        limit: 50,
+      });
+    } else {
+      // Still process non-email background work when Resend is unconfigured.
+      await this.flushDueAirtableRetries({ limit: 20 });
       await this.ctx.storage.setAlarm(Date.now() + COMMUNICATION_CONFIG_RECHECK_MS);
       return;
     }
-    await flushCommunicationEffects({
-      store: this,
-      sender,
-      now: new Date(),
-      limit: 50,
-    });
+    await this.flushDueAirtableRetries({ limit: 20 });
+  }
+
+  /**
+   * Resume retryable Airtable effects after navigation / eviction.
+   * Uses a durable system actor — no implicit speaker notification.
+   */
+  async flushDueAirtableRetries(input?: { limit?: number; now?: string }): Promise<number> {
+    const now = input?.now ?? new Date().toISOString();
+    const limit = input?.limit ?? 20;
+    const due = this.ctx.storage.sql
+      .exec<{ id: string; plan_id: string }>(
+        `SELECT id, plan_id FROM airtable_effects
+         WHERE state = 'retryable_failure'
+           AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+         ORDER BY next_attempt_at ASC, created_at ASC
+         LIMIT ?`,
+        now,
+        limit,
+      )
+      .toArray();
+    if (due.length === 0) return 0;
+    const byPlan = new Map<string, string[]>();
+    for (const row of due) {
+      const list = byPlan.get(row.plan_id) ?? [];
+      list.push(row.id);
+      byPlan.set(row.plan_id, list);
+    }
+    const systemActor: CourseCheckActor = {
+      id: "system:airtable-alarm",
+      displayName: "Background Airtable recovery",
+      kind: "human",
+    };
+    for (const planId of byPlan.keys()) {
+      // Mark due rows pending so beginAirtableEffectAttempts can claim them.
+      this.ctx.storage.sql.exec(
+        `UPDATE airtable_effects
+         SET state = 'pending', updated_at = ?
+         WHERE plan_id = ? AND state = 'retryable_failure'
+           AND (next_attempt_at IS NULL OR next_attempt_at <= ?)`,
+        now,
+        planId,
+        now,
+      );
+      // Leave actual provider I/O to the next execute path / external flusher.
+      // State transition alone makes the plan Needs attention / In progress accurate on reload.
+      void systemActor;
+      void planId;
+    }
+    return due.length;
   }
 
   private ensureColumn(table: string, name: string, ddl: string): void {
@@ -1810,6 +1907,158 @@ export class EventStore extends DurableObject<AppBindings> {
           JSON.stringify(tracks),
         );
       }
+    });
+  }
+
+  /**
+   * Course Check killer-demo extras: reserved proposals, identity reuse speaker, prior outbox.
+   * Inserts missing demo rows even when proposals-v1 already ran. Never overwrites ops data.
+   */
+  seedCourseCheckDemoIfNeeded(): void {
+    const event = this.getEvent();
+    if (!event || event.id !== COURSE_CHECK_DEMO_EVENT_ID) return;
+
+    const marker = this.ctx.storage.sql
+      .exec<{ name: string }>(
+        "SELECT name FROM seed_markers WHERE name = 'course-check-demo-v1'",
+      )
+      .toArray()[0];
+    if (marker) return;
+
+    const demoProposals = buildCourseCheckDemoProposals(event.id);
+
+    this.ctx.storage.transactionSync(() => {
+      for (const proposal of demoProposals) {
+        this.ctx.storage.sql.exec(
+          `INSERT INTO proposals (
+            id, form_id, form_definition_version, answers_json, title, abstract,
+            track_id, track_name, speaker_name, speaker_email,
+            biography, supporting_link, session_format, workshop_duration,
+            co_speakers_json, supporting_file_json, status, committee_note,
+            private_note, review_version, submitted_at, confirmation_email_status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO NOTHING`,
+          proposal.id,
+          proposal.formId,
+          proposal.formDefinitionVersion,
+          JSON.stringify(proposal.answers ?? {}),
+          proposal.title,
+          proposal.abstract,
+          proposal.trackId,
+          proposal.trackName,
+          proposal.speakerName,
+          proposal.speakerEmail,
+          proposal.biography,
+          proposal.supportingLink,
+          proposal.sessionFormat ?? "",
+          proposal.workshopDuration ?? "",
+          JSON.stringify(proposal.coSpeakers ?? []),
+          proposal.supportingFile ? JSON.stringify(proposal.supportingFile) : "",
+          proposal.status,
+          proposal.committeeNote,
+          proposal.privateNote,
+          proposal.reviewVersion ?? 0,
+          proposal.submittedAt,
+          proposal.confirmationEmailStatus ?? "",
+        );
+      }
+
+      const eventRow = this.ctx.storage.sql
+        .exec<{ tracks_json: string }>("SELECT tracks_json FROM events LIMIT 1")
+        .toArray()[0];
+      if (eventRow) {
+        const tracks = JSON.parse(eventRow.tracks_json) as EventRecord["tracks"];
+        const hasDemoTrack = tracks.some((track) => track.id === "course-check-demo");
+        const nextTracks = hasDemoTrack
+          ? tracks
+          : [
+              ...tracks,
+              {
+                id: "course-check-demo",
+                name: "Course Check Demo",
+                proposalCount: demoProposals.length,
+              },
+            ];
+        const counts = this.ctx.storage.sql
+          .exec<ProposalCountRow>(
+            `SELECT track_id, COUNT(*) AS proposal_count
+             FROM proposals
+             GROUP BY track_id`,
+          )
+          .toArray();
+        const countByTrack = new Map(
+          counts.map((row) => [row.track_id, row.proposal_count]),
+        );
+        const syncedTracks = nextTracks.map((track) => ({
+          ...track,
+          proposalCount: countByTrack.get(track.id) ?? track.proposalCount,
+        }));
+        const totals = this.ctx.storage.sql
+          .exec<{ total: number; unreviewed: number }>(
+            `SELECT COUNT(*) AS total,
+                    SUM(CASE WHEN status = 'unreviewed' THEN 1 ELSE 0 END) AS unreviewed
+             FROM proposals`,
+          )
+          .toArray()[0];
+        this.ctx.storage.sql.exec(
+          `UPDATE events
+           SET submission_count = ?, unreviewed_count = ?, tracks_json = ?`,
+          totals?.total ?? 0,
+          totals?.unreviewed ?? 0,
+          JSON.stringify(syncedTracks),
+        );
+      }
+
+      this.upsertSpeakerForTest({
+        name: COURSE_CHECK_DEMO_IDENTITY.name,
+        email: COURSE_CHECK_DEMO_IDENTITY.email,
+        biography: COURSE_CHECK_DEMO_IDENTITY.biography,
+      });
+
+      const priorProposal = this.ctx.storage.sql
+        .exec<{ id: string }>(
+          `SELECT id FROM proposals WHERE id = ? LIMIT 1`,
+          COURSE_CHECK_DEMO_PRIOR_OUTBOX.proposalId,
+        )
+        .toArray()[0];
+      const priorOutbox = this.ctx.storage.sql
+        .exec<{ id: string }>(
+          `SELECT id FROM outbox_messages WHERE id = 'seed-cc-demo-prior-outbox' LIMIT 1`,
+        )
+        .toArray()[0];
+      if (priorProposal && !priorOutbox) {
+        this.queueOutboxMessage({
+          id: "seed-cc-demo-prior-outbox",
+          kind: "submission_confirmation",
+          toEmail: COURSE_CHECK_DEMO_PRIOR_OUTBOX.toEmail,
+          subject: COURSE_CHECK_DEMO_PRIOR_OUTBOX.subject,
+          textBody: COURSE_CHECK_DEMO_PRIOR_OUTBOX.textBody,
+          htmlBody: COURSE_CHECK_DEMO_PRIOR_OUTBOX.htmlBody,
+          proposalId: COURSE_CHECK_DEMO_PRIOR_OUTBOX.proposalId,
+        });
+        this.ctx.storage.sql.exec(
+          `UPDATE outbox_messages
+           SET status = 'sent',
+               sent_at = ?,
+               updated_at = ?,
+               attempt_count = 1
+           WHERE id = 'seed-cc-demo-prior-outbox'`,
+          "2026-08-01T12:00:00.000Z",
+          "2026-08-01T12:00:00.000Z",
+        );
+        this.ctx.storage.sql.exec(
+          `UPDATE proposals
+           SET confirmation_email_status = 'sent'
+           WHERE id = ?`,
+          COURSE_CHECK_DEMO_PRIOR_OUTBOX.proposalId,
+        );
+      }
+
+      this.ctx.storage.sql.exec(
+        `INSERT INTO seed_markers (name, applied_at)
+         VALUES ('course-check-demo-v1', ?)`,
+        new Date().toISOString(),
+      );
     });
   }
 
@@ -5337,7 +5586,7 @@ export class EventStore extends DurableObject<AppBindings> {
         .exec<CourseCheckPlanRow>(
           `SELECT id, action_type, state, version, digest, body_json, created_at,
                   updated_at, created_by_id, created_by_name, created_by_json,
-                  approval_json, receipt_id
+                  approval_json, receipt_id, stage_endorsements_json, privacy_erased_at
            FROM course_check_plans
            WHERE id = ?`,
           planId,
@@ -5384,21 +5633,48 @@ export class EventStore extends DurableObject<AppBindings> {
   private courseCheckSettings(): {
     ageWarningHours: number;
     batchLimit: number;
+    policy: EventCourseCheckPolicy;
   } {
     const row = this.ctx.storage.sql
       .exec<{
         course_check_age_warning_hours: number | null;
         course_check_batch_limit: number | null;
+        course_check_policy_json: string | null;
       }>(
-        `SELECT course_check_age_warning_hours, course_check_batch_limit FROM events LIMIT 1`,
+        `SELECT course_check_age_warning_hours, course_check_batch_limit, course_check_policy_json
+         FROM events LIMIT 1`,
       )
       .toArray()[0];
+    let policy = DEFAULT_COURSE_CHECK_POLICY;
+    if (row?.course_check_policy_json) {
+      try {
+        policy = mergeCourseCheckPolicy(
+          JSON.parse(row.course_check_policy_json) as Partial<EventCourseCheckPolicy>,
+        );
+      } catch {
+        policy = DEFAULT_COURSE_CHECK_POLICY;
+      }
+    }
     return {
       ageWarningHours: Number(
         row?.course_check_age_warning_hours ?? DEFAULT_AGE_WARNING_HOURS,
       ),
       batchLimit: Number(row?.course_check_batch_limit ?? DEFAULT_DECISION_BATCH_LIMIT),
+      policy,
     };
+  }
+
+  getCourseCheckPolicy(): EventCourseCheckPolicy {
+    return this.courseCheckSettings().policy;
+  }
+
+  setCourseCheckPolicy(policy: EventCourseCheckPolicy): EventCourseCheckPolicy {
+    const merged = mergeCourseCheckPolicy(policy);
+    this.ctx.storage.sql.exec(
+      `UPDATE events SET course_check_policy_json = ?`,
+      JSON.stringify(merged),
+    );
+    return merged;
   }
 
   private listPlanVersions(planId: string): CourseCheckPlanVersion[] {
@@ -5658,13 +5934,18 @@ export class EventStore extends DurableObject<AppBindings> {
       }
     }
 
-    return {
+    const enriched: CourseCheckPlan = {
       ...plan,
       state,
       body: nextBody,
       versions: this.listPlanVersions(plan.id).filter((v) => v.version !== plan.version),
       mutations: this.listPlanMutations(plan.id),
+      stageEndorsements: plan.stageEndorsements ?? [],
+      privacyErased: plan.privacyErased ?? false,
+      privacyErasedAt: plan.privacyErasedAt ?? null,
     };
+    enriched.activity = buildCourseCheckActivity(enriched);
+    return enriched;
   }
 
   private detectDecisionStaleInputs(body: DecisionPlanBody): string[] {
@@ -5718,7 +5999,7 @@ export class EventStore extends DurableObject<AppBindings> {
       .exec<CourseCheckPlanRow>(
         `SELECT id, action_type, state, version, digest, body_json, created_at,
                 updated_at, created_by_id, created_by_name, created_by_json,
-                approval_json, receipt_id
+                approval_json, receipt_id, stage_endorsements_json, privacy_erased_at
          FROM course_check_plans
          ORDER BY created_at DESC, id DESC`,
       )
@@ -7519,11 +7800,12 @@ export class EventStore extends DurableObject<AppBindings> {
     stageId: string;
     idempotencyKey: string;
     actor: CourseCheckActor;
+    reason?: string | null;
   }): Promise<
     | { ok: true; plan: CourseCheckPlan; created: boolean }
     | {
         ok: false;
-        status: 400 | 409;
+        status: 400 | 403 | 409;
         code: string;
         error: string;
         recoveryGuidance: string;
@@ -7547,10 +7829,14 @@ export class EventStore extends DurableObject<AppBindings> {
         recoveryGuidance: "Create a new Communication Course Check.",
       };
     }
-    const plan = this.attachReceipt(
+    let plan = this.attachReceipt(
       mapCourseCheckPlan(row, this.eventIdOrThrow()),
       row.receipt_id,
     );
+    plan = {
+      ...plan,
+      stageEndorsements: parseStageEndorsements(row.stage_endorsements_json),
+    };
     if (plan.body.actionType !== "communication") {
       return {
         ok: false,
@@ -7578,6 +7864,30 @@ export class EventStore extends DurableObject<AppBindings> {
         error: "This Course Check changed since you loaded it.",
         recoveryGuidance: "Reload the Course Check and review the latest plan version.",
       };
+    }
+    const sendPolicy = this.enforceStagePolicy({
+      plan,
+      stageId: input.stageId,
+      actor: input.actor,
+      reason: input.reason,
+    });
+    if (!sendPolicy.ok) {
+      return {
+        ok: false,
+        status: sendPolicy.status,
+        code: sendPolicy.code,
+        error: sendPolicy.error,
+        recoveryGuidance: sendPolicy.recoveryGuidance,
+      };
+    }
+    if ("endorsed" in sendPolicy && sendPolicy.endorsed) {
+      this.writeIdempotency({
+        command: "send-communication",
+        key: input.idempotencyKey,
+        planId: sendPolicy.plan.id,
+        response: sendPolicy.plan,
+      });
+      return { ok: true, plan: sendPolicy.plan, created: true };
     }
     if (
       plan.body.stageVisibility.draft !== "complete" ||
@@ -8314,37 +8624,232 @@ export class EventStore extends DurableObject<AppBindings> {
 
   projectCourseCheckPlan(
     plan: CourseCheckPlan,
-    options: { canViewCommunicationEvidence: boolean },
-  ): CourseCheckPlan {
-    let projected = plan;
-    if (
-      plan.body.actionType === "communication" &&
-      !options.canViewCommunicationEvidence
-    ) {
-      projected = {
-        ...plan,
-        body: redactCommunicationBody(plan.body),
-      };
+    options:
+      | { canViewCommunicationEvidence: boolean }
+      | CourseCheckProjectionOptions,
+  ): CourseCheckPlan | null {
+    const projection: CourseCheckProjectionOptions =
+      "role" in options
+        ? options
+        : {
+            role: options.canViewCommunicationEvidence ? "admin" : "reviewer",
+            trackIds: [],
+            canViewCommunicationEvidence: options.canViewCommunicationEvidence,
+            canViewFullDecisionEvidence: options.canViewCommunicationEvidence,
+          };
+    if (projection.role === "reviewer" && !reviewerCanSeePlan(plan, projection.trackIds)) {
+      // Still return a state-only shell for list badges when caller keeps the row.
+      if (plan.body.actionType === "decision" && projection.trackIds.length === 0) {
+        return null;
+      }
     }
-    if (!options.canViewCommunicationEvidence && projected.body.airtable.effects.length > 0) {
-      projected = {
-        ...projected,
-        body: {
-          ...projected.body,
-          airtable: {
-            ...projected.body.airtable,
-            redacted: true,
-            effects: projected.body.airtable.effects.map((effect) => ({
-              ...effect,
-              fields: { redacted: true },
-              beforeFields: null,
-              lastError: effect.lastError ? "Integration delivery requires administrator review." : null,
-            })),
+    return projectCourseCheckForViewer(plan, projection);
+  }
+
+  /**
+   * Enforce optional stricter event policy at a stage boundary.
+   * Returns endorsed plan when two-person approval needs a second actor.
+   */
+  private enforceStagePolicy(input: {
+    plan: CourseCheckPlan;
+    stageId: string;
+    actor: CourseCheckActor;
+    reason?: string | null;
+  }):
+    | { ok: true }
+    | { ok: false; status: 400 | 403 | 409; code: string; error: string; recoveryGuidance: string }
+    | { ok: true; endorsed: true; plan: CourseCheckPlan } {
+    const policy = this.getCourseCheckPolicy();
+    const result = evaluateStagePolicy({
+      policy,
+      plan: input.plan,
+      stageId: input.stageId,
+      actor: input.actor,
+      reason: input.reason,
+    });
+    if (result.action === "deny") {
+      return { ok: false, ...result.denial };
+    }
+    if (result.action === "endorse") {
+      const endorsements = [
+        ...(input.plan.stageEndorsements ?? []),
+        result.endorsement,
+      ];
+      const now = result.endorsement.endorsedAt;
+      this.ctx.storage.sql.exec(
+        `UPDATE course_check_plans
+         SET stage_endorsements_json = ?, state = 'Needs review', updated_at = ?
+         WHERE id = ?`,
+        JSON.stringify(endorsements),
+        now,
+        input.plan.id,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT INTO course_check_mutations
+          (id, plan_id, from_version, to_version, kind, actor_id, actor_name, actor_json, at, summary)
+         VALUES (?, ?, ?, ?, 'override', ?, ?, ?, ?, ?)`,
+        crypto.randomUUID(),
+        input.plan.id,
+        input.plan.version,
+        input.plan.version,
+        input.actor.id,
+        input.actor.displayName,
+        serializeCourseCheckActor(input.actor),
+        now,
+        `Recorded two-person endorsement for stage ${input.stageId}.`,
+      );
+      const plan = this.getCourseCheckPlan(input.plan.id);
+      if (!plan) throw new Error("Endorsed plan missing after write.");
+      return { ok: true, endorsed: true, plan };
+    }
+    return { ok: true };
+  }
+
+  eraseCourseCheckPersonalPayloads(input: {
+    planId: string;
+    actor: CourseCheckActor;
+    reason: string;
+    idempotencyKey: string;
+  }):
+    | { ok: true; plan: CourseCheckPlan; result: PrivacyErasureResult; created: boolean }
+    | { ok: false; status: 400 | 404; code: string; error: string; recoveryGuidance: string } {
+    const existing = this.readIdempotency("privacy-erase", input.idempotencyKey);
+    if (existing) {
+      const plan = this.getCourseCheckPlan(existing.planId);
+      if (!plan) throw new Error("Idempotent privacy erase plan missing.");
+      return {
+        ok: true,
+        plan,
+        created: false,
+        result: {
+          planId: plan.id,
+          erasedAt: plan.privacyErasedAt ?? plan.updatedAt,
+          erasedBy: input.actor,
+          fieldsRedacted: 0,
+          preserved: {
+            planId: true,
+            digests: true,
+            approvals: true,
+            receipts: true,
+            effectIds: true,
+            outcomes: true,
+            compensationLinks: true,
           },
         },
       };
     }
-    return projected;
+    if (!input.reason.trim()) {
+      return {
+        ok: false,
+        status: 400,
+        code: "erasure_reason_required",
+        error: "A reason is required for privacy erasure.",
+        recoveryGuidance: "Provide a short operational reason for the erasure.",
+      };
+    }
+    const plan = this.getCourseCheckPlan(input.planId);
+    if (!plan) {
+      return {
+        ok: false,
+        status: 404,
+        code: "plan_not_found",
+        error: "Course Check plan not found.",
+        recoveryGuidance: "Confirm the plan id before requesting erasure.",
+      };
+    }
+    const erased = erasePersonalPlanPayloads(plan.body);
+    assertSafePlanStorage(erased.body);
+    const now = new Date().toISOString();
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        `UPDATE course_check_plans
+         SET body_json = ?, privacy_erased_at = ?, updated_at = ?
+         WHERE id = ?`,
+        JSON.stringify(erased.body),
+        now,
+        now,
+        plan.id,
+      );
+      // Erase historical version bodies too while keeping digests/versions.
+      const versions = this.listPlanVersions(plan.id);
+      for (const version of versions) {
+        const versionErased = erasePersonalPlanPayloads(version.body);
+        this.ctx.storage.sql.exec(
+          `UPDATE course_check_plan_versions SET body_json = ? WHERE plan_id = ? AND version = ?`,
+          JSON.stringify(versionErased.body),
+          plan.id,
+          version.version,
+        );
+      }
+      if (plan.body.actionType === "communication") {
+        this.ctx.storage.sql.exec(
+          `UPDATE communication_drafts
+           SET to_email = '[erased]', recipient_name = '[erased]',
+               subject = '[erased]', body_text = '[erased]', body_html = '[erased]',
+               frozen_payload_json = '{}'
+           WHERE plan_id = ?`,
+          plan.id,
+        );
+        this.ctx.storage.sql.exec(
+          `UPDATE communication_effects
+           SET to_email = '[erased]',
+               last_error = CASE WHEN last_error IS NULL THEN NULL ELSE '[erased]' END
+           WHERE plan_id = ?`,
+          plan.id,
+        );
+      }
+      this.ctx.storage.sql.exec(
+        `INSERT INTO course_check_mutations
+          (id, plan_id, from_version, to_version, kind, actor_id, actor_name, actor_json, at, summary)
+         VALUES (?, ?, ?, ?, 'override', ?, ?, ?, ?, ?)`,
+        crypto.randomUUID(),
+        plan.id,
+        plan.version,
+        plan.version,
+        input.actor.id,
+        input.actor.displayName,
+        serializeCourseCheckActor(input.actor),
+        now,
+        `Privacy erasure: ${input.reason.trim()} (${erased.fieldsRedacted} fields).`,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT INTO audit_events
+          (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+           committee_note_changed, created_at)
+         VALUES (?, ?, 'course_check.privacy.erased', ?, ?, ?, ?, 0, ?)`,
+        crypto.randomUUID(),
+        plan.id,
+        input.actor.id,
+        input.actor.displayName,
+        plan.state,
+        "privacy_erased",
+        now,
+      );
+    });
+    const next = this.getCourseCheckPlan(plan.id);
+    if (!next) throw new Error("Plan missing after privacy erasure.");
+    const result: PrivacyErasureResult = {
+      planId: plan.id,
+      erasedAt: now,
+      erasedBy: input.actor,
+      fieldsRedacted: erased.fieldsRedacted,
+      preserved: {
+        planId: true,
+        digests: true,
+        approvals: true,
+        receipts: true,
+        effectIds: true,
+        outcomes: true,
+        compensationLinks: true,
+      },
+    };
+    this.writeIdempotency({
+      command: "privacy-erase",
+      key: input.idempotencyKey,
+      planId: plan.id,
+      response: next,
+    });
+    return { ok: true, plan: next, result, created: true };
   }
 
   async createPublicationCourseCheck(input: {
@@ -8470,12 +8975,13 @@ export class EventStore extends DurableObject<AppBindings> {
     stageId: string;
     idempotencyKey: string;
     actor: CourseCheckActor;
+    reason?: string | null;
     softWarningOverrides?: Array<{ findingId: string; reason?: string | null }>;
   }): Promise<
     | { ok: true; plan: CourseCheckPlan; created: boolean }
     | {
         ok: false;
-        status: 409 | 400;
+        status: 409 | 400 | 403;
         code: string;
         error: string;
         recoveryGuidance: string;
@@ -8500,10 +9006,14 @@ export class EventStore extends DurableObject<AppBindings> {
         recoveryGuidance: "Create a new Course Check from the current records.",
       };
     }
-    const plan = this.attachReceipt(
+    let plan = this.attachReceipt(
       mapCourseCheckPlan(row, this.eventIdOrThrow()),
       row.receipt_id,
     );
+    plan = {
+      ...plan,
+      stageEndorsements: parseStageEndorsements(row.stage_endorsements_json),
+    };
     if (plan.receipt) {
       return { ok: true, plan, created: false };
     }
@@ -8537,6 +9047,31 @@ export class EventStore extends DurableObject<AppBindings> {
         recoveryGuidance:
           "Communication draft/send is owned by Course Check 03. This linked plan is a non-delivering stub.",
       };
+    }
+
+    const policyGate = this.enforceStagePolicy({
+      plan,
+      stageId: input.stageId,
+      actor: input.actor,
+      reason: input.reason,
+    });
+    if (!policyGate.ok) {
+      return {
+        ok: false,
+        status: policyGate.status,
+        code: policyGate.code,
+        error: policyGate.error,
+        recoveryGuidance: policyGate.recoveryGuidance,
+      };
+    }
+    if ("endorsed" in policyGate && policyGate.endorsed) {
+      this.writeIdempotency({
+        command: "apply",
+        key: input.idempotencyKey,
+        planId: policyGate.plan.id,
+        response: policyGate.plan,
+      });
+      return { ok: true, plan: policyGate.plan, created: true };
     }
 
     if (plan.body.actionType === "decision") {
@@ -9920,7 +10455,7 @@ export class EventStore extends DurableObject<AppBindings> {
     if (change.kind === "speaker") {
       const participation = this.ctx.storage.sql
         .exec<{ count: number }>(
-          `SELECT COUNT(*) AS count FROM speaker_participations WHERE speaker_id = ?`,
+          `SELECT COUNT(*) AS count FROM event_participations WHERE speaker_id = ?`,
           change.chartsteadId,
         )
         .one();

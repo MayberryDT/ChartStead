@@ -4,7 +4,7 @@
 
 **Blocked by:** 08 — Complete agent API control.
 
-**Status:** in-review
+**Status:** done
 
 - [x] Research comparable products (Postiz public API + MCP with API key header) and choose the simple path.
 - [x] Primary connection path: Settings → Automation access with **API** and **MCP** tabs sharing one scoped agent key.
@@ -34,3 +34,4 @@ Filed after Course Check 08 human QA: raw API keys work and are correct as a ker
     4. Revoke removes API and MCP access.
     5. Desktop + mobile Settings layout (no horizontal overflow).
   - Verified: typecheck, build, worker automation tests 6/6, UI settings 4/4, CC08 agent-api 11/11, Playwright desktop+mobile QA, live MCP initialize with created token.
+- 2026-08-12 — merged to main after commit.

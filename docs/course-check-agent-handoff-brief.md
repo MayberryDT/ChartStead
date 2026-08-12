@@ -14,7 +14,7 @@ You are talking to a **non-developer organizer**. Do not ask them to write code,
 
 | | |
 | --- | --- |
-| **Base URL** | `http://100.105.117.93:5189` |
+| **Base URL** | `http://100.105.117.93:5191` |
 | **Event id** | `pacific-open-data-summit-2026` |
 | **API key** | `PASTE_KEY_HERE` |
 | **Optional human provenance** | `tyler\|Tyler` (header below) |
@@ -44,13 +44,14 @@ Docs on the host (if you can read files): `docs/course-check-agent-api-v1.md`
 2. **Propose vs execute.** If your key is propose-only, create/inspect plans but stop before apply/send and say so.
 3. **Frozen plans.** Create a plan, then apply using that plan’s exact `version` + `digest`. Do not “fix” the plan at apply time.
 4. **Prefer declined** for smoke tests on seed submissions so you do not invent speakers/sessions unless the human asked for an accept cascade.
-5. **Safe seed proposal for decline smoke test:** `SUB-PODS0002` (or another unreviewed seed id if that one is already decided).
-6. After each step, tell the human what to click in the UI if they want to double-check (Tailscale app URL below).
+5. **Safe seed proposal for decline smoke test:** `SUB-PODS0049` (Course Check Demo “Declined: speculative…”) or `SUB-PODS0002` if that one is still open.
+6. **Full killer walkthrough fixtures:** track **Course Check Demo** (`SUB-PODS0048`–`SUB-PODS0057`). Human script: `docs/course-check-killer-walkthrough.md`.
+7. After each step, tell the human what to click in the UI if they want to double-check (Tailscale app URL below).
 
 **Organizer UI (human):**  
-`http://100.105.117.93:5189/e/pacific-open-data-summit-2026/submissions`  
+`http://100.105.117.93:5191/e/pacific-open-data-summit-2026/submissions`  
 Course Check plan:  
-`http://100.105.117.93:5189/e/pacific-open-data-summit-2026/course-checks/{planId}`
+`http://100.105.117.93:5191/e/pacific-open-data-summit-2026/course-checks/{planId}`
 
 ## Acceptance suite (run in order)
 
@@ -72,14 +73,14 @@ Complete each step. Stop and report if a step fails.
 
 ### C — Decision Course Check (core path)
 
-4. Create a **declined** Decision Course Check for one seed proposal, e.g. `SUB-PODS0002`:
+4. Create a **declined** Decision Course Check for one seed proposal, e.g. `SUB-PODS0049`:
 
 ```http
 POST /api/v1/events/{eventId}/course-checks/decisions
 Idempotency-Key: agent-suite-dec-1
 
 {
-  "proposalId": "SUB-PODS0002",
+  "proposalId": "SUB-PODS0049",
   "outcome": "declined",
   "idempotencyKey": "agent-suite-dec-1"
 }

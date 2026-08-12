@@ -651,6 +651,13 @@ export interface CourseCheckPlan {
   /** Immutable prior versions (newest first, excludes current). */
   versions?: CourseCheckPlanVersion[];
   mutations?: PlanMutationRecord[];
+  /** Stage endorsements awaiting a second person (two-person policy). */
+  stageEndorsements?: CourseCheckStageEndorsement[];
+  /** Normalized activity distinguishing requester/approver/executor/agent. */
+  activity?: CourseCheckActivityEntry[];
+  /** True when personal payloads were privacy-erased in storage. */
+  privacyErased?: boolean;
+  privacyErasedAt?: string | null;
 }
 
 export interface CreateDecisionCourseCheckRequest {
@@ -731,6 +738,8 @@ export interface ApplyCourseCheckRequest {
   digest: string;
   stageId: string;
   idempotencyKey: string;
+  /** Optional stage approval reason (required when event policy mandates it). */
+  reason?: string | null;
   softWarningOverrides?: Array<{
     findingId: string;
     reason?: string | null;
@@ -776,3 +785,248 @@ export const EVIDENCE_SECTION_TITLES: Record<CourseCheckEvidenceKind, string> = 
   integration: "Integration effects",
   internal: "Internal record details",
 };
+
+/** Optional stricter event policy — can only tighten, never weaken the kernel. */
+export interface EventCourseCheckPolicy {
+  /** Second distinct actor must endorse before stage execution. Default false. */
+  requireTwoPersonApproval: boolean;
+  /** Stage executor cannot be the plan creator. Default false. */
+  requireDistinctApprover: boolean;
+  /** Require a non-empty reason on every stage execution (beyond material-external). Default false. */
+  requireReasonOnApprove: boolean;
+  /** Ceiling for agent operating mode. Default autonomous_policy (no extra ceiling). */
+  maxAgentMode: import("./agent-api").AgentOperatingMode;
+}
+
+export const DEFAULT_COURSE_CHECK_POLICY: EventCourseCheckPolicy = {
+  requireTwoPersonApproval: false,
+  requireDistinctApprover: false,
+  requireReasonOnApprove: false,
+  maxAgentMode: "autonomous_policy",
+};
+
+const AGENT_MODE_RANK: Record<import("./agent-api").AgentOperatingMode, number> = {
+  propose_only: 0,
+  delegated_execution: 1,
+  autonomous_policy: 2,
+};
+
+export function agentModeRank(
+  mode: import("./agent-api").AgentOperatingMode,
+): number {
+  return AGENT_MODE_RANK[mode] ?? 0;
+}
+
+export function mergeCourseCheckPolicy(
+  partial: Partial<EventCourseCheckPolicy> | null | undefined,
+): EventCourseCheckPolicy {
+  const base = { ...DEFAULT_COURSE_CHECK_POLICY };
+  if (!partial || typeof partial !== "object") return base;
+  if (typeof partial.requireTwoPersonApproval === "boolean") {
+    base.requireTwoPersonApproval = partial.requireTwoPersonApproval;
+  }
+  if (typeof partial.requireDistinctApprover === "boolean") {
+    base.requireDistinctApprover = partial.requireDistinctApprover;
+  }
+  if (typeof partial.requireReasonOnApprove === "boolean") {
+    base.requireReasonOnApprove = partial.requireReasonOnApprove;
+  }
+  if (
+    partial.maxAgentMode === "propose_only" ||
+    partial.maxAgentMode === "delegated_execution" ||
+    partial.maxAgentMode === "autonomous_policy"
+  ) {
+    base.maxAgentMode = partial.maxAgentMode;
+  }
+  return base;
+}
+
+/** Policy never disables digest, authz, freshness, or break-glass (none exist). */
+export function assertPolicyDoesNotWeakenBaseline(
+  policy: EventCourseCheckPolicy,
+): { ok: true } | { ok: false; error: string } {
+  const keys = Object.keys(policy as object);
+  const allowed = new Set([
+    "requireTwoPersonApproval",
+    "requireDistinctApprover",
+    "requireReasonOnApprove",
+    "maxAgentMode",
+  ]);
+  for (const key of keys) {
+    if (!allowed.has(key)) {
+      return {
+        ok: false,
+        error: `Unknown policy key "${key}" cannot weaken baseline Course Check protections.`,
+      };
+    }
+  }
+  return { ok: true };
+}
+
+/** Prior stage endorsement used for two-person approval. */
+export interface CourseCheckStageEndorsement {
+  stageId: string;
+  planVersion: number;
+  digest: string;
+  actor: CourseCheckActor;
+  endorsedAt: string;
+  reason: string | null;
+}
+
+export type CourseCheckActivityRole =
+  | "requester"
+  | "endorser"
+  | "approver"
+  | "executor"
+  | "agent"
+  | "system";
+
+export interface CourseCheckActivityEntry {
+  id: string;
+  at: string;
+  role: CourseCheckActivityRole;
+  kind: string;
+  summary: string;
+  actor: CourseCheckActor | null;
+  planId: string;
+  planVersion?: number;
+  effectId?: string;
+  outcome?: string | null;
+}
+
+export interface PrivacyErasureResult {
+  planId: string;
+  erasedAt: string;
+  erasedBy: CourseCheckActor;
+  fieldsRedacted: number;
+  preserved: {
+    planId: true;
+    digests: true;
+    approvals: true;
+    receipts: true;
+    effectIds: true;
+    outcomes: true;
+    compensationLinks: true;
+  };
+}
+
+export interface PrivacyErasureRequest {
+  reason: string;
+  idempotencyKey: string;
+}
+
+export function linkedPlanIdsFromBody(body: CourseCheckPlanBody): string[] {
+  if (
+    body.actionType === "decision" ||
+    body.actionType === "publication" ||
+    body.actionType === "communication"
+  ) {
+    return body.linkedPlanIds ?? [];
+  }
+  return [];
+}
+
+export function parentPlanIdFromBody(body: CourseCheckPlanBody): string | null {
+  if (
+    body.actionType === "decision" ||
+    body.actionType === "publication" ||
+    body.actionType === "communication"
+  ) {
+    return body.parentPlanId ?? null;
+  }
+  return null;
+}
+
+export function buildCourseCheckActivity(plan: CourseCheckPlan): CourseCheckActivityEntry[] {
+  const entries: CourseCheckActivityEntry[] = [];
+  entries.push({
+    id: `${plan.id}:request`,
+    at: plan.createdAt,
+    role: plan.createdBy.kind === "agent" ? "agent" : "requester",
+    kind: "create",
+    summary: `Requested ${plan.actionType} Course Check`,
+    actor: plan.createdBy,
+    planId: plan.id,
+    planVersion: 1,
+  });
+  for (const endorsement of plan.stageEndorsements ?? []) {
+    entries.push({
+      id: `${plan.id}:endorse:${endorsement.stageId}:${endorsement.endorsedAt}`,
+      at: endorsement.endorsedAt,
+      role: "endorser",
+      kind: "endorse",
+      summary: `Endorsed stage ${endorsement.stageId}`,
+      actor: endorsement.actor,
+      planId: plan.id,
+      planVersion: endorsement.planVersion,
+    });
+  }
+  if (plan.approval) {
+    entries.push({
+      id: `${plan.id}:approve:${plan.approval.stageId}:${plan.approval.approvedAt}`,
+      at: plan.approval.approvedAt,
+      role: plan.approval.actor.kind === "agent" ? "agent" : "approver",
+      kind: "approve",
+      summary: `Approved stage ${plan.approval.stageId}`,
+      actor: plan.approval.actor,
+      planId: plan.id,
+      planVersion: plan.approval.planVersion,
+    });
+  }
+  if (plan.receipt) {
+    entries.push({
+      id: `${plan.id}:execute:${plan.receipt.id}`,
+      at: plan.receipt.appliedAt,
+      role: plan.receipt.actor.kind === "agent" ? "agent" : "executor",
+      kind: "execute",
+      summary: `Executed stage ${plan.receipt.stageId}`,
+      actor: plan.receipt.actor,
+      planId: plan.id,
+      planVersion: plan.receipt.planVersion,
+      outcome: plan.state,
+    });
+  }
+  for (const mutation of plan.mutations ?? []) {
+    if (mutation.kind === "create" || mutation.kind === "apply") continue;
+    entries.push({
+      id: mutation.id,
+      at: mutation.at,
+      role: mutation.actor.kind === "agent" ? "agent" : "executor",
+      kind: mutation.kind,
+      summary: mutation.summary,
+      actor: mutation.actor,
+      planId: plan.id,
+      planVersion: mutation.toVersion,
+    });
+  }
+  if (plan.body.actionType === "communication") {
+    for (const effect of plan.body.effects) {
+      entries.push({
+        id: `${plan.id}:effect:${effect.effectId}:${effect.status}`,
+        at: effect.updatedAt || effect.createdAt,
+        role: "system",
+        kind: "effect_outcome",
+        summary: `Effect ${effect.effectId.slice(0, 8)} → ${effect.status}`,
+        actor: null,
+        planId: plan.id,
+        effectId: effect.effectId,
+        outcome: effect.status,
+      });
+    }
+    if (plan.body.compensation) {
+      entries.push({
+        id: `${plan.id}:compensation`,
+        at: plan.updatedAt,
+        role: "system",
+        kind: "compensation",
+        summary: `Compensation for effect ${plan.body.compensation.originalEffectId.slice(0, 8)}: ${plan.body.compensation.reason}`,
+        actor: null,
+        planId: plan.id,
+        effectId: plan.body.compensation.originalEffectId,
+        outcome: plan.body.compensation.reason,
+      });
+    }
+  }
+  entries.sort((a, b) => a.at.localeCompare(b.at));
+  return entries;
+}
