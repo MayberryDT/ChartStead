@@ -318,9 +318,11 @@ test("clean decision fast path preserves keyboard focus, history, and batch sele
     `**/api/events/pacific-open-data-summit-2026/course-checks/${durablePlan.id}`,
     async (route) => route.fulfill({ json: cleanPlan }),
   );
-  const mutationRequests: string[] = [];
+  const businessMutationRequests: string[] = [];
   page.on("request", (request) => {
-    if (request.method() !== "GET") mutationRequests.push(request.url());
+    if (request.method() !== "GET" && !request.url().endsWith("/ux-events")) {
+      businessMutationRequests.push(request.url());
+    }
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(
@@ -346,7 +348,7 @@ test("clean decision fast path preserves keyboard focus, history, and batch sele
       name: `Select ${proposal!.id} for batch decision`,
     }),
   ).toBeChecked();
-  expect(mutationRequests).toEqual([]);
+  expect(businessMutationRequests).toEqual([]);
 
   await page.goBack();
   await expect(dialog).toBeVisible();
