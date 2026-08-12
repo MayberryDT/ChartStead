@@ -9,3 +9,4 @@ dist/
 *.local
 test-results/
 playwright-report/
+.superpowers/
