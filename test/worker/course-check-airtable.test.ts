@@ -510,4 +510,112 @@ describe("Course Check 07 — Airtable consequence effects", () => {
     const after = (await listProposals()).find((candidate) => candidate.id === proposal!.id);
     expect(after?.title).toBe(proposal!.title);
   });
+
+  it("redacts mapped values for reviewers and creates linked reviewed compensation", async () => {
+    const proposal = (await listProposals()).find(
+      (candidate) => candidate.programOutcome == null && candidate.status !== "deny",
+    );
+    expect(proposal).toBeTruthy();
+    const records = new Map<string, string>();
+    const configuredApp = createApp({
+      resolvePrincipal: async () => adminPrincipal,
+      airtableCredentialClientFactory: () => ({
+        async listTable() {
+          return [];
+        },
+        async upsertRecord(input: { chartsteadId: string; providerRecordId: string | null }) {
+          const recordId = input.providerRecordId ?? records.get(input.chartsteadId) ?? `rec-${input.chartsteadId}`;
+          records.set(input.chartsteadId, recordId);
+          return { recordId, created: input.providerRecordId == null };
+        },
+      }),
+    });
+    const first = await createDecision(proposal!.id, `cc07-comp-source-${proposal!.id}`);
+    const firstApplied = await applyDecision(first, `cc07-comp-source-apply-${proposal!.id}`);
+    await executeAirtable(configuredApp, firstApplied, `cc07-comp-source-write-${proposal!.id}`);
+
+    const key = `cc07-comp-update-${proposal!.id}`;
+    const create = await configuredApp.request(
+      `https://chartstead.test/api/events/${eventId}/course-checks/guaranteed-speakers`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "idempotency-key": key },
+        body: JSON.stringify({
+          sourceLabel: "Correction review",
+          title: `Corrected ${proposal!.title}`,
+          format: proposal!.sessionFormat,
+          trackId: proposal!.trackId,
+          speakers: [{
+            name: proposal!.speakerName,
+            email: proposal!.speakerEmail,
+            biography: `${proposal!.biography} Corrected.`,
+          }],
+          idempotencyKey: key,
+        }),
+      },
+      env,
+    );
+    expect(create.status).toBe(201);
+    const updatePlan = await create.json<CourseCheckPlan>();
+    const updateEffect = updatePlan.body.airtable.effects.find(
+      (effect) => effect.kind === "speaker" && effect.operation === "update",
+    );
+    expect(updateEffect?.beforeFields).toBeTruthy();
+
+    const reviewer = createApp({
+      resolvePrincipal: async () => ({
+        id: "cc07-reviewer",
+        displayName: "Course Check Reviewer",
+        role: "reviewer",
+        eventIds: [eventId],
+        trackIdsByEvent: { [eventId]: [proposal!.trackId] },
+      }),
+    });
+    const redactedResponse = await reviewer.request(
+      `https://chartstead.test/api/events/${eventId}/course-checks/${updatePlan.id}`,
+      undefined,
+      env,
+    );
+    expect(redactedResponse.status).toBe(200);
+    const redacted = await redactedResponse.json<CourseCheckPlan>();
+    expect(redacted.body.airtable.redacted).toBe(true);
+    expect(redacted.body.airtable.effects[0]?.fields).toEqual({ redacted: true });
+
+    const updateApplied = await applyDecision(updatePlan, `cc07-comp-update-apply-${proposal!.id}`);
+    const written = await executeAirtable(
+      configuredApp,
+      updateApplied,
+      `cc07-comp-update-write-${proposal!.id}`,
+    );
+    const writtenUpdate = written.body.effects?.find(
+      (effect) => effect.id === updateEffect!.id,
+    );
+    expect(writtenUpdate?.state).toBe("succeeded");
+    const compensation = await configuredApp.request(
+      `https://chartstead.test/api/events/${eventId}/course-checks/${updatePlan.id}/airtable/effects/${updateEffect!.id}/compensations`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          planVersion: updateApplied.version,
+          digest: updateApplied.digest,
+          reason: "Reviewed correction must be reversed.",
+          idempotencyKey: `cc07-compensate-${proposal!.id}`,
+        }),
+      },
+      env,
+    );
+    expect(compensation.status).toBe(201);
+    const compensationBody = await compensation.json<{
+      effect: AirtableEffect;
+    }>();
+    expect(compensationBody.effect).toEqual(
+      expect.objectContaining({
+        state: "pending",
+        operation: "update",
+        compensatesEffectId: updateEffect!.id,
+        providerRecordId: updateEffect!.providerRecordId,
+      }),
+    );
+  });
 });
