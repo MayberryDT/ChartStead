@@ -542,7 +542,7 @@ describe("Course Check review workspace", () => {
         ...proposedDecisionReview,
         title,
         courseCheckSummary: "Course Check found no issues.",
-        counts: { selected: items.length, ready: items.length, needsAction: 0, warning: 0, skipped: 0 },
+        counts: { selected: items.length, ready: items.length, eligible: items.length, needsAction: 0, warning: 0, skipped: 0 },
         issues: [],
         effectGroups: proposedDecisionReview.effectGroups.map((group) =>
           group.key === "decisions"
@@ -581,7 +581,7 @@ describe("Course Check review workspace", () => {
       decisionReview: {
         ...proposedDecisionReview,
         courseCheckSummary: "Course Check found no issues.",
-        counts: { selected: 1, ready: 1, needsAction: 0, warning: 0, skipped: 0 },
+        counts: { selected: 1, ready: 1, eligible: 1, needsAction: 0, warning: 0, skipped: 0 },
         issues: [],
         effectGroups: [...proposedDecisionReview.effectGroups],
         permittedCommits: [...proposedDecisionReview.permittedCommits],
@@ -608,7 +608,7 @@ describe("Course Check review workspace", () => {
       decisionReview: {
         ...proposedDecisionReview,
         courseCheckSummary: "Course Check found no issues.",
-        counts: { selected: 1, ready: 1, needsAction: 0, warning: 0, skipped: 0 },
+        counts: { selected: 1, ready: 1, eligible: 1, needsAction: 0, warning: 0, skipped: 0 },
         issues: [],
         effectGroups: [...proposedDecisionReview.effectGroups],
         permittedCommits: [...proposedDecisionReview.permittedCommits],
@@ -712,7 +712,7 @@ describe("Course Check review workspace", () => {
       decisionReview: {
         ...proposedDecisionReview,
         courseCheckSummary: "Course Check found no issues.",
-        counts: { selected: 1, ready: 1, needsAction: 0, warning: 0, skipped: 0 },
+        counts: { selected: 1, ready: 1, eligible: 1, needsAction: 0, warning: 0, skipped: 0 },
         issues: [],
         effectGroups: [...proposedDecisionReview.effectGroups],
         permittedCommits: [...proposedDecisionReview.permittedCommits],
@@ -728,7 +728,7 @@ describe("Course Check review workspace", () => {
       decisionReview: {
         ...projectedAppliedPlan.decisionReview,
         courseCheckSummary: "Course Check found no issues.",
-        counts: { selected: 1, ready: 0, needsAction: 0, warning: 0, skipped: 0 },
+        counts: { selected: 1, ready: 0, eligible: 0, needsAction: 0, warning: 0, skipped: 0 },
         issues: [],
         effectGroups: [...projectedAppliedPlan.decisionReview.effectGroups],
         permittedCommits: [],
