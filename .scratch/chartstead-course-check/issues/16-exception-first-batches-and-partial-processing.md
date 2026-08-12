@@ -4,7 +4,7 @@
 
 **Blocked by:** Course Check 14 — Truthful decision review projection and receipts.
 
-**Status:** in-progress
+**Status:** done
 
 ## Source
 
@@ -30,3 +30,4 @@
 - 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.
 - 2026-08-12 — Started in the overnight parallel frontier after Course Check 14; automated verification is required, with demos/review/QA deferred per Tyler's instruction.
 - 2026-08-12 — Implemented exception-first projection and review UI with grouped affected objects, four behavior classes, selected-submission filters, consequence-specific alternatives, safe defer-then-apply partial execution, and persistent exact outcome counts. Verification: typecheck and build passed; full UI 76/76 and worker 185/185 passed; focused Course Check browser file 4/4 passed. A broad E2E run reached 16/17 with this ticket's scenario passing; its unrelated failure was the older single-decision test selecting a proposal already finalized by earlier persisted suite state. Status intentionally remains in-progress for root closeout.
+- 2026-08-12 — Closed without a demo/review/QA pause per Tyler's instruction. Root independently re-ran typecheck plus 12 focused worker and 9 focused UI tests before merge; all passed.
