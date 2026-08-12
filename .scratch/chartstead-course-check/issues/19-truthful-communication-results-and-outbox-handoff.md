@@ -4,7 +4,7 @@
 
 **Blocked by:** Course Check 18 — Connected decision-to-draft Course Check workspace.
 
-**Status:** in-progress
+**Status:** done
 
 ## Source
 
@@ -30,4 +30,6 @@
 
 - 2026-08-12 — Started after the connected decision-to-draft workspace integrated; demos, reviews, and human QA are deferred while automated acceptance verification remains required.
 
-- 2026-08-12 — Implementation verified after rebasing onto `02bc661` (Course Check 20). Focused Worker: 26/26; focused UI: 54/54; broad UI: 111/111; Course Check browser walkthrough: 10/10; typecheck and production build passed. Full Worker passed 228/230, with only two 5-second timeout flakes under concurrent load; the affected killer walkthrough passed 2/2 and the documented guided-CFP suite passed 23/23 on sequential reruns. The shared approval projection now preserves the dependency-safe partial-decision commit declared by the decision projection. No demo, review agent, or human QA was run per scope; status remains `in-progress` for parent integration.
+- 2026-08-12 — Implementation verified after rebasing onto `02bc661` (Course Check 20). Focused Worker: 26/26; focused UI: 54/54; broad UI: 111/111; Course Check browser walkthrough: 10/10; typecheck and production build passed. Full Worker passed 228/230, with only two 5-second timeout flakes under concurrent load; the affected killer walkthrough passed 2/2 and the documented guided-CFP suite passed 23/23 on sequential reruns. The shared approval projection now preserves the dependency-safe partial-decision commit declared by the decision projection. No demo, review agent, or human QA was run per scope.
+
+- 2026-08-12 — Parent-integration closeout: implementation commit `89aac57` is clean and based on integrated Course Check 20 (`02bc661`); automated acceptance gates above remain the completion evidence. Marked `done` at parent request.
