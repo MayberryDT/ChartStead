@@ -24,4 +24,4 @@
 
 Blocked by Course Check 02 through 09. Course Check 01 is done.
 
-- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 08 (blocked); Course Check 09 (blocked).
+- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 08 (ready-for-agent); Course Check 09 (blocked).
