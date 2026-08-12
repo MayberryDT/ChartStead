@@ -1,6 +1,6 @@
 # 23 — Expose evaluation-ready demo personas
 
-**Status:** in-progress
+**Status:** done
 
 **Blocked by:** 22 — Invite reviewers into track-scoped queues.
 
@@ -36,3 +36,5 @@ Make the isolated demo deployment prove ChartStead's existing multi-role spine w
 - 2026-08-12 — Started immediately after Competition 22 integrated; demo startup and human QA remain deferred, but deterministic evaluator-entry implementation and automated browser coverage are in scope.
 
 - 2026-08-12 — Implemented the isolated `/demo` evaluator entry with organizer, invitation-backed Platform reviewer, and Course-Check-backed signed speaker journeys. Safe reset restores only the named reviewer and speaker fixtures, including uploads, without accumulating review audit or duplicate identity/cascade records. Production isolation, focused Worker/UI contracts, full UI (93/93), full browser (24/24), typecheck, and build verified; the full Worker run passed 200/201 and hit the documented guided-CFP 5 s upload timeout, whose exact targeted case passed 1/1. Status intentionally remains `in-progress` for parent integration.
+
+- 2026-08-12 — Parent-integration verification: rebased cleanly onto current `main` (`b49f740`) containing Competition 25/26 and Course Check 21, then passed typecheck, focused demo Worker isolation/persona tests (8/8), demo UI tests (2/2), and the evaluator browser journey (1/1). Marked `done` for parent integration; no demo server started intentionally and no merge performed.
