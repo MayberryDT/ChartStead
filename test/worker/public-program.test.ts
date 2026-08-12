@@ -333,7 +333,8 @@ describe("Ticket 09 public program", () => {
     expect(response.headers.get("content-type") ?? "").toMatch(/text\/calendar/);
     const ics = await response.text();
     expect(ics).toContain(`UID:${session!.calendarUid}`);
-    expect(ics).toContain(`SUMMARY:${session!.title}`);
+    const escapedSummary = session!.title.replace(/([,;\\])/g, "\\$1");
+    expect(ics).toContain(`SUMMARY:${escapedSummary}`);
     if (session!.startsAt) {
       expect(ics).toContain("DTSTART:");
     }

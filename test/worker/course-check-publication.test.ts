@@ -468,13 +468,21 @@ describe("Course Check 06 program publication", () => {
 
   it("creates linked communication stubs without delivery on calendar consequences", async () => {
     const proposals = await listProposals();
-    const open = proposals.find(
-      (item) => item.programOutcome == null && item.status !== "deny",
-    );
-    expect(open).toBeTruthy();
-    await acceptProposal(open!.id, `cc06-link-${open!.id}`);
-    const agenda = await getAgenda();
-    const session = agenda.sessions.find((row) => row.proposalId === open!.id)!;
+    let agenda = await getAgenda();
+    // Prefer an already-accepted session from earlier suite tests; otherwise accept one.
+    let session = agenda.sessions[0];
+    let proposalId = session?.proposalId ?? null;
+    if (!session || !proposalId) {
+      const open = proposals.find(
+        (item) => item.programOutcome == null && item.status !== "deny",
+      );
+      expect(open).toBeTruthy();
+      proposalId = open!.id;
+      await acceptProposal(proposalId, `cc06-link-${proposalId}-${crypto.randomUUID()}`);
+      agenda = await getAgenda();
+      session = agenda.sessions.find((row) => row.proposalId === proposalId)!;
+    }
+    expect(session).toBeTruthy();
     // Fully scheduled placement records a pending calendar create intent.
     await placeSession(session.id, {
       roomId: "harbor-hall",
@@ -487,7 +495,7 @@ describe("Course Check 06 program publication", () => {
 
     const created = await createPublication({
       operation: "publish",
-      key: `cc06-link-create-${open!.id}`,
+      key: `cc06-link-create-${proposalId}-${crypto.randomUUID()}`,
     });
     expect(created.status).toBe(201);
     if (!("id" in created.plan)) return;
@@ -496,7 +504,7 @@ describe("Course Check 06 program publication", () => {
 
     const applied = await applyPublication(
       created.plan,
-      `cc06-link-apply-${open!.id}`,
+      `cc06-link-apply-${proposalId}-${crypto.randomUUID()}`,
       materialOverrides(created.plan),
     );
     expect(applied.status).toBe(200);

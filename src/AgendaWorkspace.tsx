@@ -320,7 +320,6 @@ export function AgendaWorkspace({ event }: { event: EventRecord }) {
               type="button"
               role="tab"
               aria-selected={day === selectedDay}
-              aria-pressed={day === selectedDay}
               onClick={() => setSelectedDay(day)}
             >
               {dayLabel(day)}
@@ -392,7 +391,11 @@ export function AgendaWorkspace({ event }: { event: EventRecord }) {
           )}
         </aside>
 
-        <section className="agenda-grid-wrap operations-panel" aria-label="Day and room grid">
+        <section
+          className="agenda-grid-wrap operations-panel"
+          aria-label="Day and room grid"
+          tabIndex={0}
+        >
           <div className="panel-heading">
             <h3>{dayLabel(selectedDay)} · rooms</h3>
             <span className="agenda-hint">Drag onto a slot, or select a session and use Move Session</span>

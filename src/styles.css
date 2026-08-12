@@ -1581,7 +1581,7 @@ table.grid tbody tr[aria-selected="true"] td:first-child {
   font-size: 0.75rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--muted, #6b7280);
+  color: var(--muted-strong, #4b5563);
 }
 
 .inspector-meta dd {

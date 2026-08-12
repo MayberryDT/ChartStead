@@ -10455,7 +10455,7 @@ export class EventStore extends DurableObject<AppBindings> {
     if (change.kind === "speaker") {
       const participation = this.ctx.storage.sql
         .exec<{ count: number }>(
-          `SELECT COUNT(*) AS count FROM speaker_participations WHERE speaker_id = ?`,
+          `SELECT COUNT(*) AS count FROM event_participations WHERE speaker_id = ?`,
           change.chartsteadId,
         )
         .one();
