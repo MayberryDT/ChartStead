@@ -137,12 +137,12 @@ test("clean decision fast path preserves keyboard focus, history, and batch sele
   const proposalsResponse = await page.request.get(
     "/api/events/pacific-open-data-summit-2026/proposals",
   );
+  expect(proposalsResponse.ok()).toBe(true);
   const proposals = (await proposalsResponse.json()) as {
     proposals: Array<{ id: string; programOutcome: string | null }>;
   };
   const proposal = proposals.proposals.find((row) => !row.programOutcome);
   expect(proposal).toBeTruthy();
-
   const key = `cc15-browser-fast-${Date.now()}`;
   const createResponse = await page.request.post(
     "/api/events/pacific-open-data-summit-2026/course-checks/decisions",
@@ -311,4 +311,40 @@ test("exception-first batch processes eligible decisions and leaves blocked work
   };
   expect(body.proposals.find((row) => row.id === "SUB-PODS0050")?.programOutcome).toBeNull();
   expect(body.proposals.find((row) => row.id === readyProposal!.id)?.programOutcome).toBe("declined");
+});
+
+test("issue repair returns to the same decision review with context and focus", async ({ page }) => {
+  const proposalsResponse = await page.request.get(
+    "/api/events/pacific-open-data-summit-2026/proposals",
+  );
+  expect(proposalsResponse.ok()).toBe(true);
+  const proposals = (await proposalsResponse.json()) as {
+    proposals: Array<{ id: string; programOutcome: string | null }>;
+  };
+  const proposal = proposals.proposals.find((row) => !row.programOutcome);
+  expect(proposal).toBeTruthy();
+  const key = `cc17-browser-${Date.now()}`;
+  const createResponse = await page.request.post(
+    "/api/events/pacific-open-data-summit-2026/course-checks/decisions",
+    {
+      headers: { "idempotency-key": key },
+      data: {
+        items: [{ proposalId: proposal!.id, outcome: "accepted" }],
+        idempotencyKey: key,
+      },
+    },
+  );
+  expect(createResponse.status()).toBe(201);
+  const plan = (await createResponse.json()) as { id: string };
+
+  await page.goto(`/e/pacific-open-data-summit-2026/course-checks/${plan.id}`);
+  const action = page.getByRole("link", { name: "Change session placement" }).first();
+  await expect(action).toBeVisible();
+  await action.click();
+  await expect(page).toHaveURL(
+    new RegExp(`/submissions/${proposal!.id}\\?field=sessionPlacement`),
+  );
+  await page.getByRole("link", { name: "Return to decision review" }).click();
+  await expect(page).toHaveURL(new RegExp(`/course-checks/${plan.id}$`));
+  await expect(page.getByRole("link", { name: "Change session placement" }).first()).toBeFocused();
 });

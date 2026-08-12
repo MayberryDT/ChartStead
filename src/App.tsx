@@ -257,12 +257,16 @@ function EventDesk({
   initialEventId = null,
   initialProposalId = null,
   initialQueue = { query: "", status: "all", track: "", sort: "newest" },
+  repairReturnTo = null,
+  repairField = null,
 }: {
   data: EventListResponse;
   initialNav?: NavItem;
   initialEventId?: string | null;
   initialProposalId?: string | null;
   initialQueue?: ProposalQueueState;
+  repairReturnTo?: string | null;
+  repairField?: string | null;
 }) {
   const navigate = useNavigate();
   const [selectedEventId, setSelectedEventId] = useState(() => {
@@ -515,6 +519,19 @@ function EventDesk({
           </div>
         </header>
 
+        {repairReturnTo ? (
+          <aside className="repair-return" aria-label="Course Check repair">
+            <p>
+              {repairField === "sessionPlacement"
+                ? "Review the submission source for session placement changes."
+                : "Review the affected source record."}
+            </p>
+            <a className="btn btn-secondary btn-sm" href={repairReturnTo}>
+              Return to decision review
+            </a>
+          </aside>
+        ) : null}
+
         {activeNav === "Submissions" ? (
           <SubmissionsWorkspace
             event={event}
@@ -549,6 +566,14 @@ function EventDesk({
       </main>
     </div>
   );
+}
+
+function safeCourseCheckReturnPath(value: unknown, eventId: string | undefined): string | null {
+  if (typeof value !== "string" || !eventId) return null;
+  const prefix = `/e/${encodeURIComponent(eventId)}/course-checks/`;
+  if (!value.startsWith(prefix)) return null;
+  const planId = value.slice(prefix.length);
+  return planId.length > 0 && !/[/?#]/.test(planId) ? value : null;
 }
 
 function useOrganizerData() {
@@ -607,6 +632,8 @@ export function SubmissionsPage() {
       initialEventId={params.eventId ?? null}
       initialProposalId={params.proposalId ?? null}
       initialQueue={parseQueueSearch(search)}
+      repairReturnTo={safeCourseCheckReturnPath(search.returnTo, params.eventId)}
+      repairField={typeof search.field === "string" ? search.field : null}
     />
   );
 }

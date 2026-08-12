@@ -10,6 +10,10 @@ import type {
   DecisionPlanBody,
 } from "../../shared/course-check";
 import { redactCommunicationBody } from "./communication-planner";
+import {
+  decisionRevalidationSummary,
+  declareDecisionIssueActions,
+} from "./issue-actions";
 
 export type CourseCheckProjectionOptions = {
   role: "admin" | "reviewer" | "agent" | "none";
@@ -70,10 +74,10 @@ function projectDecisionBody(
       (delta) => !delta.proposalId || items.some((item) => item.proposalId === delta.proposalId),
     ),
     findings: body.findings.filter((finding) => {
-      if (finding.severity === "blocker") return true;
-      if (!finding.entityRef) return false;
+      if (finding.code === "relevant_input_changed") return items.length > 0;
       return items.some(
         (item) =>
+          item.findings.some((itemFinding) => itemFinding.id === finding.id) ||
           item.proposalId === finding.entityRef ||
           item.itemId === finding.entityRef,
       );
@@ -356,8 +360,11 @@ function safeAlternativeLabel(
 }
 
 function buildDecisionIssues(
+  eventId: string,
   body: DecisionPlanBody,
   activeItems: DecisionItem[],
+  options: CourseCheckProjectionOptions,
+  revalidation: ReturnType<typeof decisionRevalidationSummary>,
 ): DecisionReviewIssue[] {
   const severityRank: Record<DecisionReviewIssueClass, number> = {
     needs_action: 0,
@@ -387,7 +394,11 @@ function buildDecisionIssues(
         severity: finding.severity,
         classification,
         label: issueLabel(classification),
-        summary: finding.message,
+        summary:
+          finding.code === "relevant_input_changed" &&
+          revalidation.changedInputs.length > 0
+            ? `${revalidation.changedInputs.map((input) => input.label).join(". ")}.`
+            : finding.message,
         affectedObjectLabel: affectedObjectLabel(affected),
         consequence: issueConsequence(classification, finding, affected),
         scope: issueScope(
@@ -406,6 +417,16 @@ function buildDecisionIssues(
           itemId: item.itemId,
           proposalId: item.proposalId,
         })),
+        actions: declareDecisionIssueActions({
+          eventId,
+          body,
+          finding,
+          authority: {
+            role: options.role,
+            canViewFullDecisionEvidence: options.canViewFullDecisionEvidence,
+            canDeferItems: options.canDeferItems ?? options.role === "admin",
+          },
+        }),
       } satisfies DecisionReviewIssue;
     })
     .sort(
@@ -529,7 +550,18 @@ function buildDecisionReviewProjection(
     declined,
     records.totalCreated,
   );
-  const issues = buildDecisionIssues(body, activeItems);
+  const revalidation = decisionRevalidationSummary({
+    eventId: plan.eventId,
+    body,
+    canViewTargets: options.canViewFullDecisionEvidence,
+  });
+  const issues = buildDecisionIssues(
+    plan.eventId,
+    body,
+    activeItems,
+    options,
+    revalidation,
+  );
   const issueSummaryParts: string[] = [];
   if (needsAction > 0) {
     issueSummaryParts.push(
@@ -694,6 +726,7 @@ function buildDecisionReviewProjection(
     },
     issues,
     items: body.items.map((item) => itemProjection(item, phase)),
+    revalidation,
     effectGroups: [
       {
         key: "decisions",

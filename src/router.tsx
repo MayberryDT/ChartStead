@@ -111,14 +111,21 @@ const programEmbedRoute = createRoute({
   validateSearch: validateProgramSearch,
 });
 
-function validateProposalQueueSearch(
-  search: Record<string, unknown>,
-): { q?: string; status?: string; track?: string; sort?: string } {
+function validateProposalQueueSearch(search: Record<string, unknown>): {
+  q?: string;
+  status?: string;
+  track?: string;
+  sort?: string;
+  field?: string;
+  returnTo?: string;
+} {
   return {
     q: typeof search.q === "string" ? search.q : undefined,
     status: typeof search.status === "string" ? search.status : undefined,
     track: typeof search.track === "string" ? search.track : undefined,
     sort: typeof search.sort === "string" ? search.sort : undefined,
+    field: typeof search.field === "string" ? search.field : undefined,
+    returnTo: typeof search.returnTo === "string" ? search.returnTo : undefined,
   };
 }
 

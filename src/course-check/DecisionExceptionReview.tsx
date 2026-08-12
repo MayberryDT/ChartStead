@@ -6,6 +6,17 @@ import type {
   DecisionReviewItemFilter,
   DecisionReviewProjection,
 } from "../../shared/course-check";
+import type { CourseCheckIssueAction } from "../../shared/course-check-actions";
+import { IssueActions } from "./IssueActions";
+import type { CourseCheckReturnContext } from "./useCourseCheckReturnContext";
+
+type IssueActionProps = {
+  planId: string;
+  issueActionContext: Omit<CourseCheckReturnContext, "focusActionId">;
+  acknowledgedActionIds: Set<string>;
+  onAcknowledgeIssue: (action: CourseCheckIssueAction) => void;
+  onExcludeIssueItems: (itemIds: string[]) => void;
+};
 
 const ISSUE_ORDER: Array<{
   classification: DecisionReviewIssueClass;
@@ -28,10 +39,15 @@ const FILTERS: Array<{ key: DecisionReviewItemFilter | "all"; label: string }> =
 function IssueCard({
   issue,
   onChooseAlternative,
+  planId,
+  issueActionContext,
+  acknowledgedActionIds,
+  onAcknowledgeIssue,
+  onExcludeIssueItems,
 }: {
   issue: DecisionReviewIssue;
   onChooseAlternative: (issue: DecisionReviewIssue) => void;
-}) {
+} & IssueActionProps) {
   return (
     <article className="decision-exception" data-classification={issue.classification}>
       <h3>{issue.affectedObjectLabel}</h3>
@@ -48,6 +64,14 @@ function IssueCard({
         </ul>
       ) : null}
       {issue.nextStep ? <p className="muted">{issue.nextStep}</p> : null}
+      <IssueActions
+        planId={planId}
+        actions={issue.actions}
+        context={issueActionContext}
+        acknowledgedActionIds={acknowledgedActionIds}
+        onAcknowledge={onAcknowledgeIssue}
+        onExclude={onExcludeIssueItems}
+      />
       {issue.safeAlternativeLabel ? (
         <button
           type="button"
@@ -64,10 +88,15 @@ function IssueCard({
 function ProposedReview({
   review,
   onChooseAlternative,
+  planId,
+  issueActionContext,
+  acknowledgedActionIds,
+  onAcknowledgeIssue,
+  onExcludeIssueItems,
 }: {
   review: DecisionReviewProjection;
   onChooseAlternative: (issue: DecisionReviewIssue) => void;
-}) {
+} & IssueActionProps) {
   const [filter, setFilter] = useState<DecisionReviewItemFilter | "all">("all");
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const visibleItems = review.items.filter(
@@ -106,6 +135,14 @@ function ProposedReview({
                   key={`${issue.classification}-${issue.summary}`}
                   issue={issue}
                   onChooseAlternative={onChooseAlternative}
+                  planId={planId}
+                  issueActionContext={issueActionContext}
+                  acknowledgedActionIds={acknowledgedActionIds}
+                  onAcknowledgeIssue={onAcknowledgeIssue}
+                  onExcludeIssueItems={(itemIds) => {
+                    setSelectedItemIds(new Set(itemIds));
+                    onExcludeIssueItems(itemIds);
+                  }}
                 />
               ))}
             </div>
@@ -139,6 +176,14 @@ function ProposedReview({
                   key={`${issue.classification}-${issue.summary}`}
                   issue={issue}
                   onChooseAlternative={onChooseAlternative}
+                  planId={planId}
+                  issueActionContext={issueActionContext}
+                  acknowledgedActionIds={acknowledgedActionIds}
+                  onAcknowledgeIssue={onAcknowledgeIssue}
+                  onExcludeIssueItems={(itemIds) => {
+                    setSelectedItemIds(new Set(itemIds));
+                    onExcludeIssueItems(itemIds);
+                  }}
                 />
               ))}
           </div>
@@ -251,13 +296,26 @@ function AppliedResult({ review }: { review: DecisionReviewProjection }) {
 export function DecisionExceptionReview({
   review,
   onChooseAlternative,
+  planId,
+  issueActionContext,
+  acknowledgedActionIds,
+  onAcknowledgeIssue,
+  onExcludeIssueItems,
 }: {
   review: DecisionReviewProjection;
   onChooseAlternative: (issue: DecisionReviewIssue) => void;
-}) {
+} & IssueActionProps) {
   return review.result ? (
     <AppliedResult review={review} />
   ) : (
-    <ProposedReview review={review} onChooseAlternative={onChooseAlternative} />
+    <ProposedReview
+      review={review}
+      onChooseAlternative={onChooseAlternative}
+      planId={planId}
+      issueActionContext={issueActionContext}
+      acknowledgedActionIds={acknowledgedActionIds}
+      onAcknowledgeIssue={onAcknowledgeIssue}
+      onExcludeIssueItems={onExcludeIssueItems}
+    />
   );
 }

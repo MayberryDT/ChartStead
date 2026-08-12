@@ -149,6 +149,38 @@ const proposedDecisionReview = {
       safeAlternativeLabel: "Accept without a draft",
       affectedItemCount: 1,
       affectedItems: [{ itemId: body.items[0]!.itemId, proposalId: body.proposalId }],
+      actions: [
+        {
+          id: "warning-unplaced:deep-repair",
+          label: "Change session placement",
+          kind: "deep_repair",
+          target: {
+            type: "route",
+            href: "/e/pacific-open-data-summit-2026/submissions/SUB-PODS0001?field=sessionPlacement",
+            objectType: "proposal",
+            objectId: "SUB-PODS0001",
+            field: "sessionPlacement",
+          },
+          affectedEntityIds: ["SUB-PODS0001"],
+          resultingEffectSummary: "The decision review will recheck this submission.",
+        },
+        {
+          id: "warning-unplaced:acknowledge",
+          label: "Keep session unplaced",
+          kind: "acknowledge",
+          target: { type: "command", command: "acknowledge_warning", itemIds: ["item-1"] },
+          affectedEntityIds: ["SUB-PODS0001"],
+          resultingEffectSummary: "The decision can proceed with placement still pending.",
+        },
+        {
+          id: "warning-unplaced:exclude",
+          label: "Skip this submission",
+          kind: "exclude",
+          target: { type: "command", command: "defer_items", itemIds: ["item-1"] },
+          affectedEntityIds: ["SUB-PODS0001"],
+          resultingEffectSummary: "This submission will stay unchanged and move to follow-up.",
+        },
+      ],
     },
   ],
   items: [
@@ -164,6 +196,16 @@ const proposedDecisionReview = {
       filter: "check",
     },
   ],
+  revalidation: {
+    scope: "affected_dependencies",
+    affectedItemIds: [] as string[],
+    changedInputs: [] as Array<{
+      label: string;
+      affectedEntityIds: string[];
+      target: null;
+    }>,
+    preservedStageIds: [] as string[],
+  },
   effectGroups: [
     {
       key: "decisions",
@@ -783,6 +825,26 @@ describe("Course Check review workspace", () => {
     expect(requests.filter((request) => request.startsWith("POST "))).toEqual([
       "POST /api/events/pacific-open-data-summit-2026/course-checks/plan-1/apply",
     ]);
+  });
+
+  it("renders only declared issue actions and completes safe repair choices inline", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(projectedPlan));
+    renderCourseCheck();
+
+    const deepRepair = await screen.findByRole("link", { name: "Change session placement" });
+    expect(deepRepair).toHaveAttribute(
+      "href",
+      expect.stringContaining("/submissions/SUB-PODS0001?field=sessionPlacement"),
+    );
+    expect(screen.queryByRole("button", { name: /fix|resolve|manage/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Keep session unplaced" }));
+    expect(screen.getByText("Acknowledged: The decision can proceed with placement still pending.")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Skip this submission" }));
+    expect(screen.getByRole("checkbox", { name: /SUB-PODS0001/ })).toBeChecked();
+    expect(screen.getByPlaceholderText("Why defer these items?")).toHaveFocus();
   });
 
   it("defers blocked batch items and keeps the partial result truthful", async () => {

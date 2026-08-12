@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type {
   CommunicationEffect,
@@ -12,6 +12,7 @@ import type {
   DecisionPlanBody,
   PublicationPlanBody,
 } from "../shared/course-check";
+import type { CourseCheckIssueAction } from "../shared/course-check-actions";
 import {
   formatCourseCheckActorLabel,
   linkedPlanIdsFromBody,
@@ -39,6 +40,13 @@ import {
   DecisionFastPath,
   isDecisionFastPathEligible,
 } from "./course-check/DecisionFastPath";
+import { IssueActions } from "./course-check/IssueActions";
+import {
+  repairHref,
+  saveCourseCheckReturnContext,
+  useCourseCheckReturnContext,
+  type CourseCheckReturnContext,
+} from "./course-check/useCourseCheckReturnContext";
 
 function findingTone(severity: CourseCheckFinding["severity"]) {
   if (severity === "blocker") return "error";
@@ -374,11 +382,19 @@ function DecisionReviewBody({
   review,
   selectedItemIds,
   onToggleItem,
+  issueActionContext,
+  acknowledgedActionIds,
+  onAcknowledgeIssue,
+  onExcludeIssueItems,
 }: {
   plan: CourseCheckPlan;
   review: DecisionReviewProjection;
   selectedItemIds: Set<string>;
   onToggleItem: (itemId: string) => void;
+  issueActionContext: Omit<CourseCheckReturnContext, "focusActionId">;
+  acknowledgedActionIds: Set<string>;
+  onAcknowledgeIssue: (action: CourseCheckIssueAction) => void;
+  onExcludeIssueItems: (itemIds: string[]) => void;
 }) {
   const body = plan.body as DecisionPlanBody;
   const result = review.result;
@@ -465,6 +481,39 @@ function DecisionReviewBody({
           {review.issues.length > 0 ? (
             <section className="panel" aria-labelledby="decision-review-issues-title">
               <h2 id="decision-review-issues-title">Prioritized issues</h2>
+              {review.revalidation?.changedInputs.length ? (
+                <div className="course-check-changed-inputs">
+                  <h3>What changed</h3>
+                  <ul>
+                    {review.revalidation.changedInputs.map((input, index) => {
+                      const actionId = `changed-input-${index}`;
+                      return (
+                        <li key={`${input.label}-${input.affectedEntityIds.join("-")}`}>
+                          {input.target ? (
+                            <a
+                              href={repairHref(input.target.href, issueActionContext.returnPath)}
+                              data-issue-action-id={actionId}
+                              onClick={() =>
+                                saveCourseCheckReturnContext(plan.id, {
+                                  ...issueActionContext,
+                                  focusActionId: actionId,
+                                })
+                              }
+                            >
+                              {input.label}
+                            </a>
+                          ) : (
+                            input.label
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p className="muted">
+                    Only affected dependencies must be reviewed again. Completed unaffected work stays intact.
+                  </p>
+                </div>
+              ) : null}
               <ul className="course-check-findings">
                 {review.issues.map((issue, index) => (
                   <li key={`${issue.summary}-${index}`} data-severity={issue.severity}>
@@ -473,6 +522,14 @@ function DecisionReviewBody({
                     {issue.nextStep ? (
                       <p className="course-check-recovery">{issue.nextStep}</p>
                     ) : null}
+                    <IssueActions
+                      planId={plan.id}
+                      actions={issue.actions ?? []}
+                      context={issueActionContext}
+                      acknowledgedActionIds={acknowledgedActionIds}
+                      onAcknowledge={onAcknowledgeIssue}
+                      onExclude={onExcludeIssueItems}
+                    />
                   </li>
                 ))}
               </ul>
@@ -1243,6 +1300,11 @@ export function CourseCheckPage() {
   const [overrideReasons, setOverrideReasons] = useState<Record<string, string>>(
     {},
   );
+  const [issueFilter, setIssueFilter] = useState("all");
+  const [expandedIssueIds, setExpandedIssueIds] = useState<string[]>([]);
+  const [acknowledgedActionIds, setAcknowledgedActionIds] = useState<Set<string>>(
+    new Set(),
+  );
   const applyKey = useMemo(
     () => `ui-apply-${planId}-${createClientId()}`,
     [planId],
@@ -1298,6 +1360,22 @@ export function CourseCheckPage() {
       ),
     );
   }, [planQuery.data?.id, planQuery.data?.version, planQuery.data?.digest]);
+
+  const restoreReviewContext = useCallback((context: CourseCheckReturnContext) => {
+    setSelectedItemIds(new Set(context.selectedItemIds));
+    setIssueFilter(context.issueFilter);
+    setExpandedIssueIds(context.expandedIssueIds);
+    setSubject(context.subject);
+    setBodyText(context.bodyText);
+    setSelectedRecipientIds(new Set(context.selectedRecipientIds));
+    setOverrideReasons(context.overrideReasons);
+    setAcknowledgedActionIds(new Set(context.acknowledgedIssueIds));
+  }, []);
+  useCourseCheckReturnContext(
+    planId,
+    Boolean(planQuery.data),
+    restoreReviewContext,
+  );
 
   const applyMutation = useMutation({
     mutationFn: (current: CourseCheckPlan) => {
@@ -1597,6 +1675,18 @@ export function CourseCheckPage() {
     ? (currentPlan.body as PublicationPlanBody)
     : null;
   const decisionReview = isDecision ? currentPlan.decisionReview ?? null : null;
+  const issueActionContext = {
+    returnPath: `/e/${eventId}/course-checks/${planId}`,
+    selectedItemIds: [...selectedItemIds],
+    issueFilter,
+    expandedIssueIds,
+    subject,
+    bodyText,
+    selectedRecipientIds: [...selectedRecipientIds],
+    overrideReasons,
+    acknowledgedIssueIds: [...acknowledgedActionIds],
+    scrollY: typeof window === "undefined" ? 0 : window.scrollY,
+  };
   const blocked = currentPlan.body.findings.some(
     (finding) => finding.severity === "blocker",
   );
@@ -1724,6 +1814,7 @@ export function CourseCheckPage() {
         decisionReview ? (
           <DecisionExceptionReview
             review={decisionReview}
+            planId={currentPlan.id}
             onChooseAlternative={(issue) => {
               setSelectedItemIds(
                 new Set(issue.affectedItems.map((item) => item.itemId)),
@@ -1731,6 +1822,17 @@ export function CourseCheckPage() {
               setMessage(
                 `${issue.safeAlternativeLabel}: ${issue.affectedObjectLabel}.`,
               );
+            }}
+            issueActionContext={issueActionContext}
+            acknowledgedActionIds={acknowledgedActionIds}
+            onAcknowledgeIssue={(action) => {
+              setAcknowledgedActionIds((current) => new Set(current).add(action.id));
+            }}
+            onExcludeIssueItems={(itemIds) => {
+              setSelectedItemIds(new Set(itemIds));
+              document
+                .querySelector<HTMLInputElement>('input[placeholder="Why defer these items?"]')
+                ?.focus();
             }}
           />
         ) : (

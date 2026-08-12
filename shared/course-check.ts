@@ -1,4 +1,8 @@
 import type { CourseCheckAirtableEvidence } from "./airtable";
+import type {
+  CourseCheckIssueAction,
+  CourseCheckRevalidationSummary,
+} from "./course-check-actions";
 
 /** Course Check v1 contract — decision, publication, communication drafts, batch workspace. */
 
@@ -652,6 +656,7 @@ export interface DecisionReviewIssue {
   safeAlternativeLabel: string | null;
   affectedItemCount: number;
   affectedItems: DecisionReviewAffectedItem[];
+  actions: CourseCheckIssueAction[];
 }
 
 export type DecisionReviewItemFilter =
@@ -756,6 +761,7 @@ export interface DecisionReviewProjection {
   };
   issues: DecisionReviewIssue[];
   items: DecisionReviewItemProjection[];
+  revalidation: CourseCheckRevalidationSummary;
   effectGroups: DecisionReviewEffectGroup[];
   permittedCommits: DecisionReviewPermittedCommit[];
   partialExecution: DecisionReviewPartialExecution;

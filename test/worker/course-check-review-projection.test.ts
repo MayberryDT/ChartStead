@@ -53,6 +53,14 @@ type DecisionReview = {
     summary: string;
     nextStep: string | null;
     affectedItemCount: number;
+    actions: Array<{
+      id: string;
+      label: string;
+      kind: string;
+      target: Record<string, unknown>;
+      affectedEntityIds: string[];
+      resultingEffectSummary: string;
+    }>;
   }>;
   effectGroups: Array<{
     key: string;
@@ -192,7 +200,6 @@ describe("Course Check 14 decision review projection", () => {
         }),
       ]),
     );
-
     const outboxBefore = (await env.EVENT_STORE.getByName(eventId).listOutboxMessages()).length;
     const applied = await applyDecision(created, "cc14-single-decline-apply");
     expect(applied.decisionReview).toMatchObject({
@@ -249,6 +256,34 @@ describe("Course Check 14 decision review projection", () => {
         }),
       ]),
     );
+    expect(created.decisionReview?.issues.length).toBeGreaterThan(0);
+    expect(created.decisionReview?.issues.every((issue) => issue.actions.length > 0)).toBe(true);
+    const placementIssue = created.decisionReview?.issues.find((issue) =>
+      /room|time|unplaced/i.test(issue.summary),
+    );
+    expect(placementIssue?.actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "Change session placement",
+          kind: "deep_repair",
+          target: expect.objectContaining({
+            type: "route",
+            objectType: "proposal",
+            field: "sessionPlacement",
+          }),
+          resultingEffectSummary: expect.stringMatching(/recheck|review/i),
+        }),
+        expect.objectContaining({ label: "Keep session unplaced", kind: "acknowledge" }),
+        expect.objectContaining({ label: "Skip this submission", kind: "exclude" }),
+      ]),
+    );
+    for (const issue of created.decisionReview?.issues ?? []) {
+      for (const action of issue.actions) {
+        expect(action.id).not.toMatch(/digest|revision/i);
+        expect(action.affectedEntityIds.length).toBeGreaterThan(0);
+        expect(action.resultingEffectSummary.length).toBeGreaterThan(0);
+      }
+    }
 
     if (created.body.actionType !== "decision") throw new Error("expected decision plan");
     reviewer.trackIdsByEvent = {
@@ -259,6 +294,16 @@ describe("Course Check 14 decision review projection", () => {
     expect(reviewerView.decisionReview?.primaryActionLabel).toBeNull();
     expect(reviewerView.decisionReview?.canDeferItems).toBe(false);
     expect(reviewerView.decisionReview?.canStartDraftPreparation).toBe(false);
+    expect(
+      reviewerView.decisionReview?.issues.flatMap((issue) => issue.actions),
+    ).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "exclude" }),
+        expect.objectContaining({
+          target: expect.objectContaining({ field: "speakerEmail" }),
+        }),
+      ]),
+    );
 
     const ordinaryCopy = [
       created.decisionReview?.title,
