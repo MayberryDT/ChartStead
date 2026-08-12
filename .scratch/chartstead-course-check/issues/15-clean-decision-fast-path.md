@@ -4,7 +4,7 @@
 
 **Blocked by:** Course Check 14 — Truthful decision review projection and receipts.
 
-**Status:** blocked
+**Status:** ready-for-agent
 
 ## Source
 
@@ -25,3 +25,5 @@
 ## Comments
 
 - 2026-08-12 — Blocked only by the agent-ready Course Check 14 foundation. Final visual polish remains in separate human-tandem tickets and is not a dependency.
+
+- 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.

@@ -25,3 +25,5 @@
 ## Comments
 
 - 2026-08-12 — Functional completion and Outbox continuity are agent-owned. Morning human-tandem tickets can polish presentation without blocking this behavior.
+
+- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 18 (blocked).
