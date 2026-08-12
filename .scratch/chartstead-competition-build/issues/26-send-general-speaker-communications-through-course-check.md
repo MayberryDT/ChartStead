@@ -1,6 +1,6 @@
 # 26 — Send general speaker communications through Course Check
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Blocked by:** None — can start immediately.
 
@@ -27,3 +27,6 @@ Replace the organizer Messages placeholder with a complete general speaker-annou
 
 None — can start immediately.
 
+## Comments
+
+- 2026-08-12 — Started for agent implementation after Tyler authorized the incoming Competition Build frontier; demos, reviews, and human QA are deferred.

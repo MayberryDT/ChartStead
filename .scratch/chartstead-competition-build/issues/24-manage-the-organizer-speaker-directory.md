@@ -1,6 +1,6 @@
 # 24 — Manage the organizer speaker directory
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Blocked by:** None — can start immediately.
 
@@ -26,3 +26,6 @@ Extend the organizer's readiness board into a usable event speaker directory. Or
 
 None — can start immediately.
 
+## Comments
+
+- 2026-08-12 — Started for agent implementation after Tyler authorized the incoming Competition Build frontier; demos, reviews, and human QA are deferred.

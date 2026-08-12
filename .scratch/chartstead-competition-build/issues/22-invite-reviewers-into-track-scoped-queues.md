@@ -1,6 +1,6 @@
 # 22 — Invite reviewers into track-scoped queues
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Blocked by:** None — can start immediately.
 
@@ -26,3 +26,6 @@ Let an organizer grant track-scoped reviewer access before the reviewer has prev
 
 None — can start immediately.
 
+## Comments
+
+- 2026-08-12 — Started for agent implementation after Tyler authorized the incoming Competition Build frontier; demos, reviews, and human QA are deferred.
