@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — Communication drafts and recipient reasoning.
 
-**Status:** in-review
+**Status:** done
 
 - [x] `Send messages` approves and begins delivery of the exact frozen Communication Course Check version.
 - [x] Internal send intent, audit history, idempotency receipts, and address-level outbox effects commit atomically before network delivery.
@@ -27,3 +27,4 @@ Blocked by Course Check 03 — Communication drafts and recipient reasoning.
 - 2026-08-11 — frontier-reconcile: All blockers done → ready-for-agent.
 - 2026-08-11 — Claimed for implementation in a dedicated worktree. Course Check 03 is done; both ticket tracks were rescanned and no additional blocked ticket has all blockers cleared.
 - 2026-08-11 — Ready for human QA on branch `course-check-04-external-sends` in `/home/halla/ChartStead/.worktrees/course-check-04-external-sends`. Demo: `http://100.105.117.93:5184/e/pacific-open-data-summit-2026/course-checks/65dde626-adb0-4c2f-835e-3f0f7629247a`. Verify exact frozen send intent, address-level state after reload, truthful failure/recovery controls, and linked correction creation. Automated evidence: typecheck/build, 123 worker tests, 61 UI tests, and 5 E2E tests pass.
+- 2026-08-11 — Merged locally to `main` as `23f5092`; post-merge full suite passed and the ticket is complete.
