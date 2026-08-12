@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — Guided CFP publishing and submitter follow-up; 04 — Shared track review queue; 06 — Onboarding and assisted chasing; 07 — Decision communication and calendar integration verification; 09 — Public program renderer and embed; 10 — Airtable mapping and authenticated HTTP foundation; Course Check 10 — Course Check killer demo and hardening.
 
-**Status:** blocked
+**Status:** ready-for-agent
 
 - [ ] The seeded event supports one uninterrupted walkthrough from CFP setup through public program publication.
 - [ ] Real email, calendar, file, database, public output, and configured Airtable behavior are verified in the deployed environment.
@@ -23,4 +23,4 @@
 
 Blocked pending Competition 07 — Decision communication and calendar integration verification, Competition 10 — Airtable mapping and authenticated HTTP foundation, and Course Check 10 — Course Check killer demo and hardening. All other declared competition dependencies are done.
 
-- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 10 (ready-for-agent).
+- 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.

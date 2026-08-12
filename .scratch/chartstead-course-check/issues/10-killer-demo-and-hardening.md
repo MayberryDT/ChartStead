@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — Single Decision Course Check tracer; 02 — Batch decisions and shared workspace; 03 — Communication drafts and recipient reasoning; 04 — External sends and effect recovery; 05 — Calendar delivery lifecycle; 06 — Program Publication Course Check; 07 — Airtable consequence effects; 08 — Complete agent API control; 09 — Team policy, privacy, and durable operations.
 
-**Status:** in-review
+**Status:** done
 
 - [x] Seed data supports a realistic batch with accepted and declined outcomes, co-speakers, one missing address, one duplicate identity, prior communication, unplaced sessions, conflicts, and planned Airtable effects.
 - [x] The walkthrough reviews and applies internal outcomes without sending, publishing, or writing externally.
@@ -35,3 +35,4 @@ Blocked by Course Check 02 through 09. Course Check 01 is done.
   - UI: copy polish + Out of date banner + `changedInputs` in apply errors
   - Docs: `docs/course-check-killer-walkthrough.md`
   - Demo: http://100.105.117.93:5191/e/pacific-open-data-summit-2026/submissions
+- 2026-08-12 — **done**: fast-forward merged `course-check-10-killer-demo` → `main` as `9149a4a`.
