@@ -197,7 +197,12 @@ export interface PlanMutationRecord {
     | "apply"
     | "revise"
     | "create_drafts"
-    | "link";
+    | "link"
+    | "airtable_defer"
+    | "airtable_remove"
+    | "airtable_execute"
+    | "airtable_reconcile"
+    | "airtable_compensate";
   actor: CourseCheckActor;
   at: string;
   summary: string;

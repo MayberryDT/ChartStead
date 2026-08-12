@@ -139,7 +139,7 @@ it("commits internal state, stable Airtable intents, and audit history atomicall
   const plan = await createAcceptedDecision();
   const applied = await applyStage(plan, "apply-decision");
   const effects = await env.EVENT_STORE.getByName(eventId).listAirtableEffects(plan.id);
-  expect(applied.state).toBe("Partially complete");
+  expect(applied.state).toBe("Complete");
   expect(effects.every((effect) => effect.state === "pending")).toBe(true);
   expect(new Set(effects.map((effect) => effect.id)).size).toBe(effects.length);
   expect(await auditTypes()).toContain("course_check.airtable.intent_recorded");
@@ -164,7 +164,7 @@ Expected: FAIL because effect rows and disposition commands do not exist.
 
 - [ ] **Step 3: Add durable effect tables and transactional staging**
 
-Create `airtable_effects` with immutable identity/payload columns plus mutable execution columns. Create append-only `airtable_effect_events` for intent, attempt, result, reconciliation, deferral, removal, and compensation transitions. During decision, guaranteed-speaker, publication, or communication-draft internal apply, insert every frozen intent and its audit event inside the same `transactionSync` callback as the internal records and Course Check receipt. Mark the internal stage complete and leave `write-airtable` ready; return `Partially complete` while unresolved effects remain.
+Create `airtable_effects` with immutable identity/payload columns plus mutable execution columns. Create append-only `airtable_effect_events` for intent, attempt, result, reconciliation, deferral, removal, and compensation transitions. During decision, guaranteed-speaker, publication, or communication-draft internal apply, insert every frozen intent and its audit event inside the same `transactionSync` callback as the internal records and Course Check receipt. Mark the internal stage and top-level internal action complete while leaving `write-airtable` ready; the separate stage and per-effect states carry unresolved external work without making the applied internal action stale.
 
 - [ ] **Step 4: Add defer/remove mutation behavior**
 

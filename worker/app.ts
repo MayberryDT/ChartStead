@@ -3008,6 +3008,89 @@ export function createApp(options: AppOptions = {}) {
     return c.json(result.plan);
   });
 
+  app.post(
+    "/api/events/:eventId/course-checks/:planId/airtable/disposition",
+    async (c) => {
+      const principal = await resolvePrincipal(c.req.raw, c.env);
+      const eventId = c.req.param("eventId");
+      const planId = c.req.param("planId");
+      if (!canAccessEvent(principal, eventId)) {
+        return c.json({ error: "Unauthorized" }, 401);
+      }
+      if (!isEventAdmin(principal, eventId)) {
+        return c.json(
+          {
+            error: "Administrator access is required to change Airtable delivery.",
+            code: "missing_authority",
+          },
+          403,
+        );
+      }
+      const seed = findSeed(eventId);
+      if (!seed) return c.json({ error: "Event not found" }, 404);
+      await loadEvent(c.env, seed);
+      const body = (await c.req.json().catch(() => null)) as {
+        planVersion?: unknown;
+        digest?: unknown;
+        disposition?: unknown;
+        idempotencyKey?: unknown;
+      } | null;
+      const headerKey = c.req.header("idempotency-key");
+      const idempotencyKey =
+        (typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim()) ||
+        (typeof headerKey === "string" && headerKey.trim()) ||
+        "";
+      if (
+        !body ||
+        !Number.isInteger(body.planVersion) ||
+        typeof body.digest !== "string" ||
+        (body.disposition !== "deferred" && body.disposition !== "removed") ||
+        !idempotencyKey
+      ) {
+        return c.json(
+          {
+            error:
+              "planVersion, digest, disposition, and idempotencyKey are required.",
+          },
+          400,
+        );
+      }
+      const result = await c.env.EVENT_STORE.getByName(
+        eventId,
+      ).setAirtableStageDisposition({
+        planId,
+        planVersion: body.planVersion as number,
+        digest: body.digest,
+        disposition: body.disposition,
+        idempotencyKey,
+        actor: { id: principal.id, displayName: principal.displayName },
+      }) as
+        | {
+            ok: true;
+            plan: import("../shared/course-check").CourseCheckPlan;
+            created: boolean;
+          }
+        | {
+            ok: false;
+            status: 400 | 409;
+            code: string;
+            error: string;
+            recoveryGuidance: string;
+          };
+      if (!result.ok) {
+        return c.json(
+          {
+            error: result.error,
+            code: result.code,
+            recoveryGuidance: result.recoveryGuidance,
+          },
+          result.status,
+        );
+      }
+      return c.json(result.plan);
+    },
+  );
+
   app.get("/api/events/:eventId/program", async (c) => {
     const eventId = c.req.param("eventId");
     const seed = findSeed(eventId);
