@@ -44,21 +44,63 @@ export async function executeAirtableEffects(input: {
   store: DurableObjectStub<EventStore>;
   client: AirtableClient;
   planId: string;
+  planVersion: number;
+  digest: string;
+  stageId: string;
+  idempotencyKey: string;
   actor: CourseCheckActor;
+  reason?: string | null;
   now?: Date;
-}): Promise<{ plan: CourseCheckPlan; effects: AirtableEffect[] }> {
+}): Promise<
+  | {
+      ok: true;
+      plan: CourseCheckPlan;
+      effects: AirtableEffect[];
+      created: boolean;
+      endorsed?: boolean;
+    }
+  | {
+      ok: false;
+      status: 400 | 403 | 409;
+      code: string;
+      error: string;
+      recoveryGuidance: string;
+    }
+> {
   const store = input.store as unknown as {
-    beginAirtableEffectAttempts(args: Record<string, unknown>): Promise<AirtableEffect[]>;
+    beginAirtableEffectAttempts(args: Record<string, unknown>): Promise<
+      | {
+          ok: true;
+          plan: CourseCheckPlan;
+          effects: AirtableEffect[];
+          created: boolean;
+          endorsed?: boolean;
+        }
+      | {
+          ok: false;
+          status: 400 | 403 | 409;
+          code: string;
+          error: string;
+          recoveryGuidance: string;
+        }
+    >;
     recordAirtableEffectResult(args: Record<string, unknown>): Promise<AirtableEffect | null>;
     getCourseCheckPlan(planId: string): Promise<CourseCheckPlan | null>;
   };
   const now = input.now ?? new Date();
-  const attempts = await store.beginAirtableEffectAttempts({
+  const start = await store.beginAirtableEffectAttempts({
     planId: input.planId,
+    planVersion: input.planVersion,
+    digest: input.digest,
+    stageId: input.stageId,
+    idempotencyKey: input.idempotencyKey,
     actor: input.actor,
+    reason: input.reason,
     now: now.toISOString(),
   });
-  for (const effect of attempts) {
+  if (!start.ok) return start;
+  if (!start.created || start.endorsed) return start;
+  for (const effect of start.effects) {
     try {
       const result = await input.client.upsertRecord({
         kind: effect.kind,
@@ -85,7 +127,12 @@ export async function executeAirtableEffects(input: {
   }
   const plan = await store.getCourseCheckPlan(input.planId);
   if (!plan) throw new Error("Course Check disappeared during Airtable execution.");
-  return { plan, effects: plan.body.airtable.effects };
+  return {
+    ok: true,
+    plan,
+    effects: plan.body.airtable.effects,
+    created: true,
+  };
 }
 
 export async function reconcileUnknownAirtableEffects(input: {

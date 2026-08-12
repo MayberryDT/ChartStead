@@ -8047,12 +8047,13 @@ export class EventStore extends DurableObject<AppBindings> {
     stageId: string;
     idempotencyKey: string;
     actor: CourseCheckActor;
+    reason?: string | null;
     softWarningOverrides?: Array<{ findingId: string; reason?: string | null }>;
   }): Promise<
-    | { ok: true; plan: CourseCheckPlan; created: boolean }
+    | { ok: true; plan: CourseCheckPlan; created: boolean; endorsed?: boolean }
     | {
         ok: false;
-        status: 400 | 409;
+        status: 400 | 403 | 409;
         code: string;
         error: string;
         recoveryGuidance: string;
@@ -8110,6 +8111,36 @@ export class EventStore extends DurableObject<AppBindings> {
     }
     if (plan.body.stageVisibility.draft === "complete" && plan.body.drafts.length > 0) {
       return { ok: true, plan: this.enrichPlan(plan), created: false };
+    }
+
+    const draftPolicy = this.enforceStagePolicy({
+      plan,
+      stageId: input.stageId,
+      actor: input.actor,
+      reason: input.reason,
+    });
+    if (!draftPolicy.ok) {
+      return {
+        ok: false,
+        status: draftPolicy.status,
+        code: draftPolicy.code,
+        error: draftPolicy.error,
+        recoveryGuidance: draftPolicy.recoveryGuidance,
+      };
+    }
+    if ("endorsed" in draftPolicy && draftPolicy.endorsed) {
+      this.writeIdempotency({
+        command: "create-drafts",
+        key: input.idempotencyKey,
+        planId: draftPolicy.plan.id,
+        response: draftPolicy.plan,
+      });
+      return {
+        ok: true,
+        plan: this.enrichPlan(draftPolicy.plan),
+        created: true,
+        endorsed: true,
+      };
     }
 
     const changed = this.detectCommunicationStaleInputs(plan.body);
@@ -10915,11 +10946,108 @@ export class EventStore extends DurableObject<AppBindings> {
 
   beginAirtableEffectAttempts(input: {
     planId: string;
+    planVersion: number;
+    digest: string;
+    stageId: string;
+    idempotencyKey: string;
     actor: CourseCheckActor;
+    reason?: string | null;
     now?: string;
-  }): AirtableEffect[] {
+  }):
+    | {
+        ok: true;
+        plan: CourseCheckPlan;
+        effects: AirtableEffect[];
+        created: boolean;
+        endorsed?: boolean;
+      }
+    | {
+        ok: false;
+        status: 400 | 403 | 409;
+        code: string;
+        error: string;
+        recoveryGuidance: string;
+      } {
+    const command = "airtable-execute";
+    const existing = this.readIdempotency(command, input.idempotencyKey);
+    if (existing) {
+      const plan = this.getCourseCheckPlan(existing.planId);
+      if (!plan) throw new Error("Idempotent Airtable execution plan is missing.");
+      return {
+        ok: true,
+        plan,
+        effects: plan.body.airtable.effects,
+        created: false,
+      };
+    }
     const plan = this.getCourseCheckPlan(input.planId);
-    if (!plan?.receipt || plan.body.airtable.disposition !== "active") return [];
+    if (!plan) {
+      return {
+        ok: false,
+        status: 400,
+        code: "plan_not_found",
+        error: "Course Check plan not found.",
+        recoveryGuidance: "Reload the Course Check list and open an existing plan.",
+      };
+    }
+    if (input.stageId !== "write-airtable") {
+      return {
+        ok: false,
+        status: 400,
+        code: "unknown_stage",
+        error: "Unknown Course Check stage.",
+        recoveryGuidance: "Use the Write to Airtable stage for this plan.",
+      };
+    }
+    if (plan.version !== input.planVersion || plan.digest !== input.digest) {
+      return {
+        ok: false,
+        status: 409,
+        code: "plan_version_mismatch",
+        error: "This Course Check changed since you loaded it.",
+        recoveryGuidance: "Reload the Course Check and review the latest version.",
+      };
+    }
+    if (!plan.receipt || plan.body.airtable.disposition !== "active") {
+      return {
+        ok: false,
+        status: 409,
+        code: "airtable_stage_not_ready",
+        error: "The Write to Airtable stage is not ready.",
+        recoveryGuidance: "Apply the internal Course Check stage first.",
+      };
+    }
+    const policyGate = this.enforceStagePolicy({
+      plan,
+      stageId: input.stageId,
+      actor: input.actor,
+      reason: input.reason,
+    });
+    if (!policyGate.ok) {
+      return {
+        ok: false,
+        status: policyGate.status,
+        code: policyGate.code,
+        error: policyGate.error,
+        recoveryGuidance: policyGate.recoveryGuidance,
+      };
+    }
+    if ("endorsed" in policyGate && policyGate.endorsed) {
+      const endorsed = this.enrichPlan(policyGate.plan);
+      this.writeIdempotency({
+        command,
+        key: input.idempotencyKey,
+        planId: endorsed.id,
+        response: endorsed,
+      });
+      return {
+        ok: true,
+        plan: endorsed,
+        effects: endorsed.body.airtable.effects,
+        created: true,
+        endorsed: true,
+      };
+    }
     const now = input.now ?? new Date().toISOString();
     const eligible = this.listAirtableEffects(plan.id).filter(
       (effect) =>
@@ -10954,7 +11082,23 @@ export class EventStore extends DurableObject<AppBindings> {
       }
     });
     const eligibleIds = new Set(eligible.map((effect) => effect.id));
-    return this.listAirtableEffects(plan.id).filter((effect) => eligibleIds.has(effect.id));
+    const attempts = this.listAirtableEffects(plan.id).filter((effect) =>
+      eligibleIds.has(effect.id),
+    );
+    const started = this.getCourseCheckPlan(plan.id);
+    if (!started) throw new Error("Course Check disappeared during Airtable execution.");
+    this.writeIdempotency({
+      command,
+      key: input.idempotencyKey,
+      planId: started.id,
+      response: started,
+    });
+    return {
+      ok: true,
+      plan: started,
+      effects: attempts,
+      created: true,
+    };
   }
 
   recordAirtableEffectResult(input: {

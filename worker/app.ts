@@ -3641,6 +3641,7 @@ export function createApp(options: AppOptions = {}) {
       digest?: unknown;
       stageId?: unknown;
       idempotencyKey?: unknown;
+      reason?: unknown;
       softWarningOverrides?: unknown;
     } | null;
     const headerKey = c.req.header("idempotency-key");
@@ -3682,12 +3683,18 @@ export function createApp(options: AppOptions = {}) {
       stageId: typeof body.stageId === "string" ? body.stageId : "create-drafts",
       idempotencyKey,
       actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
+      reason: typeof body.reason === "string" ? body.reason : null,
       softWarningOverrides,
     })) as
-      | { ok: true; plan: import("../shared/course-check").CourseCheckPlan; created: boolean }
+      | {
+          ok: true;
+          plan: import("../shared/course-check").CourseCheckPlan;
+          created: boolean;
+          endorsed?: boolean;
+        }
       | {
           ok: false;
-          status: 400 | 409;
+          status: 400 | 403 | 409;
           code: string;
           error: string;
           recoveryGuidance: string;
@@ -3713,7 +3720,7 @@ export function createApp(options: AppOptions = {}) {
       eventId,
     );
     if (!projected) return c.json({ error: "Course Check not found" }, 404);
-    return c.json(projected, result.created ? 201 : 200);
+    return c.json(projected, result.created && !result.endorsed ? 201 : 200);
   });
 
   for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(`${__ccBase}/:planId/send`, async (c) => {
@@ -4595,17 +4602,15 @@ export function createApp(options: AppOptions = {}) {
       if (!canAccessEvent(principal, eventId)) {
         return c.json({ error: "Unauthorized" }, 401);
       }
-      {
-        const denial = authorizeCourseCheck(principal, eventId, "integration_execute");
-        if (denial) return c.json(denial.body, denial.status);
-      }
       const seed = findSeed(eventId);
       if (!seed) return c.json({ error: "Event not found" }, 404);
       await loadEvent(c.env, seed);
       const body = (await c.req.json().catch(() => null)) as {
         planVersion?: unknown;
         digest?: unknown;
+        stageId?: unknown;
         idempotencyKey?: unknown;
+        reason?: unknown;
       } | null;
       const headerKey = c.req.header("idempotency-key");
       const idempotencyKey =
@@ -4624,6 +4629,16 @@ export function createApp(options: AppOptions = {}) {
         );
       }
       const store = c.env.EVENT_STORE.getByName(eventId);
+      const policy = (await store.getCourseCheckPolicy()) as EventCourseCheckPolicy;
+      {
+        const denial = authorizeCourseCheck(
+          principal,
+          eventId,
+          "integration_execute",
+          policy,
+        );
+        if (denial) return c.json(denial.body, denial.status);
+      }
       const plan = (await store.getCourseCheckPlan(planId)) as
         | import("../shared/course-check").CourseCheckPlan
         | null;
@@ -4653,8 +4668,15 @@ export function createApp(options: AppOptions = {}) {
         credentialClientFactory: airtableCredentialFactory,
       });
       if (!connection) {
-        return c.json({
+        const projected = await projectCourseCheckResponsePlan(
+          store,
           plan,
+          principal!,
+          eventId,
+        );
+        if (!projected) return c.json({ error: "Course Check not found" }, 404);
+        return c.json({
+          plan: projected,
           effects: plan.body.airtable.effects,
           degraded: true,
           guidance: AIRTABLE_HEALTH_GUIDANCE.unconfigured,
@@ -4664,9 +4686,31 @@ export function createApp(options: AppOptions = {}) {
         store,
         client: connection.client,
         planId,
+        planVersion: body.planVersion as number,
+        digest: body.digest,
+        stageId: typeof body.stageId === "string" ? body.stageId : "write-airtable",
+        idempotencyKey,
         actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
+        reason: typeof body.reason === "string" ? body.reason : null,
       });
-      return c.json({ ...result, degraded: false });
+      if (!result.ok) {
+        return c.json(
+          {
+            error: result.error,
+            code: result.code,
+            recoveryGuidance: result.recoveryGuidance,
+          },
+          result.status,
+        );
+      }
+      const projected = await projectCourseCheckResponsePlan(
+        store,
+        result.plan,
+        principal!,
+        eventId,
+      );
+      if (!projected) return c.json({ error: "Course Check not found" }, 404);
+      return c.json({ ...result, plan: projected, degraded: false });
     },
   );
 
