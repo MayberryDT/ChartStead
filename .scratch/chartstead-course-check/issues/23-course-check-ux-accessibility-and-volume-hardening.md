@@ -4,7 +4,7 @@
 
 **Blocked by:** Course Check 19 — Truthful communication results and Outbox handoff; Course Check 20 — Shared approval, scoped freshness, and progressive disclosure; Course Check 21 — Unified publication and external-effect review; Course Check 22 — Course Check UX instrumentation and validation pack.
 
-**Status:** blocked
+**Status:** ready-for-agent
 
 ## Source
 
@@ -27,4 +27,4 @@
 
 - 2026-08-12 — Final agent-owned functional closeout. Course Check 11 and 12 remain untouched, independent morning polish tickets and do not block completion.
 
-- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 19 (in-progress).
+- 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.
