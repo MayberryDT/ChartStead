@@ -4,6 +4,12 @@ import { magicLink } from "better-auth/plugins";
 import type { OrganizerPrincipal } from "../shared/events";
 import type { AppBindings } from "./types";
 
+export interface AuthenticatedUser {
+  id: string;
+  name: string;
+  email: string;
+}
+
 async function sendMagicLink(
   env: AppBindings,
   email: string,
@@ -122,4 +128,19 @@ export async function resolveProductionPrincipal(
     id: session.user.id,
     name: session.user.name,
   });
+}
+
+export async function resolveProductionAuthenticatedUser(
+  request: Request,
+  env: AppBindings,
+): Promise<AuthenticatedUser | null> {
+  const auth = createAuth(env);
+  if (!auth) return null;
+  const session = await auth.api.getSession({ headers: request.headers });
+  if (!session) return null;
+  return {
+    id: session.user.id,
+    name: session.user.name,
+    email: session.user.email,
+  };
 }

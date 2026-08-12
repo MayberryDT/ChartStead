@@ -188,6 +188,42 @@ export interface ReviewerAssignment {
   trackIds: string[];
 }
 
+export type ReviewerInvitationStatus =
+  | "pending"
+  | "accepted"
+  | "revoked"
+  | "expired";
+
+export type ReviewerInvitationDeliveryState =
+  | "queued"
+  | "delivered"
+  | "failed"
+  | "retryable";
+
+export interface ReviewerInvitation {
+  id: string;
+  email: string;
+  trackIds: string[];
+  status: ReviewerInvitationStatus;
+  deliveryState: ReviewerInvitationDeliveryState;
+  expiresAt: string;
+  acceptedAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface ReviewerRoutingResponse {
+  reviewers: ReviewerAssignment[];
+  invitations: ReviewerInvitation[];
+}
+
+export interface ReviewerInvitationPreview {
+  eventId: string;
+  eventName: string;
+  emailHint: string;
+  tracks: Array<{ id: string; name: string }>;
+  status: ReviewerInvitationStatus;
+}
+
 export type OutboxDeliveryStatus =
   | "queued"
   | "sending"
@@ -196,7 +232,8 @@ export type OutboxDeliveryStatus =
 
 export type OutboxMessageKind =
   | "submission_confirmation"
-  | "onboarding_reminder";
+  | "onboarding_reminder"
+  | "reviewer_invitation";
 
 export interface OutboxMessage {
   id: string;

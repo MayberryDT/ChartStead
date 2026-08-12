@@ -2900,6 +2900,21 @@ export class EventStore extends DurableObject<AppBindings> {
     return row ? mapOutbox(row) : null;
   }
 
+  retryOutboxMessage(id: string, nowIso = new Date().toISOString()): OutboxMessage | null {
+    const message = this.getOutboxMessage(id);
+    if (!message) return null;
+    if (message.status === "failed") {
+      this.ctx.storage.sql.exec(
+        `UPDATE outbox_messages
+         SET status = 'queued', updated_at = ?, error = NULL, next_attempt_at = NULL
+         WHERE id = ? AND status = 'failed'`,
+        nowIso,
+        id,
+      );
+    }
+    return this.getOutboxMessage(id);
+  }
+
   listOutboxMessages(proposalId?: string): OutboxMessage[] {
     const rows = proposalId
       ? this.ctx.storage.sql

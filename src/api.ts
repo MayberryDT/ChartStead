@@ -25,6 +25,9 @@ import type {
   PublicProgramResponse,
   PublicProposal,
   ReviewerAssignment,
+  ReviewerInvitation,
+  ReviewerInvitationPreview,
+  ReviewerRoutingResponse,
   SessionPlacementPatch,
   SessionPlacementResponse,
   SpeakerDirectoryCreateInput,
@@ -404,9 +407,9 @@ export async function updateProposalReview(
 
 export async function fetchReviewerAssignments(
   eventId: string,
-): Promise<ReviewerAssignment[]> {
+): Promise<ReviewerRoutingResponse> {
   const response = await fetch(`/api/events/${eventId}/reviewers`);
-  const body = await readJson<{ reviewers: ReviewerAssignment[] } | { error: string }>(
+  const body = await readJson<ReviewerRoutingResponse | { error: string }>(
     response,
   );
   if (!response.ok || !("reviewers" in body)) {
@@ -416,29 +419,113 @@ export async function fetchReviewerAssignments(
       body,
     );
   }
-  return body.reviewers;
+  return { reviewers: body.reviewers, invitations: body.invitations ?? [] };
 }
+
+export type ReviewerGrantResult =
+  | { kind: "reviewer"; reviewer: ReviewerAssignment }
+  | { kind: "invitation"; invitation: ReviewerInvitation };
 
 export async function grantReviewerTracks(
   eventId: string,
   input: { email: string; trackIds: string[] },
-): Promise<ReviewerAssignment> {
+): Promise<ReviewerGrantResult> {
   const response = await fetch(`/api/events/${eventId}/reviewers`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await readJson<{ reviewer: ReviewerAssignment } | { error: string }>(
-    response,
-  );
-  if (!response.ok || !("reviewer" in body)) {
+  const body = await readJson<
+    | { reviewer: ReviewerAssignment }
+    | { invitation: ReviewerInvitation }
+    | { error: string }
+  >(response);
+  if (!response.ok || (!("reviewer" in body) && !("invitation" in body))) {
     throw new ApiError(
       "error" in body ? body.error : "Unable to save reviewer routing",
       response.status,
       body,
     );
   }
-  return body.reviewer;
+  return "reviewer" in body
+    ? { kind: "reviewer", reviewer: body.reviewer }
+    : { kind: "invitation", invitation: body.invitation };
+}
+
+export async function revokeReviewerInvitation(
+  eventId: string,
+  invitationId: string,
+): Promise<ReviewerInvitation> {
+  const response = await fetch(
+    `/api/events/${eventId}/reviewer-invitations/${encodeURIComponent(invitationId)}`,
+    { method: "DELETE" },
+  );
+  const body = await readJson<{ invitation: ReviewerInvitation } | { error: string }>(response);
+  if (!response.ok || !("invitation" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to revoke reviewer invitation",
+      response.status,
+      body,
+    );
+  }
+  return body.invitation;
+}
+
+export async function retryReviewerInvitation(
+  eventId: string,
+  invitationId: string,
+): Promise<ReviewerInvitation> {
+  const response = await fetch(
+    `/api/events/${eventId}/reviewer-invitations/${encodeURIComponent(invitationId)}/retry`,
+    { method: "POST" },
+  );
+  const body = await readJson<{ invitation: ReviewerInvitation } | { error: string }>(response);
+  if (!response.ok || !("invitation" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to retry reviewer invitation",
+      response.status,
+      body,
+    );
+  }
+  return body.invitation;
+}
+
+export async function fetchReviewerInvitation(
+  token: string,
+): Promise<ReviewerInvitationPreview> {
+  const response = await fetch(`/api/reviewer-invitations/${encodeURIComponent(token)}`);
+  const body = await readJson<
+    { invitation: ReviewerInvitationPreview } | { error: string }
+  >(response);
+  if (!response.ok || !("invitation" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to open reviewer invitation",
+      response.status,
+      body,
+    );
+  }
+  return body.invitation;
+}
+
+export async function acceptReviewerInvitation(
+  token: string,
+): Promise<{ accepted: true; queuePath: string; trackIds: string[] }> {
+  const response = await fetch(
+    `/api/reviewer-invitations/${encodeURIComponent(token)}/accept`,
+    { method: "POST" },
+  );
+  const body = await readJson<
+    | { accepted: true; queuePath: string; trackIds: string[] }
+    | { error: string }
+  >(response);
+  if (!response.ok || !("accepted" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to accept reviewer invitation",
+      response.status,
+      body,
+    );
+  }
+  return body;
 }
 
 export async function revokeReviewerAccess(

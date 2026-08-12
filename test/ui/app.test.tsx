@@ -875,7 +875,7 @@ describe("organizer application", () => {
     expect(screen.getByRole("heading", { name: "Reviewer routing" })).toBeVisible();
     await user.type(screen.getByLabelText("Reviewer email"), "rae@example.com");
     await user.click(screen.getByRole("checkbox", { name: "Platform" }));
-    await user.click(screen.getByRole("button", { name: "Grant review access" }));
+    await user.click(screen.getByRole("button", { name: "Send reviewer invitation" }));
 
     expect(
       await screen.findByText("Rae Viewer can now review 1 track."),
@@ -903,6 +903,96 @@ describe("organizer application", () => {
       { email: "rae@example.com", trackIds: ["platform"] },
       { edit: { trackIds: ["design-systems"] } },
       { remove: "reviewer-1" },
+    ]);
+  });
+
+  it("shows truthful invitation delivery state and organizer revoke and retry controls", async () => {
+    const user = userEvent.setup();
+    const writes: Array<{ action: string; body?: unknown }> = [];
+    const invitation = {
+      id: "invite-1",
+      email: "future@example.com",
+      trackIds: ["platform"],
+      status: "pending",
+      deliveryState: "retryable",
+      expiresAt: "2026-08-19T12:00:00.000Z",
+      acceptedAt: null,
+      revokedAt: null,
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/api/events")) {
+        return new Response(JSON.stringify(eventsPayload), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/reviewers") && init?.method === "POST") {
+        writes.push({ action: "invite", body: JSON.parse(String(init.body)) });
+        return new Response(
+          JSON.stringify({
+            invitation: {
+              ...invitation,
+              email: "next@example.com",
+              deliveryState: "queued",
+            },
+          }),
+          { status: 202, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.endsWith("/reviewers")) {
+        return new Response(
+          JSON.stringify({ reviewers: [], invitations: [invitation] }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.endsWith("/reviewer-invitations/invite-1/retry")) {
+        writes.push({ action: "retry" });
+        return new Response(
+          JSON.stringify({
+            invitation: { ...invitation, deliveryState: "delivered" },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.endsWith("/reviewer-invitations/invite-1") && init?.method === "DELETE") {
+        writes.push({ action: "revoke" });
+        return new Response(
+          JSON.stringify({ invitation: { ...invitation, status: "revoked" } }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("/proposals")) {
+        return new Response(JSON.stringify({ proposals: [] }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderAt("/e/pacific-open-data-summit-2026/submissions");
+    await user.click(await screen.findByRole("button", { name: "Reviewer routing" }));
+    expect(await screen.findByText("Delivery failed — retry available")).toBeVisible();
+    const invitationRow = screen.getByText("future@example.com").closest("li");
+    expect(invitationRow).toBeTruthy();
+    expect(within(invitationRow as HTMLElement).getByText("Platform")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Retry invitation to future@example.com" }));
+    expect(await screen.findByText("Invitation delivered.")).toBeVisible();
+
+    await user.type(screen.getByLabelText("Reviewer email"), "next@example.com");
+    await user.click(screen.getByRole("checkbox", { name: "Platform" }));
+    await user.click(screen.getByRole("button", { name: "Send reviewer invitation" }));
+    expect(await screen.findByText("Invitation queued for next@example.com.")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Revoke invitation to future@example.com" }));
+    expect(await screen.findByText("Reviewer invitation revoked.")).toBeVisible();
+    expect(writes).toEqual([
+      { action: "retry" },
+      {
+        action: "invite",
+        body: { email: "next@example.com", trackIds: ["platform"] },
+      },
+      { action: "revoke" },
     ]);
   });
 

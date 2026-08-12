@@ -26,6 +26,8 @@ import {
   fetchProposals,
   fetchReviewerAssignments,
   grantReviewerTracks,
+  retryReviewerInvitation,
+  revokeReviewerInvitation,
   revokeReviewerAccess,
   updateReviewerTracks,
   updateProposalReview,
@@ -547,8 +549,12 @@ function ReviewerRouting({ event }: { event: EventRecord }) {
   });
   const mutation = useMutation({
     mutationFn: () => grantReviewerTracks(event.id, { email, trackIds }),
-    onSuccess: (reviewer) => {
-      setMessage(`${reviewer.name} can now review ${reviewer.trackIds.length} track${reviewer.trackIds.length === 1 ? "" : "s"}.`);
+    onSuccess: (result) => {
+      setMessage(
+        result.kind === "reviewer"
+          ? `${result.reviewer.name} can now review ${result.reviewer.trackIds.length} track${result.reviewer.trackIds.length === 1 ? "" : "s"}.`
+          : `Invitation ${result.invitation.deliveryState === "delivered" ? "delivered" : "queued"} for ${result.invitation.email}.`,
+      );
       setEmail("");
       setTrackIds([]);
       void queryClient.invalidateQueries({ queryKey: ["reviewers", event.id] });
@@ -568,6 +574,26 @@ function ReviewerRouting({ event }: { event: EventRecord }) {
       setMessage("Reviewer tracks saved.");
       setEditingReviewerId(null);
       setEditTrackIds([]);
+      void queryClient.invalidateQueries({ queryKey: ["reviewers", event.id] });
+    },
+  });
+  const invitationRetryMutation = useMutation({
+    mutationFn: (invitationId: string) =>
+      retryReviewerInvitation(event.id, invitationId),
+    onSuccess: (invitation) => {
+      setMessage(
+        invitation.deliveryState === "delivered"
+          ? "Invitation delivered."
+          : "Invitation retry queued.",
+      );
+      void queryClient.invalidateQueries({ queryKey: ["reviewers", event.id] });
+    },
+  });
+  const invitationRevokeMutation = useMutation({
+    mutationFn: (invitationId: string) =>
+      revokeReviewerInvitation(event.id, invitationId),
+    onSuccess: () => {
+      setMessage("Reviewer invitation revoked.");
       void queryClient.invalidateQueries({ queryKey: ["reviewers", event.id] });
     },
   });
@@ -614,12 +640,12 @@ function ReviewerRouting({ event }: { event: EventRecord }) {
           type="submit"
           disabled={mutation.isPending || trackIds.length === 0}
         >
-          {mutation.isPending ? "Saving…" : "Grant review access"}
+          {mutation.isPending ? "Sending…" : "Send reviewer invitation"}
         </button>
       </form>
-      {mutation.isError || editMutation.isError ? (
+      {mutation.isError || editMutation.isError || invitationRetryMutation.isError || invitationRevokeMutation.isError ? (
         <p className="form-message" data-tone="error" role="alert">
-          {mutation.error?.message ?? editMutation.error?.message}
+          {mutation.error?.message ?? editMutation.error?.message ?? invitationRetryMutation.error?.message ?? invitationRevokeMutation.error?.message}
         </p>
       ) : message ? (
         <p className="form-message" role="status">{message}</p>
@@ -633,9 +659,69 @@ function ReviewerRouting({ event }: { event: EventRecord }) {
           </button>
         </div>
       ) : null}
-      {query.isSuccess && query.data.length > 0 ? (
+      {query.isSuccess && query.data.invitations.length > 0 ? (
+        <div className="reviewer-invitations" aria-label="Reviewer invitations">
+          <h3>Invitations</h3>
+          <ul className="reviewer-list">
+            {query.data.invitations.map((invitation) => {
+              const deliveryLabel =
+                invitation.status === "revoked"
+                  ? "Invitation revoked"
+                  : invitation.status === "expired"
+                    ? "Invitation expired"
+                    : invitation.status === "accepted"
+                      ? "Invitation accepted"
+                      : invitation.deliveryState === "delivered"
+                        ? "Invitation delivered"
+                        : invitation.deliveryState === "retryable"
+                          ? "Delivery failed — retry available"
+                          : invitation.deliveryState === "failed"
+                            ? "Delivery failed"
+                            : "Invitation queued";
+              return (
+                <li key={invitation.id}>
+                  <div>
+                    <strong>{invitation.email}</strong>
+                    <span>{deliveryLabel}</span>
+                  </div>
+                  <span className="reviewer-tracks">
+                    {invitation.trackIds
+                      .map((trackId) => event.tracks.find((track) => track.id === trackId)?.name ?? trackId)
+                      .join(" · ")}
+                  </span>
+                  <div className="reviewer-invitation-actions">
+                    {invitation.status === "pending" && invitation.deliveryState === "retryable" ? (
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        type="button"
+                        aria-label={`Retry invitation to ${invitation.email}`}
+                        disabled={invitationRetryMutation.isPending}
+                        onClick={() => invitationRetryMutation.mutate(invitation.id)}
+                      >
+                        Retry
+                      </button>
+                    ) : null}
+                    {invitation.status === "pending" ? (
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        type="button"
+                        aria-label={`Revoke invitation to ${invitation.email}`}
+                        disabled={invitationRevokeMutation.isPending}
+                        onClick={() => invitationRevokeMutation.mutate(invitation.id)}
+                      >
+                        Revoke
+                      </button>
+                    ) : null}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
+      {query.isSuccess && query.data.reviewers.length > 0 ? (
         <ul className="reviewer-list">
-          {query.data.map((reviewer) => (
+          {query.data.reviewers.map((reviewer) => (
             <li key={reviewer.id}>
               <div>
                 <strong>{reviewer.name}</strong>

@@ -1356,6 +1356,7 @@ img { display: block; max-width: 100%; }
 }
 
 .reviewer-routing h2 { margin: 2px 0 5px; font-size: 18px; }
+.reviewer-routing h3 { margin: 0; font-size: 13px; }
 .reviewer-routing p { margin: 0; color: var(--on-surface-variant); font-size: 12.5px; }
 .reviewer-routing form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
 .reviewer-routing form > label { display: grid; gap: 5px; font-size: 12px; font-weight: 600; }
@@ -1390,6 +1391,10 @@ img { display: block; max-width: 100%; }
 .reviewer-list li > div { display: grid; gap: 1px; }
 .reviewer-list li > div span,
 .reviewer-tracks { color: var(--on-surface-variant); }
+.reviewer-invitations { display: grid; gap: 8px; }
+.reviewer-invitation-actions { display: flex !important; justify-content: flex-end; gap: 6px; }
+.reviewer-invitation-panel strong { color: var(--on-surface); }
+.reviewer-invitation-tracks { margin: 0; padding-left: 20px; color: var(--on-surface); }
 .reviewer-tracks-button {
   justify-self: start;
   text-align: left;

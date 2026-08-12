@@ -15,10 +15,16 @@ import type {
   ProposalStatus,
   PublishedCfpForm,
   ReviewerAssignment,
+  ReviewerInvitationPreview,
   SessionPlacementPatch,
   SpeakerDirectoryCreateInput,
 } from "../shared/events";
-import { createAuth, resolveProductionPrincipal } from "./auth";
+import {
+  createAuth,
+  resolveProductionAuthenticatedUser,
+  resolveProductionPrincipal,
+  type AuthenticatedUser,
+} from "./auth";
 import {
   createResendSender,
   renderSubmissionConfirmationEmail,
@@ -97,6 +103,19 @@ import {
   reconcileUnknownAirtableEffects,
 } from "./airtable/effects";
 import { handleMcpRequest } from "./mcp";
+import {
+  REVIEWER_INVITATION_TTL_MS,
+  createInvitationToken,
+  effectiveInvitationStatus,
+  escapeEmailHtml,
+  getReviewerInvitationById,
+  getReviewerInvitationByToken,
+  insertReviewerInvitation,
+  listReviewerInvitations,
+  maskEmail,
+  projectReviewerInvitation,
+  revokeReviewerInvitation,
+} from "./reviewer-invitations";
 
 
 const MAX_PROPOSAL_BODY_BYTES = 64 * 1_024;
@@ -295,8 +314,14 @@ type PrincipalResolver = (
   env: AppBindings,
 ) => Promise<OrganizerPrincipal | null>;
 
+type AuthenticatedUserResolver = (
+  request: Request,
+  env: AppBindings,
+) => Promise<AuthenticatedUser | null>;
+
 interface AppOptions {
   resolvePrincipal?: PrincipalResolver;
+  resolveAuthenticatedUser?: AuthenticatedUserResolver;
   emailSender?: EmailSender | null;
   communicationEmailSender?: CommunicationEmailSender | null;
   signingSecret?: string;
@@ -351,6 +376,8 @@ export function createApp(options: AppOptions = {}) {
   const app = new Hono<{ Bindings: AppBindings }>();
   const baseResolvePrincipal =
     options.resolvePrincipal ?? resolveProductionPrincipal;
+  const resolveAuthenticatedUser =
+    options.resolveAuthenticatedUser ?? resolveProductionAuthenticatedUser;
   const airtableFactory =
     options.airtableClientFactory ?? defaultAirtableClientFactory;
   const airtableCredentialFactory = options.airtableCredentialClientFactory;
@@ -401,6 +428,130 @@ export function createApp(options: AppOptions = {}) {
 
 
   app.get("/api/health", (c) => c.json({ status: "ok" }));
+
+  app.get("/api/reviewer-invitations/:token", async (c) => {
+    const invitation = await getReviewerInvitationByToken(
+      c.env.AUTH_DB,
+      c.req.param("token"),
+    );
+    if (!invitation) {
+      return c.json({ error: "Reviewer invitation not found" }, 404);
+    }
+    const seed = findSeed(invitation.eventId);
+    if (!seed) return c.json({ error: "Reviewer invitation not found" }, 404);
+    const tracks = invitation.trackIds.flatMap((trackId) => {
+      const track = seed.tracks.find((candidate) => candidate.id === trackId);
+      return track ? [{ id: track.id, name: track.name }] : [];
+    });
+    return c.json({
+      invitation: {
+        eventId: invitation.eventId,
+        eventName: seed.name,
+        emailHint: maskEmail(invitation.email),
+        tracks,
+        status: effectiveInvitationStatus(invitation),
+      } satisfies ReviewerInvitationPreview,
+    });
+  });
+
+  app.post("/api/reviewer-invitations/:token/accept", async (c) => {
+    const invitation = await getReviewerInvitationByToken(
+      c.env.AUTH_DB,
+      c.req.param("token"),
+    );
+    if (!invitation) {
+      return c.json({ error: "This reviewer invitation is unavailable." }, 404);
+    }
+    const user = await resolveAuthenticatedUser(c.req.raw, c.env);
+    if (!user) return c.json({ error: "Sign in to accept this invitation." }, 401);
+    if (user.email.trim().toLowerCase() !== invitation.email) {
+      return c.json(
+        { error: "This invitation cannot be accepted by the signed-in account." },
+        403,
+      );
+    }
+    const status = effectiveInvitationStatus(invitation);
+    if (status === "expired" || status === "revoked") {
+      return c.json({ error: "This reviewer invitation is no longer available." }, 410);
+    }
+    if (status === "accepted") {
+      if (invitation.acceptedByUserId !== user.id) {
+        return c.json({ error: "This reviewer invitation is no longer available." }, 410);
+      }
+      return c.json({
+        accepted: true,
+        queuePath: `/e/${invitation.eventId}/submissions`,
+        trackIds: invitation.trackIds,
+      });
+    }
+
+    const membership = await c.env.AUTH_DB.prepare(
+      `SELECT role FROM event_memberships
+       WHERE event_id = ? AND user_id = ? LIMIT 1`,
+    )
+      .bind(invitation.eventId, user.id)
+      .first<{ role: "admin" | "reviewer" }>();
+    if (membership?.role === "admin") {
+      return c.json(
+        { error: "Event administrators already have access to every track." },
+        409,
+      );
+    }
+
+    const nowIso = new Date().toISOString();
+    await c.env.AUTH_DB.batch([
+      c.env.AUTH_DB.prepare(
+        `INSERT INTO event_memberships (event_id, user_id, role)
+         SELECT ?, ?, 'reviewer'
+         WHERE EXISTS (
+           SELECT 1 FROM reviewer_invitations
+           WHERE id = ? AND status = 'pending' AND expires_at > ?
+         )
+         ON CONFLICT(event_id, user_id) DO NOTHING`,
+      ).bind(invitation.eventId, user.id, invitation.id, nowIso),
+      c.env.AUTH_DB.prepare(
+        `DELETE FROM reviewer_track_assignments
+         WHERE event_id = ? AND user_id = ?
+           AND EXISTS (
+             SELECT 1 FROM reviewer_invitations
+             WHERE id = ? AND status = 'pending' AND expires_at > ?
+           )`,
+      ).bind(invitation.eventId, user.id, invitation.id, nowIso),
+      ...invitation.trackIds.map((trackId) =>
+        c.env.AUTH_DB.prepare(
+          `INSERT INTO reviewer_track_assignments (event_id, user_id, track_id)
+           SELECT ?, ?, ?
+           WHERE EXISTS (
+             SELECT 1 FROM reviewer_invitations
+             WHERE id = ? AND status = 'pending' AND expires_at > ?
+           )
+           ON CONFLICT(event_id, user_id, track_id) DO NOTHING`,
+        ).bind(invitation.eventId, user.id, trackId, invitation.id, nowIso),
+      ),
+      c.env.AUTH_DB.prepare(
+        `UPDATE reviewer_invitations
+         SET status = 'accepted', accepted_by_user_id = ?, accepted_at = ?, updated_at = ?
+         WHERE id = ? AND status = 'pending' AND expires_at > ?`,
+      ).bind(user.id, nowIso, nowIso, invitation.id, nowIso),
+    ]);
+    const acceptedInvitation = await getReviewerInvitationById(
+      c.env.AUTH_DB,
+      invitation.eventId,
+      invitation.id,
+    );
+    if (
+      acceptedInvitation?.status !== "accepted" ||
+      acceptedInvitation.acceptedByUserId !== user.id
+    ) {
+      return c.json({ error: "This reviewer invitation is no longer available." }, 410);
+    }
+
+    return c.json({
+      accepted: true,
+      queuePath: `/e/${invitation.eventId}/submissions`,
+      trackIds: invitation.trackIds,
+    });
+  });
 
   app.all("/mcp", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
@@ -851,7 +1002,17 @@ export function createApp(options: AppOptions = {}) {
       if (row.track_id) reviewer.trackIds.push(row.track_id);
       reviewers.set(row.id, reviewer);
     }
-    return c.json({ reviewers: [...reviewers.values()] });
+    const invitationRows = await listReviewerInvitations(c.env.AUTH_DB, eventId);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const invitations = await Promise.all(
+      invitationRows.map(async (invitation) =>
+        projectReviewerInvitation(
+          invitation,
+          await store.getOutboxMessage(invitation.outboxId),
+        ),
+      ),
+    );
+    return c.json({ reviewers: [...reviewers.values()], invitations });
   });
 
   app.post("/api/events/:eventId/reviewers", async (c) => {
@@ -886,9 +1047,62 @@ export function createApp(options: AppOptions = {}) {
       .bind(email)
       .first<{ id: string; name: string; email: string }>();
     if (!user) {
+      const now = new Date();
+      const invitationId = `reviewer-invitation-${crypto.randomUUID()}`;
+      const outboxId = `reviewer-invitation-email-${crypto.randomUUID()}`;
+      const { token, tokenHash } = await createInvitationToken();
+      const expiresAt = new Date(
+        now.getTime() + REVIEWER_INVITATION_TTL_MS,
+      ).toISOString();
+      const inviteUrl = `${publicBaseUrl(c.req.raw, c.env)}/e/${encodeURIComponent(eventId)}/reviewer-invitations/${encodeURIComponent(token)}`;
+      const trackNames = trackIds.map(
+        (trackId) => seed.tracks.find((track) => track.id === trackId)!.name,
+      );
+      const safeEventName = escapeEmailHtml(seed.name);
+      const safeTracks = trackNames.map(escapeEmailHtml).join(", ");
+      const safeUrl = escapeEmailHtml(inviteUrl);
+      const store = c.env.EVENT_STORE.getByName(eventId);
+      await store.queueOutboxMessage({
+        id: outboxId,
+        kind: "reviewer_invitation",
+        toEmail: email,
+        subject: `Review proposals for ${seed.name}`,
+        htmlBody: `<p>You have been invited to review ${safeTracks} for ${safeEventName}.</p><p><a href="${safeUrl}">Accept reviewer invitation</a></p><p>This invitation expires in 7 days.</p>`,
+        textBody: `You have been invited to review ${trackNames.join(", ")} for ${seed.name}.\n\nAccept reviewer invitation: ${inviteUrl}\n\nThis invitation expires in 7 days.`,
+        proposalId: null,
+      });
+      await insertReviewerInvitation(c.env.AUTH_DB, {
+        id: invitationId,
+        eventId,
+        email,
+        tokenHash,
+        trackIds,
+        status: "pending",
+        outboxId,
+        expiresAt,
+        acceptedByUserId: null,
+        acceptedAt: null,
+        revokedAt: null,
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+      });
+      const sender =
+        options.emailSender === undefined
+          ? createResendSender(c.env)
+          : options.emailSender;
+      if (sender) {
+        await deliverOutboxMessage({ store, sender, messageId: outboxId, now });
+      }
+      const outbox = await store.getOutboxMessage(outboxId);
+      const saved = await getReviewerInvitationById(
+        c.env.AUTH_DB,
+        eventId,
+        invitationId,
+      );
+      if (!saved) throw new Error("Reviewer invitation was not saved.");
       return c.json(
-        { error: "That person must sign in to ChartStead before they can be assigned" },
-        404,
+        { invitation: projectReviewerInvitation(saved, outbox, now) },
+        202,
       );
     }
     const membership = await c.env.AUTH_DB.prepare(
@@ -960,6 +1174,104 @@ export function createApp(options: AppOptions = {}) {
     ]);
     return c.json({ ok: true });
   });
+
+  app.delete(
+    "/api/events/:eventId/reviewer-invitations/:invitationId",
+    async (c) => {
+      const principal = await resolvePrincipal(c.req.raw, c.env);
+      const eventId = c.req.param("eventId");
+      if (!canAccessEvent(principal, eventId)) {
+        return c.json({ error: "Unauthorized" }, 401);
+      }
+      if (!isEventAdmin(principal, eventId)) {
+        return c.json({ error: "Administrator access required" }, 403);
+      }
+      const invitation = await getReviewerInvitationById(
+        c.env.AUTH_DB,
+        eventId,
+        c.req.param("invitationId"),
+      );
+      if (!invitation) return c.json({ error: "Reviewer invitation not found" }, 404);
+      const changed = await revokeReviewerInvitation(
+        c.env.AUTH_DB,
+        eventId,
+        invitation.id,
+        new Date().toISOString(),
+      );
+      if (!changed && invitation.status === "accepted") {
+        return c.json({ error: "Accepted invitations cannot be revoked." }, 409);
+      }
+      const store = c.env.EVENT_STORE.getByName(eventId);
+      const delivery = await store.getOutboxMessage(invitation.outboxId);
+      if (changed && delivery && delivery.status !== "sent") {
+        await store.markOutboxFailed(
+          invitation.outboxId,
+          "Invitation revoked before delivery.",
+          new Date().toISOString(),
+          null,
+        );
+      }
+      const current = await getReviewerInvitationById(
+        c.env.AUTH_DB,
+        eventId,
+        invitation.id,
+      );
+      if (!current) throw new Error("Reviewer invitation disappeared.");
+      return c.json({
+        invitation: projectReviewerInvitation(
+          current,
+          await store.getOutboxMessage(current.outboxId),
+        ),
+      });
+    },
+  );
+
+  app.post(
+    "/api/events/:eventId/reviewer-invitations/:invitationId/retry",
+    async (c) => {
+      const principal = await resolvePrincipal(c.req.raw, c.env);
+      const eventId = c.req.param("eventId");
+      if (!canAccessEvent(principal, eventId)) {
+        return c.json({ error: "Unauthorized" }, 401);
+      }
+      if (!isEventAdmin(principal, eventId)) {
+        return c.json({ error: "Administrator access required" }, 403);
+      }
+      const invitation = await getReviewerInvitationById(
+        c.env.AUTH_DB,
+        eventId,
+        c.req.param("invitationId"),
+      );
+      if (!invitation) return c.json({ error: "Reviewer invitation not found" }, 404);
+      if (effectiveInvitationStatus(invitation) !== "pending") {
+        return c.json({ error: "This reviewer invitation cannot be retried." }, 409);
+      }
+      const sender =
+        options.emailSender === undefined
+          ? createResendSender(c.env)
+          : options.emailSender;
+      if (!sender) {
+        return c.json({ error: "Email delivery is not configured." }, 503);
+      }
+      const store = c.env.EVENT_STORE.getByName(eventId);
+      const currentOutbox = await store.getOutboxMessage(invitation.outboxId);
+      if (currentOutbox?.status === "failed") {
+        await store.retryOutboxMessage(invitation.outboxId, new Date().toISOString());
+      }
+      await deliverOutboxMessage({
+        store,
+        sender,
+        messageId: invitation.outboxId,
+        now: new Date(),
+      });
+      return c.json({
+        invitation: projectReviewerInvitation(
+          invitation,
+          await store.getOutboxMessage(invitation.outboxId),
+        ),
+      });
+    },
+  );
 
   app.patch("/api/events/:eventId/reviewers/:reviewerId", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);

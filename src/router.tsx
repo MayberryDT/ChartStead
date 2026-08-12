@@ -15,6 +15,7 @@ import {
 } from "./PublicProgramPage";
 import { SpeakerPortalPage } from "./SpeakerPortalPage";
 import { SubmitterEditPage } from "./SubmitterEditPage";
+import { ReviewerInvitationPage } from "./ReviewerInvitationPage";
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
@@ -50,6 +51,12 @@ const speakerPortalRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/e/$eventId/portal/$token",
   component: SpeakerPortalPage,
+});
+
+const reviewerInvitationRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId/reviewer-invitations/$token",
+  component: ReviewerInvitationPage,
 });
 
 const formsRoute = createRoute({
@@ -137,6 +144,7 @@ const routeTree = rootRoute.addChildren([
   proposalDetailRoute,
   submitterEditRoute,
   speakerPortalRoute,
+  reviewerInvitationRoute,
   formsRoute,
   formBuilderRoute,
   submissionsRoute,
