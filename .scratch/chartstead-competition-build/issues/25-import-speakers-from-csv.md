@@ -1,6 +1,6 @@
 # 25 — Import speakers from CSV
 
-**Status:** in-progress
+**Status:** done
 
 **Blocked by:** 24 — Manage the organizer speaker directory.
 
@@ -36,3 +36,5 @@ Add a reviewable CSV import into the existing event speaker directory. Organizer
 - 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.
 
 - 2026-08-12 — Implementation complete in the isolated ticket worktree. Added a side-effect-free mapped preview, explicit per-row review for create/reuse/update/skip/invalid outcomes, transactional idempotent apply through the ticket-24 directory commands, persistent import receipts, and the organizer CSV panel. Automated verification passed: focused CSV worker 5/5, directory/onboarding worker 16/16, focused UI 3/3, full UI 88/88, full worker 198/198, full Playwright 21/21, typecheck, and production build. Status intentionally remains in-progress for parent integration.
+
+- 2026-08-12 — Parent integration rebased the importer over the completed invitation and Messages work, preserving both authentication helpers in the only conflict. Post-rebase verification passed typecheck, CSV worker 5/5, and integrated CSV/organizer UI 29/29. Tyler explicitly deferred demos, reviews, and human QA for this batch, so the ticket is closed on automated acceptance evidence.
