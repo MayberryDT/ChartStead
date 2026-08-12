@@ -887,6 +887,53 @@ export interface ExternalEffectReviewProjection {
   result: ExternalEffectReviewResult | null;
 }
 
+export interface CourseCheckSharedApprovalProjection {
+  kind: "shared_approval";
+  currentStage: {
+    stageId: string;
+    label: string;
+    status: CourseCheckStageStatus;
+    canExecute: boolean;
+    canEndorse: boolean;
+    /** A read-authorized viewer can hand the exact review to an authorized actor. */
+    canRequestApproval: boolean;
+    availableCommit: {
+      stageId: string;
+      label: string;
+      effectSummary: string;
+    } | null;
+    requiredApproverCount: number;
+    requiredEndorsementCount: number;
+    endorsementCount: number;
+    distinctApproverRequired: boolean;
+    reasonRequired: boolean;
+    stateSummary: string;
+    nextAction: string;
+  };
+  resume: {
+    selectionCount: number;
+    planVersion: number;
+    completedStageIds: string[];
+    outstandingIssueCount: number;
+    activityCount: number;
+  };
+  freshness: {
+    state: "current" | "age_warning" | "out_of_date";
+    changedInputs: string[];
+    affectedStageIds: string[];
+    preservedStageIds: string[];
+    nextAction: string;
+  };
+  /** Only projected to principals allowed to inspect operational internals. */
+  technicalDetails?: {
+    planId: string;
+    planVersion: number;
+    digest: string;
+    sourceRevisions: string[];
+    policyRules: string[];
+  };
+}
+
 export interface CourseCheckPlanVersion {
   planId: string;
   version: number;
@@ -916,6 +963,8 @@ export interface CourseCheckPlan {
   decisionReview?: DecisionReviewProjection;
   /** Authenticated viewer-specific publication, delivery, and integration review. */
   externalReview?: ExternalEffectReviewProjection;
+  /** Viewer-specific stage authority, resumption, freshness, and audit adapter. */
+  sharedApproval?: CourseCheckSharedApprovalProjection;
   /** Immutable prior versions (newest first, excludes current). */
   versions?: CourseCheckPlanVersion[];
   mutations?: PlanMutationRecord[];

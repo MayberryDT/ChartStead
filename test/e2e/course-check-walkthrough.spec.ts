@@ -86,6 +86,80 @@ test("decision review stays truthful before and after commit", async ({ page }) 
   );
 });
 
+test("shared approval explains policy authority and resumable stage state", async ({ page }) => {
+  const policyUrl =
+    "/api/events/pacific-open-data-summit-2026/course-checks/policy";
+  const strictPolicy = {
+    requireTwoPersonApproval: true,
+    requireDistinctApprover: true,
+    requireReasonOnApprove: true,
+    maxAgentMode: "autonomous_policy",
+  };
+  const resetPolicy = {
+    requireTwoPersonApproval: false,
+    requireDistinctApprover: false,
+    requireReasonOnApprove: false,
+    maxAgentMode: "autonomous_policy",
+  };
+  expect((await page.request.put(policyUrl, { data: { policy: strictPolicy } })).ok()).toBe(true);
+
+  try {
+    const proposalsResponse = await page.request.get(
+      "/api/events/pacific-open-data-summit-2026/proposals",
+    );
+    const proposals = (await proposalsResponse.json()) as {
+      proposals: Array<{ id: string; programOutcome: string | null }>;
+    };
+    const proposal = proposals.proposals.find(
+      (row) => row.id !== "SUB-PODS0050" && !row.programOutcome,
+    );
+    expect(proposal).toBeTruthy();
+    const key = `cc20-browser-policy-${Date.now()}`;
+    const createResponse = await page.request.post(
+      "/api/events/pacific-open-data-summit-2026/course-checks/decisions",
+      {
+        headers: { "idempotency-key": key },
+        data: {
+          items: [{ proposalId: proposal!.id, outcome: "declined" }],
+          idempotencyKey: key,
+        },
+      },
+    );
+    expect(createResponse.status()).toBe(201);
+    const plan = (await createResponse.json()) as {
+      id: string;
+      version: number;
+      sharedApproval: {
+        currentStage: {
+          canExecute: boolean;
+          endorsementCount: number;
+          requiredEndorsementCount: number;
+        };
+      };
+    };
+    expect(plan.sharedApproval.currentStage).toMatchObject({
+      canExecute: false,
+      endorsementCount: 0,
+      requiredEndorsementCount: 1,
+    });
+
+    await page.goto(
+      `/e/pacific-open-data-summit-2026/course-checks/${plan.id}`,
+    );
+    const approval = page.getByRole("region", { name: "Stage approval" });
+    await expect(approval).toBeVisible();
+    await expect(approval.getByText("0 of 1 endorsements recorded")).toBeVisible();
+    await expect(approval.getByText("A different approver is required")).toBeVisible();
+    await expect(approval.getByText("An approval reason is required")).toBeVisible();
+    await expect(approval.getByText(`version ${plan.version}`, { exact: false })).toBeVisible();
+    await expect(approval.getByRole("status")).toHaveAttribute("aria-live", "polite");
+    await expect(page.getByPlaceholder("Why approve this exact stage?")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Decline 1 submission" })).toBeDisabled();
+  } finally {
+    expect((await page.request.put(policyUrl, { data: { policy: resetPolicy } })).ok()).toBe(true);
+  }
+});
+
 test("decision result advances to draft preparation without leaving the workspace", async ({ page }) => {
   const proposalsResponse = await page.request.get(
     "/api/events/pacific-open-data-summit-2026/proposals",

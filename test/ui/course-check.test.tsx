@@ -7,7 +7,7 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -495,6 +495,74 @@ describe("Course Check review workspace", () => {
     expect(container).not.toHaveTextContent("Mutation history");
     expect(container).not.toHaveTextContent(plan.id.slice(0, 8));
     expect(container).not.toHaveTextContent(plan.digest);
+  });
+
+  it("keeps shared approval and exact stale recovery visible without exposing technical evidence in task copy", async () => {
+    const policyPlan = {
+      ...projectedPlan,
+      state: "Out of date" as const,
+      sharedApproval: {
+        kind: "shared_approval" as const,
+        currentStage: {
+          stageId: "apply-decision",
+          label: "Apply decision",
+          status: "out_of_date" as const,
+          canExecute: false,
+          canEndorse: false,
+          canRequestApproval: true,
+          availableCommit: { stageId: "apply-decision", label: "Accept 1 submission", effectSummary: "Accept the selected submission." },
+          requiredApproverCount: 2,
+          requiredEndorsementCount: 1,
+          endorsementCount: 0,
+          distinctApproverRequired: true,
+          reasonRequired: true,
+          stateSummary: "This stage needs review because proposal evidence changed.",
+          nextAction: "Refresh this decision stage, then ask another authorized administrator to endorse it with a reason.",
+        },
+        resume: {
+          selectionCount: 1,
+          planVersion: 2,
+          completedStageIds: ["create-drafts"],
+          outstandingIssueCount: 1,
+          activityCount: 2,
+        },
+        freshness: {
+          state: "out_of_date" as const,
+          changedInputs: ["Review decision for SUB-PODS0001 changed"],
+          affectedStageIds: ["apply-decision"],
+          preservedStageIds: ["create-drafts"],
+          nextAction: "Refresh the decision review before approving apply-decision.",
+        },
+        technicalDetails: {
+          planId: plan.id,
+          planVersion: 2,
+          digest: plan.digest,
+          sourceRevisions: ["SUB-PODS0001 revision 2"],
+          policyRules: ["Two authorized people", "Different approver", "Approval reason required"],
+        },
+      },
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(policyPlan));
+    const { container } = renderCourseCheck();
+
+    const approval = await screen.findByRole("region", { name: "Stage approval" });
+    expect(approval).toBeVisible();
+    expect(screen.getByText("0 of 1 endorsements recorded")).toBeVisible();
+    expect(screen.getByText("A different approver is required")).toBeVisible();
+    expect(screen.getByText("An approval reason is required")).toBeVisible();
+    expect(screen.getByText("Review decision for SUB-PODS0001 changed")).toBeVisible();
+    expect(screen.getByText("create-drafts remains complete")).toBeVisible();
+    expect(within(approval).getByRole("status")).toHaveTextContent(
+      "Refresh the decision review before approving apply-decision.",
+    );
+    expect(screen.getByRole("button", { name: "Accept 1 submission" })).toBeDisabled();
+    const technical = screen.getByText("Technical details").closest("details");
+    expect(technical).not.toBeNull();
+    expect(technical).not.toHaveAttribute("open");
+    expect(technical).toHaveTextContent("digest-1");
+    expect(container.querySelector(".course-check-stage-task-copy")).not.toHaveTextContent(
+      "digest-1",
+    );
   });
 
   it.each([

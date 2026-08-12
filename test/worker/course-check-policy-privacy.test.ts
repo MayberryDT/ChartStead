@@ -4,7 +4,7 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   assertPolicyDoesNotWeakenBaseline,
   mergeCourseCheckPolicy,
-  type CourseCheckPlan,
+type CourseCheckPlan,
   type EventCourseCheckPolicy,
 } from "../../shared/course-check";
 import type { OrganizerPrincipal, OrganizerProposal } from "../../shared/events";
@@ -61,6 +61,53 @@ const outsiderApp = createApp({
   resolvePrincipal: async () => speakerPrincipal,
   signingSecret: "course-check-09-test-signing-secret",
 });
+
+type SharedApprovalView = {
+  currentStage: {
+    stageId: string;
+    label: string;
+    status: string;
+    canExecute: boolean;
+    canEndorse: boolean;
+    canRequestApproval: boolean;
+    availableCommit: { label: string } | null;
+    requiredApproverCount: number;
+    requiredEndorsementCount: number;
+    endorsementCount: number;
+    distinctApproverRequired: boolean;
+    reasonRequired: boolean;
+    stateSummary: string;
+    nextAction: string;
+  };
+  resume: {
+    selectionCount: number;
+    planVersion: number;
+    completedStageIds: string[];
+    outstandingIssueCount: number;
+    activityCount: number;
+  };
+  freshness: {
+    state: string;
+    changedInputs: string[];
+    affectedStageIds: string[];
+    preservedStageIds: string[];
+    nextAction: string;
+  };
+  technicalDetails?: {
+    planId: string;
+    planVersion: number;
+    digest: string;
+    sourceRevisions: string[];
+    policyRules: string[];
+  };
+};
+
+function sharedApproval(plan: CourseCheckPlan): SharedApprovalView {
+  const projection = (plan as CourseCheckPlan & { sharedApproval?: SharedApprovalView })
+    .sharedApproval;
+  expect(projection).toBeDefined();
+  return projection!;
+}
 
 async function loadEvent() {
   const response = await adminAppA.request(
@@ -266,6 +313,87 @@ describe("Course Check 09 — policy, privacy, durable operations", () => {
     ).toBe(true);
   });
 
+  it("projects exact shared approval state for each authorized actor and resumes the same version", async () => {
+    await setPolicy({
+      requireTwoPersonApproval: true,
+      requireDistinctApprover: true,
+      requireReasonOnApprove: true,
+    });
+    const plan = await createReadyPlan("shared-approval");
+
+    const requesterView = sharedApproval(plan);
+    expect(requesterView.currentStage).toMatchObject({
+      stageId: "apply-decision",
+      canExecute: false,
+      canEndorse: false,
+      canRequestApproval: true,
+      requiredApproverCount: 2,
+      requiredEndorsementCount: 1,
+      endorsementCount: 0,
+      distinctApproverRequired: true,
+      reasonRequired: true,
+    });
+    expect(requesterView.currentStage.availableCommit?.label).toMatch(
+      /submission/,
+    );
+    expect(requesterView.currentStage.nextAction).toContain(
+      "another authorized administrator",
+    );
+    expect(requesterView.resume).toMatchObject({
+      selectionCount: 1,
+      planVersion: plan.version,
+      completedStageIds: [],
+    });
+    expect(requesterView.technicalDetails).toMatchObject({
+      planId: plan.id,
+      planVersion: plan.version,
+      digest: plan.digest,
+    });
+
+    const first = await applyDecision(
+      adminAppB,
+      plan,
+      `cc20-shared-endorse-${plan.id}`,
+      "independent review complete",
+    );
+    expect(first.status).toBe(200);
+    const endorsed = first.body as CourseCheckPlan;
+    const endorserView = sharedApproval(endorsed);
+    expect(endorserView.currentStage).toMatchObject({
+      canExecute: false,
+      canEndorse: false,
+      endorsementCount: 1,
+    });
+    expect(endorserView.currentStage.stateSummary).toContain(
+      "waiting for a different authorized administrator",
+    );
+
+    const resumedResponse = await adminAppA.request(
+      `https://chartstead.test/api/events/${eventId}/course-checks/${plan.id}`,
+      undefined,
+      env,
+    );
+    expect(resumedResponse.status).toBe(200);
+    const resumed = await resumedResponse.json<CourseCheckPlan>();
+    const resumedView = sharedApproval(resumed);
+    expect(resumed.version).toBe(endorsed.version);
+    expect(resumed.digest).toBe(endorsed.digest);
+    expect(resumed.body.stages).toEqual(endorsed.body.stages);
+    if (resumed.body.actionType === "decision" && endorsed.body.actionType === "decision") {
+      expect(resumed.body.items.map((item) => item.itemId)).toEqual(
+        endorsed.body.items.map((item) => item.itemId),
+      );
+    }
+    expect(resumedView.resume.activityCount).toBeGreaterThanOrEqual(2);
+    // The requester remains barred by the distinct-approver rule even after
+    // another administrator endorses the exact version.
+    expect(resumedView.currentStage).toMatchObject({
+      canExecute: false,
+      canRequestApproval: true,
+      endorsementCount: 1,
+    });
+  });
+
   it("mandatory reason policy rejects bare apply", async () => {
     await setPolicy({ requireReasonOnApprove: true });
     const plan = await createReadyPlan("reason");
@@ -304,6 +432,12 @@ describe("Course Check 09 — policy, privacy, durable operations", () => {
         }
       }
     }
+    expect(sharedApproval(projected).currentStage).toMatchObject({
+      canExecute: false,
+      canEndorse: false,
+      canRequestApproval: true,
+    });
+    expect(sharedApproval(projected).technicalDetails).toBeUndefined();
 
     const outsider = await outsiderApp.request(
       `https://chartstead.test/api/events/${eventId}/course-checks/${platformPlan.id}`,

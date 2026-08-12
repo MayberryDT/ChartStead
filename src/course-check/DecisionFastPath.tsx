@@ -5,6 +5,7 @@ import type {
   DecisionReviewProjection,
   DecisionPlanBody,
 } from "../../shared/course-check";
+import { SharedApprovalReview } from "./SharedApprovalReview";
 
 export interface DecisionFastPathCounts {
   accepted: number;
@@ -128,6 +129,13 @@ export function isDecisionFastPathEligible(
       : Boolean(review.primaryActionLabel) &&
         review.permittedCommits.length === 1 &&
         review.permittedCommits[0]?.stageId === "apply-decision";
+  const approvalIsSimple =
+    !plan.sharedApproval ||
+    (plan.sharedApproval.currentStage.canExecute &&
+      !plan.sharedApproval.currentStage.canEndorse &&
+      plan.sharedApproval.currentStage.requiredApproverCount === 1 &&
+      !plan.sharedApproval.currentStage.distinctApproverRequired &&
+      !plan.sharedApproval.currentStage.reasonRequired);
 
   return (
     !hasReviewIssues &&
@@ -135,7 +143,8 @@ export function isDecisionFastPathEligible(
     !hasComplexHistory &&
     !hasExternalStage &&
     statusesAreSimple &&
-    commitIsSimple
+    commitIsSimple &&
+    approvalIsSimple
   );
 }
 
@@ -199,6 +208,10 @@ export function DecisionFastPath({
             {review.preCommitBoundary}
           </p>
         )}
+
+        {plan.sharedApproval ? (
+          <SharedApprovalReview review={plan.sharedApproval} />
+        ) : null}
 
         <section aria-labelledby="decision-fast-path-effects-title">
           <h2 id="decision-fast-path-effects-title">

@@ -1,5 +1,6 @@
 import type {
   CommunicationPlanBody,
+  CourseCheckSharedApprovalProjection,
   CourseCheckPlan,
   DecisionReviewGeneratedRecords,
   DecisionReviewIssue,
@@ -14,7 +15,9 @@ import type {
   ExternalEffectReviewPhase,
   ExternalEffectReviewProjection,
   PublicationPlanBody,
+  EventCourseCheckPolicy,
 } from "../../shared/course-check";
+import { DEFAULT_COURSE_CHECK_POLICY } from "../../shared/course-check";
 import { redactCommunicationBody } from "./communication-planner";
 import {
   decisionRevalidationSummary,
@@ -31,6 +34,10 @@ export type CourseCheckProjectionOptions = {
   permittedStageIds?: string[];
   canDeferItems?: boolean;
   canStartDraftPreparation?: boolean;
+  /** Authenticated actor used only to explain current policy eligibility. */
+  viewerActorId?: string;
+  policy?: EventCourseCheckPolicy;
+  canViewTechnicalEvidence?: boolean;
 };
 
 const REDACTED = "[redacted]";
@@ -1444,6 +1451,236 @@ function buildExternalEffectReviewProjection(
   };
 }
 
+function sharedApprovalSelectionCount(plan: CourseCheckPlan): number {
+  const body = plan.body;
+  if (body.actionType === "decision") return body.items.length;
+  if (body.actionType === "publication") {
+    return body.includedSessionIds.length + body.excludedSessions.length;
+  }
+  if (body.actionType === "communication") {
+    return body.recipientGroups.reduce(
+      (count, group) =>
+        count + group.recipients.filter((recipient) => recipient.selected).length,
+      0,
+    );
+  }
+  return body.speakers.length;
+}
+
+function sharedApprovalSourceRevisions(plan: CourseCheckPlan): string[] {
+  const body = plan.body;
+  if (body.actionType === "decision") {
+    return body.items.map(
+      (item) => `${item.proposalId} revision ${item.proposalRevision}`,
+    );
+  }
+  if (body.actionType === "communication") {
+    return Object.entries(body.relevantRevisions.proposalRevisions).map(
+      ([proposalId, revision]) => `${proposalId} revision ${revision}`,
+    );
+  }
+  if (body.actionType === "publication") {
+    return [
+      `Working schedule ${body.workingFingerprint}`,
+      ...(body.publicRevisionId
+        ? [
+            `Public revision ${body.publicRevisionId} version ${body.publicRevisionVersion ?? "unknown"}`,
+          ]
+        : []),
+    ];
+  }
+  return body.relevantRevisions.speakerEmails.map(
+    (_email, index) => `Speaker source ${index + 1}`,
+  );
+}
+
+function buildSharedApprovalProjection(
+  plan: CourseCheckPlan,
+  options: CourseCheckProjectionOptions,
+): CourseCheckSharedApprovalProjection {
+  const policy = options.policy ?? DEFAULT_COURSE_CHECK_POLICY;
+  const activeStage =
+    plan.body.stages.find((stage) => stage.status === "out_of_date") ??
+    plan.body.stages.find(
+      (stage) =>
+        stage.status === "ready" ||
+        stage.status === "approved" ||
+        stage.status === "blocked",
+    ) ??
+    plan.body.stages.find((stage) => stage.status === "pending") ??
+    [...plan.body.stages].reverse().find((stage) => stage.status === "complete") ??
+    plan.body.stages[0] ?? {
+      id: "complete",
+      label: "Course Check",
+      verb: "Review Course Check",
+      status: "complete" as const,
+    };
+  const stageEndorsements = (plan.stageEndorsements ?? []).filter(
+    (endorsement) =>
+      endorsement.stageId === activeStage.id &&
+      endorsement.planVersion === plan.version &&
+      endorsement.digest === plan.digest,
+  );
+  const uniqueEndorserIds = new Set(
+    stageEndorsements.map((endorsement) => endorsement.actor.id),
+  );
+  const viewerActorId = options.viewerActorId ?? null;
+  const viewerEndorsed = Boolean(
+    viewerActorId && uniqueEndorserIds.has(viewerActorId),
+  );
+  const hasOtherEndorser = Boolean(
+    viewerActorId &&
+      stageEndorsements.some(
+        (endorsement) => endorsement.actor.id !== viewerActorId,
+      ),
+  );
+  const stagePermitted = (
+    options.permittedStageIds ??
+    (options.role === "admin" ? plan.body.stages.map((stage) => stage.id) : [])
+  ).includes(activeStage.id);
+  const actionable =
+    activeStage.status === "ready" || activeStage.status === "approved";
+  const violatesDistinctApprover = Boolean(
+    policy.requireDistinctApprover && viewerActorId === plan.createdBy.id,
+  );
+  const canEndorse = Boolean(
+    actionable &&
+      stagePermitted &&
+      policy.requireTwoPersonApproval &&
+      !violatesDistinctApprover &&
+      !viewerEndorsed &&
+      !hasOtherEndorser,
+  );
+  const canExecute = Boolean(
+    actionable &&
+      stagePermitted &&
+      !violatesDistinctApprover &&
+      (!policy.requireTwoPersonApproval || hasOtherEndorser),
+  );
+  const decisionCommit = plan.decisionReview?.permittedCommits.find(
+    (commit) => commit.stageId === activeStage.id,
+  );
+  const externalCommit = plan.externalReview?.permittedActions.find(
+    (commit) => commit.stageId === activeStage.id,
+  );
+  const availableCommit = decisionCommit ?? externalCommit ??
+    (actionable
+      ? {
+          stageId: activeStage.id,
+          label: activeStage.verb,
+          effectSummary: activeStage.label,
+        }
+      : null);
+  const changedInputs =
+    plan.decisionReview?.revalidation.changedInputs.map((input) => input.label) ??
+    plan.body.findings
+      .filter((finding) => finding.code === "relevant_input_changed")
+      .map((finding) => finding.message);
+  const affectedStageIds = plan.body.stages
+    .filter((stage) => stage.status === "out_of_date")
+    .map((stage) => stage.id);
+  const preservedStageIds = plan.body.stages
+    .filter((stage) => stage.status === "complete")
+    .map((stage) => stage.id);
+  const freshnessState =
+    plan.state === "Out of date" || affectedStageIds.length > 0
+      ? ("out_of_date" as const)
+      : plan.body.ageWarning?.active
+        ? ("age_warning" as const)
+        : ("current" as const);
+  const freshnessNextAction =
+    freshnessState === "out_of_date"
+      ? `Refresh the ${activeStage.label.toLowerCase()} review before approving ${activeStage.id}.`
+      : freshnessState === "age_warning"
+        ? `Recheck the current source information before approving ${activeStage.id}.`
+        : `Continue with ${activeStage.verb.toLowerCase()} when the review is ready.`;
+
+  let stateSummary: string;
+  let nextAction: string;
+  if (activeStage.status === "complete") {
+    stateSummary = `${activeStage.label} is complete.`;
+    nextAction = "No approval action is required for this completed stage.";
+  } else if (freshnessState === "out_of_date") {
+    stateSummary = `${activeStage.label} needs review because source evidence changed.`;
+    nextAction = freshnessNextAction;
+  } else if (!stagePermitted) {
+    stateSummary = `${activeStage.label} is waiting for an authorized actor.`;
+    nextAction = "Ask an authorized administrator to continue this exact review.";
+  } else if (violatesDistinctApprover) {
+    stateSummary = `${activeStage.label} requires an approver other than the requester.`;
+    nextAction = "Ask another authorized administrator to approve and execute this stage.";
+  } else if (policy.requireTwoPersonApproval && viewerEndorsed) {
+    stateSummary = `${activeStage.label} is waiting for a different authorized administrator.`;
+    nextAction = "Another authorized administrator must approve this exact plan version.";
+  } else if (canEndorse) {
+    stateSummary = `${activeStage.label} is ready for your endorsement.`;
+    nextAction = `Endorse this exact review${policy.requireReasonOnApprove ? " with a reason" : ""}; a different authorized administrator can then execute it.`;
+  } else if (canExecute) {
+    stateSummary = `${activeStage.label} is ready for you to approve and execute.`;
+    nextAction = `${activeStage.verb}${policy.requireReasonOnApprove ? " and provide an approval reason" : ""}.`;
+  } else {
+    stateSummary = `${activeStage.label} is ${activeStage.status.replaceAll("_", " ")}.`;
+    nextAction = `Resolve the outstanding review requirements before ${activeStage.verb.toLowerCase()}.`;
+  }
+
+  const policyRules = [
+    ...(policy.requireTwoPersonApproval ? ["Two authorized people"] : []),
+    ...(policy.requireDistinctApprover ? ["Different approver"] : []),
+    ...(policy.requireReasonOnApprove ? ["Approval reason required"] : []),
+  ];
+  const outstandingIssueCount =
+    plan.decisionReview?.issues.filter(
+      (issue) => issue.classification !== "details",
+    ).length ??
+    plan.externalReview?.issues.length ??
+    plan.body.findings.filter((finding) => finding.severity !== "info").length;
+
+  return {
+    kind: "shared_approval",
+    currentStage: {
+      stageId: activeStage.id,
+      label: activeStage.label,
+      status: activeStage.status,
+      canExecute,
+      canEndorse,
+      canRequestApproval: actionable && !canExecute && !canEndorse,
+      availableCommit,
+      requiredApproverCount: policy.requireTwoPersonApproval ? 2 : 1,
+      requiredEndorsementCount: policy.requireTwoPersonApproval ? 1 : 0,
+      endorsementCount: uniqueEndorserIds.size,
+      distinctApproverRequired: policy.requireDistinctApprover,
+      reasonRequired: policy.requireReasonOnApprove,
+      stateSummary,
+      nextAction,
+    },
+    resume: {
+      selectionCount: sharedApprovalSelectionCount(plan),
+      planVersion: plan.version,
+      completedStageIds: preservedStageIds,
+      outstandingIssueCount,
+      activityCount: plan.activity?.length ?? 0,
+    },
+    freshness: {
+      state: freshnessState,
+      changedInputs,
+      affectedStageIds,
+      preservedStageIds,
+      nextAction: freshnessNextAction,
+    },
+    ...(options.canViewTechnicalEvidence
+      ? {
+          technicalDetails: {
+            planId: plan.id,
+            planVersion: plan.version,
+            digest: plan.digest,
+            sourceRevisions: sharedApprovalSourceRevisions(plan),
+            policyRules,
+          },
+        }
+      : {}),
+  };
+}
+
 /**
  * Role-aware Course Check projection.
  * Admins/agents with full authority see complete evidence.
@@ -1527,6 +1764,11 @@ export function projectCourseCheckForViewer(
 
   const externalReview = buildExternalEffectReviewProjection(projected, options);
   if (externalReview) projected = { ...projected, externalReview };
+
+  projected = {
+    ...projected,
+    sharedApproval: buildSharedApprovalProjection(projected, options),
+  };
 
   return projected;
 }

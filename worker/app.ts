@@ -3286,6 +3286,10 @@ export function createApp(options: AppOptions = {}) {
           "propose_communication",
           policy,
         ) === null,
+      viewerActorId: principal.id,
+      policy: policy ?? undefined,
+      canViewTechnicalEvidence:
+        role === "admin" || isAgentPrincipal(principal),
     };
   }
 

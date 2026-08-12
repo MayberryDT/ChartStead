@@ -50,6 +50,7 @@ import {
   type CourseCheckReturnContext,
 } from "./course-check/useCourseCheckReturnContext";
 import { useCourseCheckUxInstrumentation } from "./course-check/useCourseCheckUxInstrumentation";
+import { SharedApprovalReview } from "./course-check/SharedApprovalReview";
 
 function findingTone(severity: CourseCheckFinding["severity"]) {
   if (severity === "blocker") return "error";
@@ -1529,6 +1530,7 @@ export function CourseCheckPage() {
   const [overrideReasons, setOverrideReasons] = useState<Record<string, string>>(
     {},
   );
+  const [approvalReason, setApprovalReason] = useState("");
   const [issueFilter, setIssueFilter] = useState("all");
   const [expandedIssueIds, setExpandedIssueIds] = useState<string[]>([]);
   const [focusDeferReason, setFocusDeferReason] = useState(false);
@@ -1643,6 +1645,7 @@ export function CourseCheckPage() {
         digest: current.digest,
         stageId,
         idempotencyKey: applyKey,
+        reason: approvalReason.trim() || null,
         softWarningOverrides,
       });
     },
@@ -1661,7 +1664,10 @@ export function CourseCheckPage() {
         affectedCount,
       );
       setMessage(
-        next.body.actionType === "publication"
+        next.sharedApproval?.currentStage.endorsementCount &&
+          !next.sharedApproval.currentStage.canExecute
+          ? "Endorsement recorded. A different authorized administrator can resume this exact review and execute it."
+          : next.body.actionType === "publication"
           ? next.state === "Complete"
             ? "Program publication applied. Linked communication plans stay separate."
             : `Publication ${next.state}.`
@@ -2142,7 +2148,9 @@ export function CourseCheckPage() {
         </div>
       </header>
 
-      {currentPlan.state === "Out of date" ? (
+      {currentPlan.sharedApproval ? (
+        <SharedApprovalReview review={currentPlan.sharedApproval} />
+      ) : currentPlan.state === "Out of date" ? (
         <p className="form-message" data-tone="warning" role="status">
           This Course Check is out of date. A relevant input changed after it was
           reviewed. Refresh the plan or open a new Course Check, then approve the
@@ -2320,6 +2328,17 @@ export function CourseCheckPage() {
                 {decisionReview.partialExecution.skippedCount} will stay unchanged
               </p>
             ) : null}
+            {currentPlan.sharedApproval?.currentStage.reasonRequired ? (
+              <label className="course-check-approval-reason">
+                Approval reason
+                <input
+                  type="text"
+                  value={approvalReason}
+                  onChange={(event) => setApprovalReason(event.target.value)}
+                  placeholder="Why approve this exact stage?"
+                />
+              </label>
+            ) : null}
             {!decisionReview || selectedItemIds.size > 0 ? (
               <div className="course-check-defer">
                 <label>
@@ -2359,6 +2378,11 @@ export function CourseCheckPage() {
                 disabled={
                   decisionReview
                     ? !decisionReview.partialExecution.canExecute ||
+                      (currentPlan.sharedApproval?.currentStage.stageId === "apply-decision" &&
+                        !currentPlan.sharedApproval.currentStage.canExecute &&
+                        !currentPlan.sharedApproval.currentStage.canEndorse) ||
+                      (currentPlan.sharedApproval?.currentStage.reasonRequired &&
+                        !approvalReason.trim()) ||
                       applyMutation.isPending ||
                       deferMutation.isPending
                     : blocked || applyMutation.isPending || !applyStage
@@ -2379,7 +2403,9 @@ export function CourseCheckPage() {
                   applyMutation.mutate(currentPlan);
                 }}
               >
-                {decisionReview?.partialExecution.primaryActionLabel ??
+                {currentPlan.sharedApproval?.currentStage.canEndorse
+                  ? `Endorse ${decisionReview?.partialExecution.primaryActionLabel ?? decisionReview?.primaryActionLabel ?? "decision"}`
+                  : decisionReview?.partialExecution.primaryActionLabel ??
                   decisionReview?.primaryActionLabel ??
                   applyStage?.verb ??
                   "Apply decision"}
