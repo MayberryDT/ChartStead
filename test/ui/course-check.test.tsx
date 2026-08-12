@@ -541,6 +541,10 @@ describe("Course Check review workspace", () => {
       decisionReview: {
         ...proposedDecisionReview,
         items: [...proposedDecisionReview.items],
+        partialExecution: {
+          ...proposedDecisionReview.partialExecution,
+          requiredDeferredItemIds: [...proposedDecisionReview.partialExecution.requiredDeferredItemIds],
+        },
         title,
         courseCheckSummary: "Course Check found no issues.",
         counts: { selected: items.length, ready: items.length, eligible: items.length, needsAction: 0, warning: 0, skipped: 0 },
@@ -582,6 +586,10 @@ describe("Course Check review workspace", () => {
       decisionReview: {
         ...proposedDecisionReview,
         items: [...proposedDecisionReview.items],
+        partialExecution: {
+          ...proposedDecisionReview.partialExecution,
+          requiredDeferredItemIds: [...proposedDecisionReview.partialExecution.requiredDeferredItemIds],
+        },
         courseCheckSummary: "Course Check found no issues.",
         counts: { selected: 1, ready: 1, eligible: 1, needsAction: 0, warning: 0, skipped: 0 },
         issues: [],
@@ -610,6 +618,10 @@ describe("Course Check review workspace", () => {
       decisionReview: {
         ...proposedDecisionReview,
         items: [...proposedDecisionReview.items],
+        partialExecution: {
+          ...proposedDecisionReview.partialExecution,
+          requiredDeferredItemIds: [...proposedDecisionReview.partialExecution.requiredDeferredItemIds],
+        },
         courseCheckSummary: "Course Check found no issues.",
         counts: { selected: 1, ready: 1, eligible: 1, needsAction: 0, warning: 0, skipped: 0 },
         issues: [],
@@ -715,6 +727,10 @@ describe("Course Check review workspace", () => {
       decisionReview: {
         ...proposedDecisionReview,
         items: [...proposedDecisionReview.items],
+        partialExecution: {
+          ...proposedDecisionReview.partialExecution,
+          requiredDeferredItemIds: [...proposedDecisionReview.partialExecution.requiredDeferredItemIds],
+        },
         courseCheckSummary: "Course Check found no issues.",
         counts: { selected: 1, ready: 1, eligible: 1, needsAction: 0, warning: 0, skipped: 0 },
         issues: [],
@@ -732,6 +748,10 @@ describe("Course Check review workspace", () => {
       decisionReview: {
         ...projectedAppliedPlan.decisionReview,
         items: [...projectedAppliedPlan.decisionReview.items],
+        partialExecution: {
+          ...projectedAppliedPlan.decisionReview.partialExecution,
+          requiredDeferredItemIds: [...projectedAppliedPlan.decisionReview.partialExecution.requiredDeferredItemIds],
+        },
         courseCheckSummary: "Course Check found no issues.",
         counts: { selected: 1, ready: 0, eligible: 0, needsAction: 0, warning: 0, skipped: 0 },
         issues: [],
