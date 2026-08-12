@@ -25,3 +25,4 @@ Blocked by Course Check 02 — Batch decisions and shared workspace, Course Chec
 - 2026-08-11 — frontier-reconcile: All blockers done → ready-for-agent.
 - 2026-08-11 — Claimed for implementation on branch `course-check-07-airtable-effects` in a dedicated worktree.
 - 2026-08-11 — Ready for human QA on `http://100.105.117.93:5187/e/pacific-open-data-summit-2026/submissions`. Test exact Airtable previews, internal apply before integration, Write/Defer/Remove actions, degraded unconfigured behavior, and reconciliation/compensation states.
+- 2026-08-11 — Rebuilt the Course Check review surface after QA feedback: removed the accidental nested app grid, adopted the submissions visual language, and made evidence/Airtable effects collapsed by default with visible attention badges. Updated demo: `http://100.105.117.93:5187/e/pacific-open-data-summit-2026/course-checks/17b70e24-e991-40f8-98c6-2b8f162c993a`.

@@ -23,4 +23,4 @@
 
 Blocked pending Competition 07 — Decision communication and calendar integration verification, Competition 10 — Airtable mapping and authenticated HTTP foundation, and Course Check 10 — Course Check killer demo and hardening. All other declared competition dependencies are done.
 
-- 2026-08-11 — frontier-reconcile: Still blocked on: Competition 07 (blocked); Course Check 10 (blocked).
+- 2026-08-12 — frontier-reconcile: Still blocked on: Competition 07 (blocked); Course Check 10 (blocked).

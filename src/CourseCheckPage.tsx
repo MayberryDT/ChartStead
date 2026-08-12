@@ -37,25 +37,45 @@ function EvidenceSectionView({
   section: CourseCheckEvidenceSection;
   plan: CourseCheckPlan;
 }) {
-  const [open, setOpen] = useState(section.defaultExpanded);
   const findings = plan.body.findings.filter((finding) =>
     section.findingIds.includes(finding.id),
   );
   const deltas = section.deltaIndexes
     .map((index) => plan.body.deltas[index])
     .filter(Boolean);
+  const blockerCount = findings.filter((finding) => finding.severity === "blocker").length;
+  const warningCount = findings.filter((finding) => finding.severity === "warning").length;
+  const infoCount = findings.filter((finding) => finding.severity === "info").length;
+  const severity = blockerCount > 0 ? "blocker" : warningCount > 0 ? "warning" : infoCount > 0 ? "info" : "clean";
+  const findingLabel = blockerCount > 0
+    ? `${blockerCount} blocker${blockerCount === 1 ? "" : "s"}`
+    : warningCount > 0
+      ? `${warningCount} warning${warningCount === 1 ? "" : "s"}`
+      : infoCount > 0
+        ? `${infoCount} note${infoCount === 1 ? "" : "s"}`
+        : null;
 
   return (
     <details
       className="course-check-evidence"
-      open={open}
-      onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}
       data-kind={section.kind}
-      data-expanded={section.defaultExpanded ? "risk" : "clean"}
+      data-severity={severity}
     >
       <summary>
-        <strong>{section.title}</strong>
-        <span className="course-check-evidence-summary">{section.summary}</span>
+        <span className="course-check-disclosure-main">
+          <strong>{section.title}</strong>
+          <span className="course-check-evidence-summary">{section.summary}</span>
+        </span>
+        <span className="course-check-disclosure-meta">
+          <span>{deltas.length} change{deltas.length === 1 ? "" : "s"}</span>
+          {findingLabel ? (
+            <span className="course-check-risk-badge" data-severity={severity}>
+              {findingLabel}
+            </span>
+          ) : null}
+          <span className="course-check-review-label">Review</span>
+          <span className="course-check-chevron" aria-hidden="true">⌄</span>
+        </span>
       </summary>
       <div className="course-check-evidence-body">
         {findings.length === 0 && deltas.length === 0 ? (
@@ -89,6 +109,100 @@ function EvidenceSectionView({
         ) : null}
       </div>
     </details>
+  );
+}
+
+function AirtableStage({
+  plan,
+  isPending,
+  onAction,
+}: {
+  plan: CourseCheckPlan;
+  isPending: boolean;
+  onAction: (action: "execute" | "reconcile" | "deferred" | "removed") => void;
+}) {
+  const effects = plan.body.airtable.effects;
+  if (effects.length === 0) return null;
+
+  return (
+    <section className="course-check-airtable" aria-labelledby="airtable-effects-title">
+      <header className="course-check-section-header">
+        <div>
+          <p className="eyebrow">Optional integration stage</p>
+          <h2 id="airtable-effects-title">Write to Airtable</h2>
+          <p className="muted">{plan.body.airtable.summary}</p>
+        </div>
+        <span className="course-check-stage-badge">
+          {plan.body.airtable.disposition}
+        </span>
+      </header>
+
+      <div className="course-check-airtable-effects">
+        {effects.map((effect) => (
+          <details
+            className="course-check-airtable-effect"
+            data-state={effect.state}
+            key={effect.id}
+          >
+            <summary>
+              <span className="course-check-disclosure-main">
+                <strong>{effect.operation} {effect.tableName}</strong>
+                <span className="course-check-effect-identity">
+                  <span>{effect.kind}</span>
+                  <span className="mono" title={effect.chartsteadId}>
+                    {effect.chartsteadId}
+                  </span>
+                </span>
+              </span>
+              <span className="course-check-disclosure-meta">
+                <span className="course-check-airtable-state" data-state={effect.state}>
+                  {effect.state.replaceAll("_", " ")}
+                </span>
+                <span className="course-check-review-label">Review</span>
+                <span className="course-check-chevron" aria-hidden="true">⌄</span>
+              </span>
+            </summary>
+            <div className="course-check-airtable-effect-body">
+              <dl>
+                {Object.entries(effect.fields).map(([field, value]) => (
+                  <div key={field}>
+                    <dt>{field}</dt>
+                    <dd>{String(value ?? "—")}</dd>
+                  </div>
+                ))}
+              </dl>
+              {effect.providerRecordId ? (
+                <p className="muted">
+                  Provider record <span className="mono" title={effect.providerRecordId}>{effect.providerRecordId}</span>
+                </p>
+              ) : null}
+              {effect.lastError ? (
+                <p className="form-message" data-tone="error">{effect.lastError}</p>
+              ) : null}
+            </div>
+          </details>
+        ))}
+      </div>
+
+      {plan.receipt && plan.body.airtable.disposition === "active" ? (
+        <div className="course-check-airtable-actions">
+          <button type="button" className="btn btn-primary" disabled={isPending} onClick={() => onAction("execute")}>
+            Write to Airtable
+          </button>
+          {effects.some((effect) => effect.state === "unknown") ? (
+            <button type="button" className="btn btn-secondary" disabled={isPending} onClick={() => onAction("reconcile")}>
+              Reconcile unknown writes
+            </button>
+          ) : null}
+          <button type="button" className="btn btn-secondary" disabled={isPending} onClick={() => onAction("deferred")}>
+            Defer
+          </button>
+          <button type="button" className="btn btn-ghost" disabled={isPending} onClick={() => onAction("removed")}>
+            Remove stage
+          </button>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -194,8 +308,8 @@ function DecisionBatchBody({
       <section className="panel">
         <h2>Evidence</h2>
         <p className="lede">
-          Irreversible effects and people first. Clean sections stay collapsed; blockers
-          and warnings expand automatically.
+          Irreversible effects and people first. All sections stay collapsed until you
+          choose to review them; warnings and blockers remain visible in each summary.
         </p>
         <div className="course-check-evidence-list">
           {sections.map((section) => (
@@ -811,7 +925,7 @@ export function CourseCheckPage() {
 
   if (planQuery.isLoading) {
     return (
-      <main className="app course-check-page">
+      <main className="course-check-page">
         <p>Loading Course Check…</p>
       </main>
     );
@@ -819,7 +933,7 @@ export function CourseCheckPage() {
 
   if (planQuery.isError || !planQuery.data) {
     return (
-      <main className="app course-check-page">
+      <main className="course-check-page">
         <p className="form-message" data-tone="error" role="alert">
           {planQuery.error instanceof Error
             ? planQuery.error.message
@@ -863,9 +977,9 @@ export function CourseCheckPage() {
   );
 
   return (
-    <main className="app course-check-page">
+    <main className="course-check-page">
       <header className="course-check-header">
-        <div>
+        <div className="course-check-header-copy">
           <p className="eyebrow">Course Check</p>
           <h1>
             {isCommunication
@@ -884,14 +998,22 @@ export function CourseCheckPage() {
                 : "Resumable event resource. Another authorized administrator can inspect and continue this exact versioned batch."}
           </p>
         </div>
-        <Link
-          className="btn btn-secondary btn-sm"
-          to="/e/$eventId/submissions"
-          params={{ eventId }}
-          search={{ q: undefined, status: undefined, track: undefined, sort: undefined }}
-        >
-          Back to submissions
-        </Link>
+        <div className="course-check-header-tools">
+          <div className="course-check-header-status">
+            <span className="course-check-plan-state" data-state={currentPlan.state}>
+              {currentPlan.state}
+            </span>
+            <span className="mono" title={currentPlan.id}>#{currentPlan.id.slice(0, 8)}</span>
+          </div>
+          <Link
+            className="btn btn-secondary btn-sm"
+            to="/e/$eventId/submissions"
+            params={{ eventId }}
+            search={{ q: undefined, status: undefined, track: undefined, sort: undefined }}
+          >
+            Back to submissions
+          </Link>
+        </div>
       </header>
 
       {isDecision ? (
@@ -936,68 +1058,11 @@ export function CourseCheckPage() {
         <GuaranteedBody plan={currentPlan} />
       )}
 
-      {currentPlan.body.airtable.effects.length > 0 ? (
-        <section className="course-check-airtable" aria-labelledby="airtable-effects-title">
-          <div>
-            <p className="eyebrow">Optional integration stage</p>
-            <h2 id="airtable-effects-title">Write to Airtable</h2>
-            <p className="muted">{currentPlan.body.airtable.summary}</p>
-          </div>
-          <ul className="course-check-airtable-effects">
-            {currentPlan.body.airtable.effects.map((effect) => (
-              <li key={effect.id}>
-                <div>
-                  <strong>{effect.operation} {effect.tableName}</strong>
-                  <span className="mono">{effect.chartsteadId}</span>
-                </div>
-                <span className="course-check-airtable-state" data-state={effect.state}>
-                  {effect.state.replaceAll("_", " ")}
-                </span>
-                <dl>
-                  {Object.entries(effect.fields).map(([field, value]) => (
-                    <div key={field}>
-                      <dt>{field}</dt>
-                      <dd>{String(value ?? "—")}</dd>
-                    </div>
-                  ))}
-                </dl>
-                {effect.providerRecordId ? (
-                  <p className="muted">Provider record <span className="mono">{effect.providerRecordId}</span></p>
-                ) : null}
-                {effect.lastError ? <p className="form-message" data-tone="error">{effect.lastError}</p> : null}
-              </li>
-            ))}
-          </ul>
-          {currentPlan.receipt && currentPlan.body.airtable.disposition === "active" ? (
-            <div className="course-check-airtable-actions">
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={airtableMutation.isPending}
-                onClick={() => airtableMutation.mutate({ plan: currentPlan, action: "execute" })}
-              >
-                Write to Airtable
-              </button>
-              {currentPlan.body.airtable.effects.some((effect) => effect.state === "unknown") ? (
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled={airtableMutation.isPending}
-                  onClick={() => airtableMutation.mutate({ plan: currentPlan, action: "reconcile" })}
-                >
-                  Reconcile unknown writes
-                </button>
-              ) : null}
-              <button type="button" className="btn btn-secondary" disabled={airtableMutation.isPending} onClick={() => airtableMutation.mutate({ plan: currentPlan, action: "deferred" })}>
-                Defer
-              </button>
-              <button type="button" className="btn btn-ghost" disabled={airtableMutation.isPending} onClick={() => airtableMutation.mutate({ plan: currentPlan, action: "removed" })}>
-                Remove stage
-              </button>
-            </div>
-          ) : null}
-        </section>
-      ) : null}
+      <AirtableStage
+        plan={currentPlan}
+        isPending={airtableMutation.isPending}
+        onAction={(action) => airtableMutation.mutate({ plan: currentPlan, action })}
+      />
 
       <footer className="course-check-actions">
         {isDecision && decisionComplete ? (
