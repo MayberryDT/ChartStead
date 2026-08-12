@@ -1,6 +1,6 @@
 # 26 — Send general speaker communications through Course Check
 
-**Status:** in-progress
+**Status:** done
 
 **Blocked by:** None — can start immediately.
 
@@ -31,3 +31,4 @@ None — can start immediately.
 
 - 2026-08-12 — Started for agent implementation after Tyler authorized the incoming Competition Build frontier; demos, reviews, and human QA are deferred.
 - 2026-08-12 — Implemented the event-scoped Messages workspace on the locked organizer shell, exact individual/readiness-group audience selection, recipient substitutions, communication history, and a non-sending handoff into the authoritative Communication Course Check. Direct speaker scope no longer expands silently to co-speakers; draft freeze renders and freezes each recipient payload; stale speaker identity/address data blocks drafts while the existing explicit send, outbox, retry, reconciliation, compensation, redaction, and idempotency boundaries remain authoritative. Verification: UI 82/82 passed; ticket worker communication/delivery 18/18 passed; the full worker run reached 185/186 because the unrelated guided-CFP upload test exceeded its five-second timeout, then that test passed alone. The competition-spine browser file passed 3/3 and the broad browser suite passed 17/18; its sole failure is the pre-existing Agenda card contrast violation (ratios 3.78–4.1 against 4.5). Typecheck and production build passed. Status intentionally remains in-progress for parent integration.
+- 2026-08-12 — Parent integration rebased the Messages work over the completed speaker directory without losing either route or organizer-shell context. Post-rebase verification passed typecheck, the integrated organizer UI file (28/28), and the focused Communication Course Check worker file (10/10). Tyler explicitly deferred demos, reviews, and human QA for this batch, so the ticket is closed on automated acceptance evidence.
