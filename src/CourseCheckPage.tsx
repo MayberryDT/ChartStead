@@ -11,7 +11,11 @@ import type {
   DecisionPlanBody,
   PublicationPlanBody,
 } from "../shared/course-check";
-import { formatCourseCheckActorLabel } from "../shared/course-check";
+import {
+  formatCourseCheckActorLabel,
+  linkedPlanIdsFromBody,
+  parentPlanIdFromBody,
+} from "../shared/course-check";
 import {
   ApiError,
   applyCourseCheckPlan,
@@ -66,6 +70,7 @@ function EvidenceSectionView({
       className="course-check-evidence"
       data-kind={section.kind}
       data-severity={severity}
+      open={section.defaultExpanded}
     >
       <summary>
         <span className="course-check-disclosure-main">
@@ -338,6 +343,74 @@ function DecisionBatchBody({
         </section>
       ) : null}
 
+      <OperationHistoryPanel plan={plan} />
+
+      <section className="panel">
+        <h2>External effects</h2>
+        <p>
+          No message, calendar, public-program, or integration delivery is created by
+          Apply decision.
+        </p>
+      </section>
+    </div>
+  );
+}
+
+function OperationHistoryPanel({ plan }: { plan: CourseCheckPlan }) {
+  const linked = linkedPlanIdsFromBody(plan.body);
+  const parentId = parentPlanIdFromBody(plan.body);
+  const activity = plan.activity ?? [];
+  return (
+    <>
+      {linked.length > 0 || parentId ? (
+        <section className="panel course-check-operation-history" aria-label="Linked operation history">
+          <h2>Operation history</h2>
+          <p className="muted">
+            Linked plans stay navigable as one history. Approval never transfers between them.
+          </p>
+          <ul>
+            {parentId ? (
+              <li>
+                Parent{" "}
+                <Link
+                  to="/e/$eventId/course-checks/$planId"
+                  params={{ eventId: plan.eventId, planId: parentId }}
+                >
+                  {parentId.slice(0, 8)}
+                </Link>
+              </li>
+            ) : null}
+            {linked.map((id) => (
+              <li key={id}>
+                Linked{" "}
+                <Link
+                  to="/e/$eventId/course-checks/$planId"
+                  params={{ eventId: plan.eventId, planId: id }}
+                >
+                  {id.slice(0, 8)}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {activity.length > 0 ? (
+        <section className="panel" aria-label="Shared activity">
+          <h2>Shared activity</h2>
+          <ul className="course-check-activity">
+            {activity.map((entry) => (
+              <li key={entry.id} data-role={entry.role}>
+                <span className="course-check-activity-role">{entry.role}</span>
+                {" · "}
+                {entry.actor ? formatCourseCheckActorLabel(entry.actor) : "system"}
+                {": "}
+                {entry.summary}
+                {entry.outcome ? ` → ${entry.outcome}` : ""}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       {plan.mutations && plan.mutations.length > 0 ? (
         <section className="panel">
           <h2>Mutation history</h2>
@@ -351,15 +424,7 @@ function DecisionBatchBody({
           </ul>
         </section>
       ) : null}
-
-      <section className="panel">
-        <h2>External effects</h2>
-        <p>
-          No message, calendar, public-program, or integration delivery is created by
-          Apply decision.
-        </p>
-      </section>
-    </div>
+    </>
   );
 }
 
@@ -388,6 +453,7 @@ function GuaranteedBody({ plan }: { plan: CourseCheckPlan }) {
       {(body.evidenceSections ?? []).map((section) => (
         <EvidenceSectionView key={section.kind} section={section} plan={plan} />
       ))}
+      <OperationHistoryPanel plan={plan} />
     </div>
   );
 }
@@ -525,6 +591,7 @@ function PublicationBody({
       {(body.evidenceSections ?? []).map((section) => (
         <EvidenceSectionView key={section.kind} section={section} plan={plan} />
       ))}
+      <OperationHistoryPanel plan={plan} />
     </div>
   );
 }
@@ -986,19 +1053,7 @@ function CommunicationBody({
         </div>
       </section>
 
-      {plan.mutations && plan.mutations.length > 0 ? (
-        <section className="panel">
-          <h2>Mutation history</h2>
-          <ul className="course-check-mutations">
-            {plan.mutations.map((mutation) => (
-              <li key={mutation.id}>
-                v{mutation.fromVersion}→v{mutation.toVersion} · {mutation.kind} ·{" "}
-                {formatCourseCheckActorLabel(mutation.actor)}: {mutation.summary}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      <OperationHistoryPanel plan={plan} />
     </div>
   );
 }

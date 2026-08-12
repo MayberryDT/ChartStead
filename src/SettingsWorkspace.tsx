@@ -7,14 +7,17 @@ import {
   type AgentOperatingMode,
   type CourseCheckScope,
 } from "../shared/agent-api";
+import type { EventCourseCheckPolicy } from "../shared/course-check";
 import {
   ApiError,
   connectAirtableSync,
   createEventApiKey,
   disconnectAirtableSync,
   fetchAirtableSync,
+  fetchCourseCheckPolicy,
   listEventApiKeys,
   pullAirtableSync,
+  updateCourseCheckPolicy,
   updateEventApiKey,
   type CreatedEventApiKey,
   type EventApiKeySummary,
@@ -80,6 +83,131 @@ function formatTimestamp(value: string | null): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
+}
+
+function CourseCheckPolicyCard({ eventId }: { eventId: string }) {
+  const queryClient = useQueryClient();
+  const [message, setMessage] = useState<string | null>(null);
+  const [tone, setTone] = useState<"success" | "error">("success");
+  const policyQuery = useQuery({
+    queryKey: ["course-check-policy", eventId],
+    queryFn: () => fetchCourseCheckPolicy(eventId),
+  });
+  const [draft, setDraft] = useState<EventCourseCheckPolicy | null>(null);
+  useEffect(() => {
+    if (policyQuery.data) setDraft(policyQuery.data);
+  }, [policyQuery.data]);
+
+  const saveMutation = useMutation({
+    mutationFn: (policy: EventCourseCheckPolicy) =>
+      updateCourseCheckPolicy(eventId, policy),
+    onSuccess: (policy) => {
+      setDraft(policy);
+      setTone("success");
+      setMessage("Course Check policy saved. Baseline protections remain in force.");
+      void queryClient.invalidateQueries({ queryKey: ["course-check-policy", eventId] });
+    },
+    onError: (error) => {
+      setTone("error");
+      setMessage(
+        error instanceof ApiError ? error.message : "Unable to save Course Check policy.",
+      );
+    },
+  });
+
+  if (!draft) {
+    return (
+      <section className="settings-card" aria-labelledby="cc-policy-heading">
+        <h3 id="cc-policy-heading">Course Check policy</h3>
+        <p className="muted">{policyQuery.isError ? "Unable to load policy." : "Loading…"}</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="settings-card" aria-labelledby="cc-policy-heading">
+      <div className="settings-card-header">
+        <div>
+          <h3 id="cc-policy-heading">Course Check policy</h3>
+          <p className="muted">
+            Optional stricter approvals. Policy can only add gates — never disable digest,
+            authorization, freshness, or break-glass controls.
+          </p>
+        </div>
+      </div>
+      <form
+        className="settings-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setMessage(null);
+          saveMutation.mutate(draft);
+        }}
+      >
+        <label className="settings-check">
+          <input
+            type="checkbox"
+            checked={draft.requireTwoPersonApproval}
+            onChange={(e) =>
+              setDraft({ ...draft, requireTwoPersonApproval: e.target.checked })
+            }
+          />
+          <span>Require two-person approval before stage execution</span>
+        </label>
+        <label className="settings-check">
+          <input
+            type="checkbox"
+            checked={draft.requireDistinctApprover}
+            onChange={(e) =>
+              setDraft({ ...draft, requireDistinctApprover: e.target.checked })
+            }
+          />
+          <span>Approver must differ from the plan requester</span>
+        </label>
+        <label className="settings-check">
+          <input
+            type="checkbox"
+            checked={draft.requireReasonOnApprove}
+            onChange={(e) =>
+              setDraft({ ...draft, requireReasonOnApprove: e.target.checked })
+            }
+          />
+          <span>Require a reason on every stage approval</span>
+        </label>
+        <label className="settings-label" htmlFor="cc-max-agent-mode">
+          Maximum agent operating mode
+        </label>
+        <select
+          id="cc-max-agent-mode"
+          className="settings-input"
+          value={draft.maxAgentMode}
+          onChange={(e) =>
+            setDraft({
+              ...draft,
+              maxAgentMode: e.target.value as AgentOperatingMode,
+            })
+          }
+        >
+          <option value="propose_only">Propose only</option>
+          <option value="delegated_execution">Delegated execution</option>
+          <option value="autonomous_policy">Autonomous policy</option>
+        </select>
+        <div className="settings-actions">
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={saveMutation.isPending}
+          >
+            {saveMutation.isPending ? "Saving…" : "Save policy"}
+          </button>
+        </div>
+        {message ? (
+          <p className={`form-message ${tone === "error" ? "error" : "success"}`} role="status">
+            {message}
+          </p>
+        ) : null}
+      </form>
+    </section>
+  );
 }
 
 function AgentApiKeysCard({ eventId }: { eventId: string }) {
@@ -471,6 +599,7 @@ export function SettingsWorkspace({ eventId }: { eventId: string }) {
           <h2>Settings</h2>
         </div>
         <div className="settings-stack">
+          <CourseCheckPolicyCard eventId={eventId} />
           <AgentApiKeysCard eventId={eventId} />
 
           <section className="settings-card" aria-labelledby="airtable-sync-heading">
