@@ -4,7 +4,7 @@
 
 **Blocked by:** Course Check 17 — Direct repair actions and preserved review context; Course Check 18 — Connected decision-to-draft Course Check workspace.
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 ## Source
 
@@ -28,3 +28,5 @@
 - 2026-08-12 — This ticket makes the research compatible with the already-shipped team-policy and durable-operation kernel (`sessions/2026/08/chartstead-course-check-09-team-policy`).
 
 - 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.
+
+- 2026-08-12 — Started implementation after Tyler explicitly authorized Course Check 20; automated verification will replace demo, review, and human QA for this closeout.
