@@ -587,6 +587,61 @@ describe("unified external-effect review projection", () => {
     });
   });
 
+  it("keeps an all-success batch Sent when only one effect was reconciled", () => {
+    const sent = communicationPlan();
+    if (sent.body.actionType !== "communication") throw new Error("Expected communication");
+    sent.body.effects = sent.body.effects.map((effect) => ({
+      ...effect,
+      status: "succeeded" as const,
+      lastError: null,
+      succeededAt: "2026-08-12T10:06:00.000Z",
+    }));
+    sent.body.deliverySummary = { total: 2, queued: 0, sending: 0, succeeded: 2, retryScheduled: 0, failed: 0, unknown: 0 };
+    sent.mutations = [{
+      id: "reconcile-one",
+      planId: sent.id,
+      fromVersion: sent.version,
+      toVersion: sent.version,
+      kind: "reconcile",
+      actor,
+      at: "2026-08-12T10:07:00.000Z",
+      summary: "Reconciled effect-failed as delivered.",
+    }];
+
+    const projected = projectCourseCheckForViewer(sent, adminProjection);
+    expect(projected?.communicationReview?.currentStatus).toEqual({
+      key: "sent",
+      label: "Sent",
+    });
+    expect(projected?.communicationReview?.deliveryResult?.counts.reconciled).toBe(1);
+  });
+
+  it("counts one correction plan exactly once when its mutation and body describe the same correction", () => {
+    const corrected = communicationPlan();
+    if (corrected.body.actionType !== "communication") throw new Error("Expected communication");
+    corrected.body.compensation = {
+      originalPlanId: "communication-original",
+      originalEffectId: "effect-original",
+      reason: "Correct the prior message",
+    };
+    corrected.mutations = [{
+      id: "compensate-one",
+      planId: corrected.id,
+      fromVersion: 2,
+      toVersion: 3,
+      kind: "compensate",
+      actor,
+      at: "2026-08-12T10:07:00.000Z",
+      summary: "Created correction for effect-original.",
+    }];
+
+    const projected = projectCourseCheckForViewer(corrected, adminProjection);
+    expect(projected?.communicationReview?.deliveryResult?.counts.corrected).toBe(1);
+    expect(projected?.communicationReview?.deliveryResult?.statement).toContain(
+      "1 corrected",
+    );
+  });
+
   it("redacts Outbox groups, addresses, prior messages, and send authority together", () => {
     const prepared = communicationPlan();
     if (prepared.body.actionType !== "communication") throw new Error("Expected communication");

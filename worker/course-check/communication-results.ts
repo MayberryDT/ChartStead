@@ -25,8 +25,12 @@ function reconciliationCount(plan: CourseCheckPlan): number {
 }
 
 function correctionCount(plan: CourseCheckPlan): number {
-  return (plan.mutations ?? []).filter((mutation) => mutation.kind === "compensate").length +
-    (plan.body.actionType === "communication" && plan.body.compensation ? 1 : 0);
+  const mutations = (plan.mutations ?? []).filter(
+    (mutation) => mutation.kind === "compensate",
+  ).length;
+  const linkedCorrection =
+    plan.body.actionType === "communication" && plan.body.compensation ? 1 : 0;
+  return Math.max(mutations, linkedCorrection);
 }
 
 function isBounce(error: string | null): boolean {
@@ -50,7 +54,7 @@ function currentStatus(
         : { key: "failed", label: "Failed" };
     }
     if (body.deliverySummary.succeeded === body.deliverySummary.total) {
-      return reconciliationCount(plan) > 0
+      return reconciliationCount(plan) >= body.deliverySummary.total
         ? { key: "delivered", label: "Delivered" }
         : { key: "sent", label: "Sent" };
     }
