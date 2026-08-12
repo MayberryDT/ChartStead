@@ -1546,6 +1546,9 @@ function buildSharedApprovalProjection(
   const actionable =
     activeStage.status === "ready" ||
     activeStage.status === "approved" ||
+    (activeStage.id === "send-messages" &&
+      plan.body.actionType === "communication" &&
+      plan.body.stageVisibility.send === "ready") ||
     (activeStage.id === "apply-decision" &&
       plan.decisionReview?.partialExecution.canExecute === true);
   const violatesDistinctApprover = Boolean(
@@ -1773,18 +1776,23 @@ export function projectCourseCheckForViewer(
   const externalReview = buildExternalEffectReviewProjection(projected, options);
   if (externalReview) projected = { ...projected, externalReview };
 
+  const sharedApproval = buildSharedApprovalProjection(projected, options);
+  projected = { ...projected, sharedApproval };
+
+  const communicationStage = sharedApproval.currentStage.stageId === "send-messages"
+    ? sharedApproval.currentStage
+    : null;
   const communicationReview = buildCommunicationReviewProjection(projected, {
     canViewCommunicationEvidence: options.canViewCommunicationEvidence,
-    canSend:
-      options.role !== "reviewer" &&
-      (options.permittedStageIds ?? []).includes("send-messages"),
+    sendAction:
+      communicationStage?.canExecute
+        ? "execute"
+        : communicationStage?.canEndorse
+          ? "endorse"
+          : null,
+    reasonRequired: communicationStage?.reasonRequired ?? false,
   });
   if (communicationReview) projected = { ...projected, communicationReview };
-
-  projected = {
-    ...projected,
-    sharedApproval: buildSharedApprovalProjection(projected, options),
-  };
 
   return projected;
 }

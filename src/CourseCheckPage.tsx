@@ -1822,12 +1822,16 @@ export function CourseCheckPage() {
         digest: current.digest,
         stageId: "send-messages",
         idempotencyKey: sendKey,
+        reason: approvalReason.trim() || null,
       });
     },
     onSuccess: (next) => {
       queryClient.setQueryData(["course-check", eventId, activePlanId], next);
       setMessage(
-        "Delivery intent is durable. Each address now has an independent effect record.",
+        next.body.actionType === "communication" && next.body.effects.length === 0 &&
+          next.sharedApproval?.currentStage.endorsementCount
+          ? "Endorsement recorded. A different authorized administrator can resume this exact review and send the frozen messages."
+          : "Delivery intent is durable. Each address now has an independent effect record.",
       );
       uxInstrumentation.trackStageOutcome(
         "succeeded",
@@ -2235,6 +2239,8 @@ export function CourseCheckPage() {
           {currentPlan.communicationReview ? (
             <CommunicationResultPanel
               review={currentPlan.communicationReview}
+              approvalReason={approvalReason}
+              onApprovalReasonChange={setApprovalReason}
               onSend={
                 currentPlan.communicationReview.sendAction
                   ? () => {

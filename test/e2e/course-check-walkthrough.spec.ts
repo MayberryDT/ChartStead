@@ -314,6 +314,32 @@ test("draft result stays truthful through the exact Outbox handoff and reload", 
   await page.reload();
   await expect(page.getByRole("region", { name: "Exact Outbox draft set" })).toBeVisible();
   await expect(page.getByText(/No emails were sent\./).first()).toBeVisible();
+
+  const policyUrl = "/api/events/pacific-open-data-summit-2026/course-checks/policy";
+  expect((await page.request.put(policyUrl, {
+    data: { policy: {
+      requireTwoPersonApproval: false,
+      requireDistinctApprover: false,
+      requireReasonOnApprove: true,
+      maxAgentMode: "autonomous_policy",
+    } },
+  })).ok()).toBe(true);
+  try {
+    await page.goto(`/e/pacific-open-data-summit-2026/course-checks/${communication.id}`);
+    const send = page.getByRole("button", { name: /Send \d+ messages?/ });
+    await expect(send).toBeDisabled();
+    await page.getByLabel("Approval reason").fill("Reviewed exact frozen Outbox set");
+    await expect(send).toBeEnabled();
+  } finally {
+    expect((await page.request.put(policyUrl, {
+      data: { policy: {
+        requireTwoPersonApproval: false,
+        requireDistinctApprover: false,
+        requireReasonOnApprove: false,
+        maxAgentMode: "autonomous_policy",
+      } },
+    })).ok()).toBe(true);
+  }
 });
 
 test("publication uses the same external-effect review in the API and organizer workspace", async ({

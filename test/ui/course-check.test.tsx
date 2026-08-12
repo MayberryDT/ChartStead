@@ -424,6 +424,61 @@ const communicationPlan: CourseCheckPlan = {
   receipt: null,
 };
 
+const frozenCommunicationPlan: CourseCheckPlan = {
+  ...communicationPlan,
+  state: "Complete",
+  body: {
+    ...communicationBody,
+    stages: [
+      { id: "create-drafts", label: "Create drafts", status: "complete", verb: "Create drafts" },
+      { id: "send-messages", label: "Send messages", status: "ready", verb: "Send messages", external: true },
+    ],
+    stageVisibility: { ...communicationBody.stageVisibility, draft: "complete", send: "ready" },
+    drafts: [{
+      draftId: "draft-1", groupId: "group-1", proposalId: body.proposalId,
+      sessionId: "session-1", toEmail: "speaker@example.test", recipientName: "Example Speaker",
+      subject: communicationBody.subject, bodyText: communicationBody.bodyText,
+      bodyHtml: communicationBody.bodyHtml, attachmentRefs: [], calendarIntent: null,
+      status: "frozen", frozenAt: "2026-08-11T12:02:00.000Z", frozenPlanVersion: 1,
+    }],
+  },
+  communicationReview: {
+    kind: "communication_review",
+    currentStatus: { key: "ready_to_send", label: "Ready to send" },
+    progress: [
+      { key: "no_draft", label: "No draft", state: "complete" },
+      { key: "draft_prepared", label: "Draft prepared", state: "complete" },
+      { key: "ready_to_send", label: "Ready to send", state: "current" },
+      { key: "sending", label: "Sending", state: "pending" },
+    ],
+    draftResult: {
+      title: "Draft prepared", counts: { prepared: 1, omitted: 0, failed: 0, unchanged: 0 },
+      noEmailsSent: true,
+      statement: "1 draft prepared, 0 recipients omitted, 0 failed, and 0 items unchanged. No emails were sent.",
+      preparedAt: "2026-08-11T12:02:00.000Z",
+    },
+    handoffs: [{ kind: "outbox", label: "Review 1 draft in Outbox", href: "/e/pacific-open-data-summit-2026/messages?planId=communication-plan-1", count: 1 }],
+    outbox: { exactDraftCount: 1, sourceLabel: "Prepared from applied decisions", groups: [], draftlessGroups: [] },
+    deliveryResult: null,
+    sendAction: { stageId: "send-messages", action: "endorse", reasonRequired: true, label: "Endorse send of 1 message", effectSummary: "Approve exactly 1 frozen message." },
+    immutableBoundary: null,
+  },
+  sharedApproval: {
+    kind: "shared_approval",
+    currentStage: {
+      stageId: "send-messages", label: "Send messages", status: "ready", canExecute: false,
+      canEndorse: true, canRequestApproval: false,
+      availableCommit: { stageId: "send-messages", label: "Send messages", effectSummary: "Send messages" },
+      requiredApproverCount: 2, requiredEndorsementCount: 1, endorsementCount: 0,
+      distinctApproverRequired: true, reasonRequired: true,
+      stateSummary: "Send messages is ready for your endorsement.",
+      nextAction: "Endorse this exact review with a reason; a different authorized administrator can then execute it.",
+    },
+    resume: { selectionCount: 1, planVersion: 1, completedStageIds: ["create-drafts"], outstandingIssueCount: 0, activityCount: 0 },
+    freshness: { state: "current", changedInputs: [], affectedStageIds: [], preservedStageIds: ["create-drafts"], nextAction: "Continue with send messages when the review is ready." },
+  },
+};
+
 function jsonResponse(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
     status,
@@ -1260,78 +1315,59 @@ describe("Course Check review workspace", () => {
   });
 
   it("keeps the exact draft result and Outbox handoff visible after draft creation", async () => {
-    const frozenPlan: CourseCheckPlan = {
-      ...communicationPlan,
-      state: "Complete",
-      body: {
-        ...communicationBody,
-        stageVisibility: { ...communicationBody.stageVisibility, draft: "complete", send: "ready" },
-        drafts: [
-          {
-            draftId: "draft-1",
-            groupId: "group-1",
-            proposalId: body.proposalId,
-            sessionId: "session-1",
-            toEmail: "speaker@example.test",
-            recipientName: "Example Speaker",
-            subject: communicationBody.subject,
-            bodyText: communicationBody.bodyText,
-            bodyHtml: communicationBody.bodyHtml,
-            attachmentRefs: [],
-            calendarIntent: null,
-            status: "frozen",
-            frozenAt: "2026-08-11T12:02:00.000Z",
-            frozenPlanVersion: 1,
-          },
-        ],
-      },
-      communicationReview: {
-        kind: "communication_review",
-        currentStatus: { key: "ready_to_send", label: "Ready to send" },
-        progress: [
-          { key: "no_draft", label: "No draft", state: "complete" },
-          { key: "draft_prepared", label: "Draft prepared", state: "complete" },
-          { key: "ready_to_send", label: "Ready to send", state: "current" },
-          { key: "sending", label: "Sending", state: "pending" },
-        ],
-        draftResult: {
-          title: "Draft prepared",
-          counts: { prepared: 1, omitted: 0, failed: 0, unchanged: 0 },
-          noEmailsSent: true,
-          statement: "1 draft prepared, 0 recipients omitted, 0 failed, and 0 items unchanged. No emails were sent.",
-          preparedAt: "2026-08-11T12:02:00.000Z",
-        },
-        handoffs: [
-          {
-            kind: "outbox",
-            label: "Review 1 draft in Outbox",
-            href: "/e/pacific-open-data-summit-2026/messages?planId=communication-plan-1",
-            count: 1,
-          },
-          {
-            kind: "submissions",
-            label: "Return to submissions",
-            href: "/e/pacific-open-data-summit-2026/submissions",
-            count: 1,
-          },
-        ],
-        outbox: { exactDraftCount: 1, sourceLabel: "Prepared from applied decisions", groups: [], draftlessGroups: [] },
-        deliveryResult: null,
-        sendAction: { stageId: "send-messages", label: "Send 1 message", effectSummary: "Approve and queue exactly 1 frozen message." },
-        immutableBoundary: null,
-      },
-    };
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(frozenPlan));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(frozenCommunicationPlan));
     renderCourseCheck(
       "/e/pacific-open-data-summit-2026/course-checks/plan-1?stage=communication-plan-1",
     );
 
     expect(await screen.findByRole("heading", { name: "Ready to send" })).toBeVisible();
-    expect(screen.getByText(frozenPlan.communicationReview!.draftResult!.statement)).toBeVisible();
+    expect(screen.getByText(frozenCommunicationPlan.communicationReview!.draftResult!.statement)).toBeVisible();
     expect(screen.getByRole("link", { name: "Review 1 draft in Outbox" })).toHaveAttribute(
       "href",
       "/e/pacific-open-data-summit-2026/messages?planId=communication-plan-1",
     );
     expect(screen.getAllByText("No emails were sent.", { exact: true }).length).toBeGreaterThan(0);
+  });
+
+  it("requires an approval reason and reports endorsement without claiming delivery started", async () => {
+    const endorsedPlan: CourseCheckPlan = {
+      ...frozenCommunicationPlan,
+      state: "Needs review",
+      sharedApproval: {
+        ...frozenCommunicationPlan.sharedApproval!,
+        currentStage: {
+          ...frozenCommunicationPlan.sharedApproval!.currentStage,
+          canEndorse: false,
+          canRequestApproval: true,
+          endorsementCount: 1,
+          stateSummary: "Send messages is waiting for a different authorized administrator.",
+        },
+      },
+      communicationReview: {
+        ...frozenCommunicationPlan.communicationReview!,
+        sendAction: null,
+      },
+    };
+    let postedBody: Record<string, unknown> | null = null;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if ((init?.method ?? "GET") === "POST" && String(input).endsWith("/send")) {
+        postedBody = JSON.parse(String(init?.body));
+        return jsonResponse(endorsedPlan);
+      }
+      if ((init?.method ?? "GET") === "POST") return jsonResponse({ ok: true }, 202);
+      return jsonResponse(frozenCommunicationPlan);
+    });
+    const user = userEvent.setup();
+    renderCourseCheck("/e/pacific-open-data-summit-2026/course-checks/communication-plan-1");
+
+    const send = await screen.findByRole("button", { name: "Endorse send of 1 message" });
+    expect(send).toBeDisabled();
+    await user.type(screen.getByLabelText("Approval reason"), "Reviewed frozen recipients");
+    expect(send).toBeEnabled();
+    await user.click(send);
+
+    expect(await screen.findByText(/Endorsement recorded/)).toBeVisible();
+    expect(screen.queryByText(/Delivery intent is durable/)).not.toBeInTheDocument();
+    expect(postedBody).toMatchObject({ reason: "Reviewed frozen recipients" });
   });
 });

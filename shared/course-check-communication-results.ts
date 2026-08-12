@@ -112,6 +112,8 @@ export interface CommunicationReviewProjection {
   deliveryResult: CommunicationDeliveryResult | null;
   sendAction: {
     stageId: "send-messages";
+    action: "execute" | "endorse";
+    reasonRequired: boolean;
     label: string;
     effectSummary: string;
   } | null;

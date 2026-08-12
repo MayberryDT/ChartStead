@@ -64,6 +64,8 @@ const review: CommunicationReviewProjection = {
   deliveryResult: null,
   sendAction: {
     stageId: "send-messages",
+    action: "execute",
+    reasonRequired: false,
     label: "Send 1 message",
     effectSummary: "Approve and queue exactly 1 frozen message.",
   },

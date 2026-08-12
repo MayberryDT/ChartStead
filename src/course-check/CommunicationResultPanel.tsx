@@ -13,10 +13,14 @@ export function CommunicationResultPanel({
   review,
   showOutboxDetails = false,
   onSend,
+  approvalReason = "",
+  onApprovalReasonChange,
 }: {
   review: CommunicationReviewProjection;
   showOutboxDetails?: boolean;
   onSend?: () => void;
+  approvalReason?: string;
+  onApprovalReasonChange?: (reason: string) => void;
 }) {
   return (
     <section
@@ -155,7 +159,23 @@ export function CommunicationResultPanel({
       {review.sendAction && onSend ? (
         <div className="course-check-actions">
           <p>{review.sendAction.effectSummary} This is a separate approval.</p>
-          <button type="button" className="btn btn-primary" onClick={onSend}>
+          {review.sendAction.reasonRequired ? (
+            <label className="course-check-approval-reason">
+              Approval reason
+              <input
+                type="text"
+                value={approvalReason}
+                onChange={(event) => onApprovalReasonChange?.(event.target.value)}
+                placeholder="Why approve this exact stage?"
+              />
+            </label>
+          ) : null}
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={review.sendAction.reasonRequired && !approvalReason.trim()}
+            onClick={onSend}
+          >
             {review.sendAction.label}
           </button>
         </div>

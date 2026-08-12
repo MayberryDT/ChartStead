@@ -1369,6 +1369,7 @@ export async function sendCommunication(
     digest: string;
     stageId?: "send-messages";
     idempotencyKey: string;
+    reason?: string | null;
   },
 ): Promise<CourseCheckPlan> {
   return updateCommunicationEffect(

@@ -189,7 +189,8 @@ export function buildCommunicationReviewProjection(
   plan: CourseCheckPlan,
   options: {
     canViewCommunicationEvidence: boolean;
-    canSend: boolean;
+    sendAction: "execute" | "endorse" | null;
+    reasonRequired: boolean;
   },
 ): CommunicationReviewProjection | null {
   if (plan.body.actionType !== "communication") return null;
@@ -312,10 +313,14 @@ export function buildCommunicationReviewProjection(
     },
     deliveryResult: deliveryResult(plan, body),
     sendAction:
-      sendReady && options.canSend
+      sendReady && options.sendAction
         ? {
             stageId: "send-messages",
-            label: `Send ${body.drafts.length} ${plural(body.drafts.length, "message")}`,
+            action: options.sendAction,
+            reasonRequired: options.reasonRequired,
+            label: options.sendAction === "endorse"
+              ? `Endorse send of ${body.drafts.length} ${plural(body.drafts.length, "message")}`
+              : `Send ${body.drafts.length} ${plural(body.drafts.length, "message")}`,
             effectSummary: `Approve and queue exactly ${body.drafts.length} frozen ${plural(body.drafts.length, "message")}.`,
           }
         : null,

@@ -211,7 +211,77 @@ const adminProjection = {
   permittedStageIds: ["publish-program", "write-airtable", "send-messages"],
 };
 
+function readyCommunicationPlan(): CourseCheckPlan {
+  const prepared = communicationPlan();
+  if (prepared.body.actionType !== "communication") throw new Error("Expected communication");
+  prepared.state = "Complete";
+  prepared.createdBy = actor;
+  prepared.body.effects = [];
+  prepared.body.deliverySummary = { total: 0, queued: 0, sending: 0, succeeded: 0, retryScheduled: 0, failed: 0, unknown: 0 };
+  prepared.body.drafts = [{
+    draftId: "draft-ready",
+    groupId: "group-ready",
+    proposalId: "proposal-ready",
+    sessionId: null,
+    toEmail: "ready@example.test",
+    recipientName: "Ready Speaker",
+    subject: "Ready",
+    bodyText: "Ready",
+    bodyHtml: "<p>Ready</p>",
+    attachmentRefs: [],
+    calendarIntent: null,
+    status: "frozen",
+    frozenAt: "2026-08-12T10:09:00.000Z",
+    frozenPlanVersion: 3,
+  }];
+  prepared.body.stages = [
+    { id: "create-drafts", label: "Create drafts", status: "complete", verb: "Create drafts" },
+    { id: "send-messages", label: "Send messages", status: "ready", verb: "Send messages", external: true },
+  ];
+  prepared.body.stageVisibility = { decision: "complete", draft: "complete", send: "ready", delivery: "not_started" };
+  return prepared;
+}
+
 describe("unified external-effect review projection", () => {
+  it("does not advertise send to a requester barred by distinct-approver policy", () => {
+    const projected = projectCourseCheckForViewer(readyCommunicationPlan(), {
+      ...adminProjection,
+      viewerActorId: actor.id,
+      policy: {
+        requireTwoPersonApproval: false,
+        requireDistinctApprover: true,
+        requireReasonOnApprove: false,
+        maxAgentMode: "autonomous_policy",
+      },
+    });
+
+    expect(projected?.sharedApproval?.currentStage.canExecute).toBe(false);
+    expect(projected?.communicationReview?.sendAction).toBeNull();
+  });
+
+  it("projects endorsement and mandatory-reason send truth from shared policy", () => {
+    const projected = projectCourseCheckForViewer(readyCommunicationPlan(), {
+      ...adminProjection,
+      viewerActorId: "admin-2",
+      policy: {
+        requireTwoPersonApproval: true,
+        requireDistinctApprover: true,
+        requireReasonOnApprove: true,
+        maxAgentMode: "autonomous_policy",
+      },
+    });
+
+    expect(projected?.sharedApproval?.currentStage).toMatchObject({
+      canExecute: false,
+      canEndorse: true,
+      reasonRequired: true,
+    });
+    expect(projected?.communicationReview?.sendAction).toMatchObject({
+      action: "endorse",
+      label: "Endorse send of 1 message",
+      reasonRequired: true,
+    });
+  });
   it("projects a durable draft result and exact Outbox handoff without implying a send", () => {
     const prepared = communicationPlan();
     if (prepared.body.actionType !== "communication") throw new Error("Expected communication");
