@@ -4,7 +4,7 @@
 
 **Blocked by:** Course Check 18 — Connected decision-to-draft Course Check workspace.
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 ## Source
 
@@ -27,3 +27,5 @@
 - 2026-08-12 — Functional completion and Outbox continuity are agent-owned. Morning human-tandem tickets can polish presentation without blocking this behavior.
 
 - 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.
+
+- 2026-08-12 — Started after the connected decision-to-draft workspace integrated; demos, reviews, and human QA are deferred while automated acceptance verification remains required.
