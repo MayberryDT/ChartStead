@@ -83,6 +83,7 @@ export function useCourseCheckUxInstrumentation(
   const sequence = useRef(0);
   const routeChanges = useRef(0);
   const completed = useRef(journey.completed);
+  const initializedJourneyId = useRef<string | null>(null);
   const stage = plan ? stageForPlan(plan) : "decision";
 
   const track = useCallback(
@@ -112,21 +113,38 @@ export function useCourseCheckUxInstrumentation(
 
   useEffect(() => {
     if (!plan || !storageKey) return;
-    const prior = readJourney(storageKey);
-    writeJourney(storageKey, journey);
-    track({
-      eventType: prior && !prior.completed ? "journey_resumed" : "journey_started",
-      durationMs: prior ? Math.max(0, Date.now() - prior.startedAt) : 0,
-      outcome: prior && !prior.completed ? "resumed" : "started",
-    });
-    const issues = plan.decisionReview?.issues ?? plan.externalReview?.issues ?? [];
-    if (issues.length > 0) {
+    if (initializedJourneyId.current !== journey.id) {
+      initializedJourneyId.current = journey.id;
+      const prior = readJourney(storageKey);
+      writeJourney(storageKey, journey);
       track({
-        eventType: "issues_shown",
-        issueCount: issues.length,
-        affectedCount: issues.length,
-        outcome: "shown",
+        eventType: prior && !prior.completed ? "journey_resumed" : "journey_started",
+        durationMs: prior ? Math.max(0, Date.now() - prior.startedAt) : 0,
+        outcome: prior && !prior.completed ? "resumed" : "started",
       });
+      const issues = plan.decisionReview?.issues ?? plan.externalReview?.issues ?? [];
+      const issuesByClass = new Map<
+        CourseCheckUxIssueClass,
+        { issueCount: number; affectedCount: number }
+      >();
+      for (const issue of issues) {
+        const priorClass = issuesByClass.get(issue.classification) ?? {
+          issueCount: 0,
+          affectedCount: 0,
+        };
+        priorClass.issueCount += 1;
+        priorClass.affectedCount +=
+          "affectedItemCount" in issue ? issue.affectedItemCount : 1;
+        issuesByClass.set(issue.classification, priorClass);
+      }
+      for (const [issueClass, counts] of issuesByClass) {
+        track({
+          eventType: "issues_shown",
+          issueClass,
+          ...counts,
+          outcome: "shown",
+        });
+      }
     }
     const onPageHide = () => {
       if (completed.current) return;
