@@ -30,3 +30,5 @@ Add a reviewable CSV import into the existing event speaker directory. Organizer
 
 - 2026-08-12 — Created blocked on Competition 24 so CSV import reuses one authoritative speaker identity and directory command path.
 
+
+- 2026-08-12 — frontier-reconcile: Still blocked on: Competition 24 (in-progress).

@@ -27,4 +27,4 @@
 
 - 2026-08-12 — **One coherent workspace** intentionally does not mean one commit. This implements the research direction without weakening ChartStead's locked safety boundaries.
 
-- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 16 (in-progress); Course Check 17 (in-progress).
+- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 17 (in-progress).

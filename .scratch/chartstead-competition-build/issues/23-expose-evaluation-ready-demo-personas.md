@@ -30,3 +30,5 @@ Make the isolated demo deployment prove ChartStead's existing multi-role spine w
 
 - 2026-08-12 — Created blocked on Competition 22 so the demo proves the same reviewer invitation and authorization path that production uses.
 
+
+- 2026-08-12 — frontier-reconcile: Still blocked on: Competition 22 (in-progress).
