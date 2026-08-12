@@ -4,7 +4,7 @@
 
 **Blocked by:** Course Check 14 — Truthful decision review projection and receipts.
 
-**Status:** in-progress
+**Status:** done
 
 ## Source
 
@@ -30,3 +30,4 @@
 - 2026-08-12 — Started in the overnight parallel frontier after Course Check 14; automated verification is required, with demos/review/QA deferred per Tyler's instruction.
 
 - 2026-08-12 — Implemented the compact issue-free decision fast path with exact live consequences, truthful receipt, preserved submissions origin/selection, responsive focus/history behavior, and full-workspace fallback for stale, split, deferred, policy-gated, or external-stage work. Verified typecheck; 81 UI tests; 22 focused decision/projection/batch worker tests; 4 Course Check browser tests including 390×844 history/selection coverage; and production build. Status remains in-progress for parent closeout; no demo or QA request started.
+- 2026-08-12 — Closed without a demo/review/QA pause per Tyler's instruction. Root independently re-ran typecheck and the 39 focused Course Check/app UI tests before merge; all passed.
