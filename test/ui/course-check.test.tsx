@@ -602,7 +602,7 @@ describe("Course Check review workspace", () => {
 
     await screen.findByRole("heading", { name: "Review 1 acceptance decision" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Review summary" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Review summary" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Write to Airtable" })).toBeVisible();
   });
 
