@@ -1,6 +1,6 @@
 # 22 — Invite reviewers into track-scoped queues
 
-**Status:** in-progress
+**Status:** done
 
 **Blocked by:** None — can start immediately.
 
@@ -30,3 +30,5 @@ None — can start immediately.
 
 - 2026-08-12 — Started for agent implementation after Tyler authorized the incoming Competition Build frontier; demos, reviews, and human QA are deferred.
 - 2026-08-12 — Implemented and verified the invitation lifecycle through the existing Better Auth identity, D1 event membership/track assignments, shared review queue, and auditable event outbox. Focused contract/UI/browser tests cover queued/delivered/retryable/terminal-failed delivery, explicit retry, revoke/expiry/mismatch/consumed safety, idempotent exact-scope acceptance, and reviewer authorization. Full verification: UI 82/82, worker 187/187, browser 19/19, typecheck and production build pass. Status remains in-progress for parent integration as requested.
+
+- 2026-08-12 — Parent integration verification passed after rebasing onto the current frontier: invitation worker 4/4, organizer UI 27/27, and typecheck. Marked done under Tyler's explicit instruction to defer demos, reviews, and human QA. Migration `0004_reviewer_invitations.sql` must be applied before enabling these routes in deployment.
