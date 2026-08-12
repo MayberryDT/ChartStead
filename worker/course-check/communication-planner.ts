@@ -13,6 +13,7 @@ import type {
   ProgramOutcome,
 } from "../../shared/course-check";
 import { DEFAULT_AGE_WARNING_HOURS } from "../../shared/course-check";
+import { renderCommunicationTemplate } from "../../shared/communication-template";
 import {
   buildCalendarInviteIcs,
   calendarInviteAttachmentFilename,
@@ -680,9 +681,25 @@ export function freezeCommunicationDrafts(input: {
         sessionId: group.sessionId,
         toEmail: recipient.address,
         recipientName: recipient.name,
-        subject: input.body.subject,
-        bodyText: input.body.bodyText,
-        bodyHtml: input.body.bodyHtml,
+        subject: renderCommunicationTemplate(input.body.subject, {
+          speakerName: recipient.name,
+          proposalTitle: group.label,
+          eventName,
+        }),
+        bodyText: renderCommunicationTemplate(input.body.bodyText, {
+          speakerName: recipient.name,
+          proposalTitle: group.label,
+          eventName,
+        }),
+        bodyHtml: renderCommunicationTemplate(
+          input.body.bodyHtml,
+          {
+            speakerName: recipient.name,
+            proposalTitle: group.label,
+            eventName,
+          },
+          { html: true },
+        ),
         attachmentRefs,
         calendarIntent,
         status: "frozen",

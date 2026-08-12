@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createDefaultCfpDefinition } from "../../shared/cfp-definition";
 import type { OrganizerCfpForm } from "../../shared/events";
-import { AgendaPage, App, SubmissionsPage } from "../../src/App";
+import { AgendaPage, App, MessagesPage, SubmissionsPage } from "../../src/App";
 import { CfpBuilderPage, CfpFormsPage } from "../../src/CfpBuilderPage";
 import { CfpPage } from "../../src/CfpPage";
 import { ProposalDetailPage } from "../../src/ProposalDetailPage";
@@ -78,6 +78,16 @@ function renderAt(path: string) {
     path: "/e/$eventId/agenda",
     component: AgendaPage,
   });
+  const messagesRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/e/$eventId/messages",
+    component: MessagesPage,
+  });
+  const courseCheckRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/e/$eventId/course-checks/$planId",
+    component: () => <h1>Course Check handoff</h1>,
+  });
   const router = createRouter({
     routeTree: rootRoute.addChildren([
       indexRoute,
@@ -90,6 +100,8 @@ function renderAt(path: string) {
       submissionsRoute,
       submissionDetailRoute,
       agendaRoute,
+      messagesRoute,
+      courseCheckRoute,
     ]),
     history: createMemoryHistory({ initialEntries: [path] }),
   });
@@ -253,6 +265,184 @@ describe("organizer application", () => {
       "page",
     );
     expect(await screen.findByLabelText("Unplaced sessions")).toBeVisible();
+  });
+
+  it("builds an exact speaker announcement and hands the frozen review scope to Course Check", async () => {
+    const requests: Array<{ url: string; method: string; body: unknown }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const method = init?.method ?? "GET";
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+      requests.push({ url, method, body });
+      if (url.endsWith("/onboarding")) {
+        return new Response(
+          JSON.stringify({
+            eventId: "pacific-open-data-summit-2026",
+            speakers: [
+              {
+                speakerId: "spk-ava",
+                name: "Ava Speaker",
+                email: "ava@example.test",
+                proposalId: "SUB-AVA",
+                proposalTitle: "Open data after dark",
+                role: "primary",
+                openTaskCount: 2,
+                overdueCount: 1,
+                nextDueAt: "2026-08-10T00:00:00.000Z",
+                daysUntilNextDue: -2,
+                readinessFlags: ["employer_approval"],
+                missingWork: [],
+                lastContactAt: null,
+                lastContactStatus: null,
+                history: [],
+              },
+              {
+                speakerId: "spk-bo",
+                name: "Bo Missing",
+                email: "",
+                proposalId: "SUB-BO",
+                proposalTitle: "Keeping incomplete truth",
+                role: "primary",
+                openTaskCount: 1,
+                overdueCount: 0,
+                nextDueAt: null,
+                daysUntilNextDue: null,
+                readinessFlags: [],
+                missingWork: [],
+                lastContactAt: null,
+                lastContactStatus: null,
+                history: [],
+              },
+              {
+                speakerId: "spk-casey",
+                name: "Casey Ready",
+                email: "casey@example.test",
+                proposalId: "SUB-CASEY",
+                proposalTitle: "A calmer program desk",
+                role: "primary",
+                openTaskCount: 0,
+                overdueCount: 0,
+                nextDueAt: null,
+                daysUntilNextDue: null,
+                readinessFlags: [],
+                missingWork: [],
+                lastContactAt: "2026-08-11T00:00:00.000Z",
+                lastContactStatus: "sent",
+                history: [],
+              },
+            ],
+            drafts: [],
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.endsWith("/course-checks") && method === "GET") {
+        return new Response(
+          JSON.stringify({
+            plans: [
+              {
+                id: "plan-delivered",
+                actionType: "communication",
+                state: "Complete",
+                updatedAt: "2026-08-11T12:00:00.000Z",
+                body: {
+                  actionType: "communication",
+                  subject: "Earlier announcement",
+                  recipientGroups: [{ recipients: [{ selected: true }] }],
+                  deliverySummary: {
+                    total: 1,
+                    queued: 0,
+                    sending: 0,
+                    succeeded: 1,
+                    retryScheduled: 0,
+                    failed: 0,
+                    unknown: 0,
+                  },
+                  stageVisibility: {
+                    decision: "not_started",
+                    draft: "complete",
+                    send: "complete",
+                    delivery: "complete",
+                  },
+                  compensation: null,
+                },
+              },
+            ],
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.endsWith("/course-checks/communications") && method === "POST") {
+        return new Response(
+          JSON.stringify({
+            id: "plan-new",
+            actionType: "communication",
+            state: "Ready",
+            version: 1,
+            digest: "digest-new",
+            body: { actionType: "communication" },
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify(eventsPayload), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    const { router } = renderAt("/");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("link", { name: "Messages" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Speaker messages" }),
+    ).toBeVisible();
+    expect(screen.getByText("1 missing address")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Earlier announcement" })).toBeVisible();
+    expect(screen.getByText("Delivered")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Overdue" }));
+    await user.click(screen.getByRole("button", { name: "Select visible" }));
+    await user.click(screen.getByRole("button", { name: "All speakers" }));
+    await user.click(screen.getByRole("checkbox", { name: /Casey Ready/ }));
+    expect(screen.getByText("2 included")).toBeVisible();
+    expect(screen.getByText("0 excluded")).toBeVisible();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Subject" }), {
+      target: { value: "Program update for {{speaker_name}}" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: {
+        value:
+          "Hello {{speaker_name}}, this is about {{proposal_title}} at {{event_name}}.",
+      },
+    });
+    expect(screen.getByText("Preview for Ava Speaker")).toBeVisible();
+    expect(screen.getByText(/Hello Ava Speaker, this is about Open data after dark/)).toBeVisible();
+
+    await user.click(
+      screen.getByRole("button", { name: "Review 2 recipients in Course Check" }),
+    );
+    await vi.waitFor(() =>
+      expect(router.state.location.pathname).toBe(
+        "/e/pacific-open-data-summit-2026/course-checks/plan-new",
+      ),
+    );
+    const create = requests.find(
+      (request) =>
+        request.url.endsWith("/course-checks/communications") &&
+        request.method === "POST",
+    );
+    expect(create?.body).toMatchObject({
+      speakerIds: ["spk-ava", "spk-casey"],
+      subject: "Program update for {{speaker_name}}",
+    });
+    expect(
+      requests.some(
+        (request) => request.url.includes("/create-drafts") || request.url.endsWith("/send"),
+      ),
+    ).toBe(false);
   });
 
   it("offers Google and magic-link authentication when access is required", async () => {

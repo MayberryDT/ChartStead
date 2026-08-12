@@ -6844,6 +6844,25 @@ export class EventStore extends DurableObject<AppBindings> {
 
   private detectCommunicationStaleInputs(body: CommunicationPlanBody): string[] {
     const changed: string[] = [];
+    for (const recipient of body.recipientGroups.flatMap((group) => group.recipients)) {
+      if (!recipient.speakerId) continue;
+      const speaker = this.ctx.storage.sql
+        .exec<{ name: string; email: string }>(
+          `SELECT name, email FROM speakers WHERE id = ?`,
+          recipient.speakerId,
+        )
+        .toArray()[0];
+      if (!speaker) {
+        changed.push(`${recipient.speakerId}:missing`);
+        continue;
+      }
+      if (speaker.name.trim() !== recipient.name.trim()) {
+        changed.push(`${recipient.speakerId}:name`);
+      }
+      if (speaker.email.trim().toLowerCase() !== recipient.address.trim().toLowerCase()) {
+        changed.push(`${recipient.speakerId}:email`);
+      }
+    }
     for (const proposalId of body.relevantRevisions.proposalIds) {
       const proposal = this.getProposal(proposalId);
       if (!proposal) {
@@ -6971,18 +6990,6 @@ export class EventStore extends DurableObject<AppBindings> {
       }
     }
 
-    for (const speakerId of input.speakerIds ?? []) {
-      const rows = this.ctx.storage.sql
-        .exec<{ proposal_id: string | null }>(
-          `SELECT proposal_id FROM event_participations WHERE speaker_id = ?`,
-          speakerId,
-        )
-        .toArray();
-      for (const row of rows) {
-        if (row.proposal_id) proposalIds.add(row.proposal_id);
-      }
-    }
-
     const groups: CommunicationGroupInput[] = [];
     let accepted = 0;
     let declined = 0;
@@ -7038,9 +7045,13 @@ export class EventStore extends DurableObject<AppBindings> {
       });
     }
 
-    // Speaker-only selections without proposal linkage
-    if (groups.length === 0 && (input.speakerIds ?? []).length > 0) {
+    // Explicit speaker selections remain exact and do not silently expand to co-speakers.
+    if ((input.speakerIds ?? []).length > 0) {
+      const alreadyIncludedSpeakerIds = new Set(
+        groups.flatMap((group) => group.speakers.map((speaker) => speaker.speakerId)),
+      );
       for (const speakerId of input.speakerIds ?? []) {
+        if (alreadyIncludedSpeakerIds.has(speakerId)) continue;
         const speaker = this.ctx.storage.sql
           .exec<{ id: string; name: string; email: string }>(
             `SELECT id, name, email FROM speakers WHERE id = ?`,
@@ -7048,10 +7059,21 @@ export class EventStore extends DurableObject<AppBindings> {
           )
           .toArray()[0];
         if (!speaker) continue;
+        const context = this.ctx.storage.sql
+          .exec<{ title: string }>(
+            `SELECT p.title
+             FROM event_participations ep
+             JOIN proposals p ON p.id = ep.proposal_id
+             WHERE ep.speaker_id = ?
+             ORDER BY ep.created_at DESC
+             LIMIT 1`,
+            speakerId,
+          )
+          .toArray()[0];
         groups.push({
           proposalId: null,
           sessionId: null,
-          label: speaker.name,
+          label: context?.title ?? speaker.name,
           outcome: null,
           speakers: [
             {

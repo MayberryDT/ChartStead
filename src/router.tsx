@@ -5,7 +5,7 @@ import {
   Outlet,
 } from "@tanstack/react-router";
 
-import { AgendaPage, App, SubmissionsPage } from "./App";
+import { AgendaPage, App, MessagesPage, SubmissionsPage } from "./App";
 import { CfpBuilderPage, CfpFormsPage } from "./CfpBuilderPage";
 import { CourseCheckPage } from "./CourseCheckPage";
 import { ProposalDetailPage } from "./ProposalDetailPage";
@@ -98,6 +98,12 @@ const agendaRoute = createRoute({
   component: AgendaPage,
 });
 
+const messagesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId/messages",
+  component: MessagesPage,
+});
+
 function validateProgramSearch(search: Record<string, unknown>) {
   return {
     revision: typeof search.revision === "string" ? search.revision : undefined,
@@ -151,6 +157,7 @@ const routeTree = rootRoute.addChildren([
   submissionDetailRoute,
   courseCheckRoute,
   agendaRoute,
+  messagesRoute,
   programRoute,
   programEmbedRoute,
 ]);

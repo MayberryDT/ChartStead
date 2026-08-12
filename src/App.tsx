@@ -11,6 +11,7 @@ import { AppSelect } from "./AppSelect";
 import { authClient } from "./auth-client";
 import { AgendaWorkspace } from "./AgendaWorkspace";
 import { OnboardingWorkspace } from "./OnboardingWorkspace";
+import { MessagesWorkspace } from "./MessagesWorkspace";
 import { SettingsWorkspace } from "./SettingsWorkspace";
 import {
   SubmissionsWorkspace,
@@ -337,6 +338,13 @@ function EventDesk({
         to: "/e/$eventId/agenda",
         params: { eventId },
       });
+      return;
+    }
+    if (activeNav === "Messages") {
+      void navigate({
+        to: "/e/$eventId/messages",
+        params: { eventId },
+      });
     }
   }
 
@@ -353,6 +361,13 @@ function EventDesk({
     if (item === "Agenda") {
       void navigate({
         to: "/e/$eventId/agenda",
+        params: { eventId: event.id },
+      });
+      return;
+    }
+    if (item === "Messages") {
+      void navigate({
+        to: "/e/$eventId/messages",
         params: { eventId: event.id },
       });
       return;
@@ -405,21 +420,25 @@ function EventDesk({
       ? "Submissions"
       : activeNav === "Agenda"
         ? "Agenda"
-        : activeNav === "Speakers"
-          ? "Speakers"
-          : activeNav === "Settings"
-            ? "Settings"
-            : event.name;
+        : activeNav === "Messages"
+          ? "Messages"
+          : activeNav === "Speakers"
+            ? "Speakers"
+            : activeNav === "Settings"
+              ? "Settings"
+              : event.name;
   const topbarMeta =
     activeNav === "Submissions"
       ? `${event.submissionCount} total · ${event.unreviewedCount} unreviewed · track routing on`
       : activeNav === "Agenda"
         ? `${formatDateRange(event.startsOn, event.endsOn)} · day and room placement`
-        : activeNav === "Speakers"
-          ? "Directory, readiness, event participation, and assisted follow-up"
-          : activeNav === "Settings"
-            ? "Airtable sync status and API foundation"
-            : formatDateRange(event.startsOn, event.endsOn);
+        : activeNav === "Messages"
+          ? "Exact audiences, frozen drafts, and truthful delivery"
+          : activeNav === "Speakers"
+            ? "Directory, readiness, event participation, and assisted follow-up"
+            : activeNav === "Settings"
+              ? "Airtable sync status and API foundation"
+              : formatDateRange(event.startsOn, event.endsOn);
   const currentRole = data.principal.rolesByEvent?.[event.id] ?? data.principal.role;
 
   return (
@@ -441,17 +460,14 @@ function EventDesk({
                   ? `/e/${event.id}/submissions`
                   : item === "Agenda"
                     ? `/e/${event.id}/agenda`
-                    : item === "Overview"
-                      ? "/"
-                      : `#${item.toLowerCase()}`
+                    : item === "Messages"
+                      ? `/e/${event.id}/messages`
+                      : item === "Overview"
+                        ? "/"
+                        : `#${item.toLowerCase()}`
               }
               aria-current={activeNav === item ? "page" : undefined}
               onClick={(click) => {
-                if (item === "Messages") {
-                  click.preventDefault();
-                  setActiveNav(item);
-                  return;
-                }
                 if (item === "Settings") {
                   click.preventDefault();
                   setActiveNav(item);
@@ -549,6 +565,17 @@ function EventDesk({
           <OverviewWorkspace event={event} />
         ) : activeNav === "Speakers" ? (
           <OnboardingWorkspace eventId={event.id} />
+        ) : activeNav === "Messages" ? (
+          <MessagesWorkspace
+            eventId={event.id}
+            eventName={event.name}
+            onOpenCourseCheck={(planId) => {
+              void navigate({
+                to: "/e/$eventId/course-checks/$planId",
+                params: { eventId: event.id, planId },
+              });
+            }}
+          />
         ) : activeNav === "Settings" ? (
           <SettingsWorkspace eventId={event.id} />
         ) : (
@@ -659,6 +686,32 @@ export function AgendaPage() {
     <EventDesk
       data={query.data}
       initialNav="Agenda"
+      initialEventId={params.eventId ?? null}
+    />
+  );
+}
+
+export function MessagesPage() {
+  const query = useOrganizerData();
+  const params = useParams({ strict: false }) as { eventId?: string };
+
+  if (query.isPending) return <LoadingShell />;
+  if (query.error instanceof ApiError && query.error.status === 401) return <SignIn />;
+  if (query.isError) {
+    return (
+      <main className="sign-in-shell">
+        <section className="error-panel" role="alert">
+          <h1>ChartStead could not open messages.</h1>
+          <p>{query.error.message}</p>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <EventDesk
+      data={query.data}
+      initialNav="Messages"
       initialEventId={params.eventId ?? null}
     />
   );

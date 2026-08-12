@@ -194,3 +194,117 @@ test("seeded volume stays responsive on submissions search", async ({ page }) =>
   ).toBeVisible({ timeout: 5_000 });
   expect(Date.now() - filterStarted).toBeLessThan(5_000);
 });
+
+test("speaker announcement stays a draft until an explicit Course Check send", async ({
+  page,
+}) => {
+  const suffix = Date.now().toString(36);
+  const subject = `Walkthrough update ${suffix} for {{speaker_name}}`;
+  const proposalsResponse = await page.request.get(
+    `/api/events/${eventId}/proposals`,
+  );
+  expect(proposalsResponse.ok(), await proposalsResponse.text()).toBeTruthy();
+  const proposals = (await proposalsResponse.json()) as {
+    proposals: Array<{
+      id: string;
+      title: string;
+      trackId: string;
+      programOutcome: string | null;
+    }>;
+  };
+  const candidates = proposals.proposals
+    .filter(
+      (proposal) =>
+        proposal.programOutcome === null &&
+        proposal.trackId !== "course-check-demo",
+    )
+    .slice(0, 2);
+  expect(candidates).toHaveLength(2);
+
+  for (const [index, proposal] of candidates.entries()) {
+    const createKey = `messages-${suffix}-${index}`;
+    const create = await page.request.post(
+      `/api/events/${eventId}/course-checks/decisions`,
+      {
+        data: {
+          proposalId: proposal.id,
+          outcome: "accepted",
+          idempotencyKey: createKey,
+        },
+        headers: { "idempotency-key": createKey },
+      },
+    );
+    expect(create.ok(), await create.text()).toBeTruthy();
+    const plan = (await create.json()) as {
+      id: string;
+      version: number;
+      digest: string;
+    };
+    const apply = await page.request.post(
+      `/api/events/${eventId}/course-checks/${plan.id}/apply`,
+      {
+        data: {
+          planVersion: plan.version,
+          digest: plan.digest,
+          stageId: "apply-decision",
+          idempotencyKey: `${createKey}-apply`,
+        },
+        headers: { "idempotency-key": `${createKey}-apply` },
+      },
+    );
+    expect(apply.ok(), await apply.text()).toBeTruthy();
+  }
+
+  const onboardingResponse = await page.request.get(
+    `/api/events/${eventId}/onboarding`,
+  );
+  expect(onboardingResponse.ok(), await onboardingResponse.text()).toBeTruthy();
+  const onboarding = (await onboardingResponse.json()) as {
+    speakers: Array<{ speakerId: string; name: string; email: string }>;
+  };
+  const speakers = onboarding.speakers
+    .filter((speaker) => speaker.email.includes("@"))
+    .slice(-2);
+  expect(speakers).toHaveLength(2);
+
+  await page.goto(`/e/${eventId}/messages`);
+  await expect(
+    page.getByRole("heading", { name: "Speaker messages" }),
+  ).toBeVisible({ timeout: 30_000 });
+  for (const speaker of speakers) {
+    await page
+      .getByRole("checkbox", { name: new RegExp(`Select ${speaker.name}`) })
+      .check();
+  }
+  await page.getByRole("textbox", { name: "Subject" }).fill(subject);
+  await page.getByRole("textbox", { name: "Message" }).fill(
+    "Hello {{speaker_name}}, this is an update about {{proposal_title}} at {{event_name}}.",
+  );
+  await expect(page.getByText(`Preview for ${speakers[0]!.name}`)).toBeVisible();
+
+  await page
+    .getByRole("button", { name: "Review 2 recipients in Course Check" })
+    .click();
+  await expect(page.getByText("Creating drafts never sends email or calendar invites."))
+    .toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "Frozen drafts" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Create drafts" }).click();
+  await expect(page.getByRole("heading", { name: "Frozen drafts" })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.getByRole("heading", { name: "Delivery effects" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Send messages" }).click();
+  await expect(page.getByRole("heading", { name: "Delivery effects" })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.getByText(/queued|sending|succeeded|retry scheduled/i).first())
+    .toBeVisible();
+
+  await page.goto(`/e/${eventId}/messages`);
+  await expect(page.getByRole("link", { name: subject })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.getByText(/Queued|Delivered|Retry scheduled/).first()).toBeVisible();
+});

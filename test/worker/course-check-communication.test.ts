@@ -539,4 +539,112 @@ describe("Course Check 03 — communication drafts and recipient reasoning", () 
     // Send stage remains non-executable in this ticket
     expect(body.stages.find((s) => s.id === "send-messages")?.status).toBe("pending");
   });
+
+  it("keeps a direct speaker selection exact instead of expanding to every proposal speaker", async () => {
+    const proposalId = "SUB-PODS0028";
+    const store = env.EVENT_STORE.getByName(eventId);
+    await store.setProposalCoSpeakersForTest(proposalId, [
+      {
+        name: "Exact Scope Co-speaker",
+        email: "exact-scope-co@example.test",
+        biography: "Co-speaker who should not be selected implicitly.",
+      },
+    ]);
+    const decision = await createDecisionPlan({
+      proposalId,
+      outcome: "accepted",
+      idempotencyKey: `cc26-exact-dec-${proposalId}`,
+    });
+    await applyDecision(decision, `cc26-exact-apply-${proposalId}`);
+    const cascade = await store.getAcceptanceCascade(proposalId);
+    expect(cascade.speakers).toHaveLength(2);
+
+    const selectedSpeaker = cascade.speakers[0]!;
+    const created = await createCommunication({
+      speakerIds: [selectedSpeaker.id],
+      subject: "A general announcement",
+      bodyText: "Hello {{speaker_name}}.",
+      idempotencyKey: `cc26-exact-create-${proposalId}`,
+    });
+
+    expect(created.status).toBe(201);
+    const body = asCommunication(created.body as CourseCheckPlan);
+    expect(body.source.selection?.speakerIds).toEqual([selectedSpeaker.id]);
+    expect(body.recipientGroups).toHaveLength(1);
+    expect(body.recipientGroups[0]?.proposalId).toBeNull();
+    expect(body.recipientGroups[0]?.recipients).toHaveLength(1);
+    expect(body.recipientGroups[0]?.recipients[0]).toMatchObject({
+      speakerId: selectedSpeaker.id,
+      name: selectedSpeaker.name,
+      selected: true,
+    });
+  });
+
+  it("freezes recipient-specific substitutions without sending", async () => {
+    const proposalId = "SUB-PODS0029";
+    const store = env.EVENT_STORE.getByName(eventId);
+    const decision = await createDecisionPlan({
+      proposalId,
+      outcome: "accepted",
+      idempotencyKey: `cc26-substitute-dec-${proposalId}`,
+    });
+    await applyDecision(decision, `cc26-substitute-apply-${proposalId}`);
+    const cascade = await store.getAcceptanceCascade(proposalId);
+    const speaker = cascade.speakers[0]!;
+    const outboxBefore = await store.listOutboxMessages();
+    const created = await createCommunication({
+      speakerIds: [speaker.id],
+      subject: "A note for {{speaker_name}}",
+      bodyText:
+        "Hello {{speaker_name}},\n\nThis is an update about {{proposal_title}} at {{event_name}}.",
+      idempotencyKey: `cc26-substitute-create-${proposalId}`,
+    });
+    const plan = created.body as CourseCheckPlan;
+
+    const result = await createDrafts({
+      plan,
+      idempotencyKey: `cc26-substitute-drafts-${proposalId}`,
+    });
+
+    expect(result.status).toBe(201);
+    const body = asCommunication(result.body as CourseCheckPlan);
+    expect(body.drafts).toHaveLength(1);
+    expect(body.drafts[0]).toMatchObject({
+      recipientName: speaker.name,
+      subject: `A note for ${speaker.name}`,
+    });
+    expect(body.drafts[0]?.bodyText).toContain(`Hello ${speaker.name},`);
+    expect(body.drafts[0]?.bodyText).toContain("Pacific Open Data Summit 2026");
+    expect(body.drafts[0]?.bodyText).not.toContain("{{");
+    expect(await store.listOutboxMessages()).toEqual(outboxBefore);
+  });
+
+  it("blocks draft creation when a directly selected speaker changed", async () => {
+    const proposalId = "SUB-PODS0030";
+    const store = env.EVENT_STORE.getByName(eventId);
+    const decision = await createDecisionPlan({
+      proposalId,
+      outcome: "accepted",
+      idempotencyKey: `cc26-stale-dec-${proposalId}`,
+    });
+    await applyDecision(decision, `cc26-stale-apply-${proposalId}`);
+    const cascade = await store.getAcceptanceCascade(proposalId);
+    const speaker = cascade.speakers[0]!;
+    const created = await createCommunication({
+      speakerIds: [speaker.id],
+      idempotencyKey: `cc26-stale-create-${proposalId}`,
+    });
+    const plan = created.body as CourseCheckPlan;
+    await store.updateSpeakerProfileForTest(speaker.id, {
+      name: `${speaker.name} Updated`,
+    });
+
+    const result = await createDrafts({
+      plan,
+      idempotencyKey: `cc26-stale-drafts-${proposalId}`,
+    });
+
+    expect(result.status).toBe(409);
+    expect(result.body).toMatchObject({ code: "relevant_input_changed" });
+  });
 });
