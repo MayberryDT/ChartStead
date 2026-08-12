@@ -4,7 +4,7 @@
 
 **Blocked by:** none
 
-**Status:** in-progress
+**Status:** done
 
 ## Source
 
@@ -28,3 +28,4 @@
 - 2026-08-12 — Created from the Course Check UX research. This agent-ready interaction-model foundation has no dependency on human-tandem visual polish tickets 11 or 12.
 - 2026-08-12 — Started for the overnight non-human-tandem Course Check implementation run; automated verification remains required, while demos, review pauses, and human QA are deferred per Tyler's instruction.
 - 2026-08-12 — Implemented the authenticated decision-review projection and organizer business-language surface for single/batch proposed and applied states. Verified with 86 Course Check worker tests, 74 UI tests (standalone rerun after concurrent-load timing failures), 16 browser tests, typecheck, build, and diff checks. No demo, QA request, main merge, or other ticket-status change was made.
+- 2026-08-12 — Closed without a demo/review/QA pause per Tyler's overnight instruction. Root independently re-ran typecheck plus the focused projection and Course Check UI suites before merging; all passed.
