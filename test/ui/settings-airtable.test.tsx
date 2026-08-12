@@ -10,9 +10,10 @@ describe("Settings Airtable sync", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(api, "listEventApiKeys").mockResolvedValue({ apiKeys: [] });
+    vi.spyOn(api, "listAiConnections").mockResolvedValue({ connections: [] });
   });
 
-  it("shows agent API key controls in Settings", async () => {
+  it("connects and verifies a personal assistant without revealing a bearer token", async () => {
     vi.spyOn(api, "fetchAirtableSync").mockResolvedValue({
       sync: {
         health: "unconfigured",
@@ -26,19 +27,33 @@ describe("Settings Airtable sync", () => {
         baseId: null,
       },
     });
-    vi.spyOn(api, "createEventApiKey").mockResolvedValue({
-      apiKey: {
-        id: "key-1",
-        name: "QA agent",
-        keyPrefix: "cs_live_abcd",
-        principalKind: "agent",
-        agentMode: "delegated_execution",
-        courseCheckScopes: ["decisions", "drafts"],
+    vi.spyOn(api, "createAiConnection").mockResolvedValue({
+      connection: {
+        id: "connection-1",
+        name: "Claude",
+        provider: "claude",
+        accessProfile: "research_prepare",
+        approvalPolicy: "important_actions",
+        status: "connection_not_tested",
         createdAt: "2026-08-12T00:00:00.000Z",
         lastUsedAt: null,
-        revokedAt: null,
-        token: "cs_live_test_token_once",
+        lastTestAt: null,
+        authorizationUrl: "https://claude.ai/settings/connectors?chartstead=code",
       },
+    });
+    vi.spyOn(api, "testAiConnection").mockResolvedValue({
+      connection: {
+        id: "connection-1",
+        name: "Claude",
+        provider: "claude",
+        accessProfile: "research_prepare",
+        approvalPolicy: "important_actions",
+        status: "connected",
+        createdAt: "2026-08-12T00:00:00.000Z",
+        lastUsedAt: null,
+        lastTestAt: "2026-08-12T00:01:00.000Z",
+      },
+      test: { acceptedSpeakersMissingBiography: 2, changedRecords: 0 },
     });
 
     const client = new QueryClient({
@@ -51,29 +66,58 @@ describe("Settings Airtable sync", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByRole("heading", { name: /Agent API keys/i })).toBeInTheDocument();
-    await user.clear(screen.getByLabelText(/^Name$/i));
-    await user.type(screen.getByLabelText(/^Name$/i), "QA agent");
-    await user.selectOptions(
-      screen.getByLabelText(/Operating mode/i),
-      "delegated_execution",
-    );
-    await user.click(screen.getByRole("checkbox", { name: /All stages/i }));
-    await user.click(screen.getByRole("button", { name: /Create agent key/i }));
+    expect(await screen.findByText(/^AI connections$/i)).toBeInTheDocument();
+    expect(screen.getByText(/Use your AI assistant with ChartStead/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Choose an assistant/i }));
+    await user.click(screen.getByRole("button", { name: /^Claude$/i }));
+    expect(screen.getByText(/Research and prepare/i)).toBeInTheDocument();
+    expect(screen.getByText(/ChartStead will ask before/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Allow and connect/i }));
 
     await waitFor(() => {
-      expect(api.createEventApiKey).toHaveBeenCalledWith(
+      expect(api.createAiConnection).toHaveBeenCalledWith(
         "pacific-open-data-summit-2026",
-        expect.objectContaining({
-          name: "QA agent",
-          principalKind: "agent",
-          agentMode: "delegated_execution",
-          courseCheckScopes: ["all"],
-        }),
+        {
+          provider: "claude",
+          accessProfile: "research_prepare",
+          approvalPolicy: "important_actions",
+        },
       );
     });
-    expect(await screen.findByText(/Copy this token now/i)).toBeInTheDocument();
-    expect(screen.getByText("cs_live_test_token_once")).toBeInTheDocument();
+    expect(screen.queryByText(/cs_live_/i)).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /Test connection/i }));
+    expect(await screen.findByText(/Claude is connected/i)).toBeInTheDocument();
+    expect(screen.getByText(/No changes were made/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Open Claude/i })).toBeInTheDocument();
+  });
+
+  it("keeps long-lived API keys under secondary Developer access", async () => {
+    vi.spyOn(api, "fetchAirtableSync").mockResolvedValue({
+      sync: {
+        health: "unconfigured",
+        configured: false,
+        hasAccessToken: false,
+        lastPullAt: null,
+        lastSuccessAt: null,
+        lastError: null,
+        guidance: "Connect Airtable in Settings.",
+        pendingChangeCount: 0,
+        baseId: null,
+      },
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={client}>
+        <SettingsWorkspace eventId="pacific-open-data-summit-2026" />
+      </QueryClientProvider>,
+    );
+
+    const developer = await screen.findByText("Developer access");
+    expect(developer).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Create agent key/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Open developer access/i }));
+    expect(screen.getByRole("button", { name: /Create API key/i })).toBeInTheDocument();
   });
 
   it("shows stacked connect controls without search-field chrome", async () => {

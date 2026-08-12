@@ -64,6 +64,12 @@ export interface OrganizerPrincipal {
   >;
   /** Optional human who requested this agent turn (request provenance). */
   initiatingHuman?: { id: string; displayName: string } | null;
+  /** Personal-assistant access profile; absent for developer/API agents. */
+  aiAccessProfile?: import("./ai-connections").AiAccessProfile;
+  /** Exact MCP resource audience for a personal-assistant token. */
+  aiResourceUri?: string;
+  /** Organizer-selected boundary for assistant-initiated changes. */
+  aiApprovalPolicy?: import("./ai-connections").AiApprovalPolicy;
 }
 
 export interface EventListResponse {

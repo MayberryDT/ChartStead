@@ -3940,6 +3940,208 @@ details[open] > summary .course-check-chevron { transform: rotate(180deg); }
   font-size: 1.05rem;
 }
 
+.ai-connections {
+  overflow: hidden;
+  padding: 0;
+}
+
+.ai-connections-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 28px;
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.ai-connections-hero h3 {
+  max-width: 22ch;
+  margin: 2px 0 8px;
+  font-size: clamp(1.45rem, 3vw, 2rem);
+  letter-spacing: -0.025em;
+}
+
+.ai-connections-hero p:not(.settings-eyebrow) {
+  max-width: 62ch;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.settings-eyebrow {
+  margin: 0;
+  color: #85e2b8;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.assistant-step,
+.connection-handoff,
+.connection-success,
+.connection-list {
+  padding: 24px 28px;
+}
+
+.step-heading span {
+  color: var(--on-surface-muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.step-heading h4,
+.connection-list h4 {
+  margin: 4px 0 16px;
+  font-size: 1.05rem;
+}
+
+.provider-grid,
+.access-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.provider-card,
+.access-card {
+  display: grid;
+  gap: 5px;
+  min-height: 116px;
+  padding: 16px;
+  border: 1px solid var(--outline);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--on-surface);
+  text-align: left;
+}
+
+.provider-card {
+  cursor: pointer;
+  font: inherit;
+}
+
+.provider-card:hover,
+.access-card.selected {
+  border-color: var(--secondary);
+  background: var(--selection);
+  box-shadow: 0 0 0 1px var(--secondary);
+}
+
+.provider-card span,
+.access-card small,
+.connection-row span {
+  color: var(--on-surface-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.provider-card small {
+  align-self: end;
+  color: var(--on-success-container);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.access-card {
+  grid-template-columns: auto 1fr;
+  cursor: pointer;
+}
+
+.access-card input {
+  margin-top: 3px;
+}
+
+.access-card span {
+  display: grid;
+  gap: 6px;
+}
+
+.boundary-review {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  margin-top: 16px;
+  border: 1px solid var(--outline);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--outline);
+}
+
+.boundary-review div {
+  padding: 14px;
+  background: var(--surface-subtle);
+}
+
+.boundary-review p,
+.connection-handoff p,
+.connection-success p {
+  margin: 5px 0 0;
+  color: var(--on-surface-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.connection-handoff {
+  margin: 0 28px 24px;
+  padding: 16px;
+  border-left: 4px solid var(--secondary);
+  background: var(--info-container);
+}
+
+.connection-success {
+  margin: 0 28px 24px;
+  padding: 16px;
+  border-left: 4px solid var(--tertiary);
+  background: var(--success-container);
+}
+
+.connection-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--outline);
+}
+
+.connection-row > div {
+  display: grid;
+  gap: 2px;
+}
+
+.connection-row > .settings-actions {
+  display: flex;
+}
+
+.connection-status {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.connection-status.connected { color: var(--on-success-container); }
+.connection-status.connection_not_tested { color: var(--on-warning-container); }
+
+.developer-access > .settings-card {
+  margin-top: 16px;
+  border: 0;
+  border-top: 1px solid var(--outline);
+  border-radius: 0;
+  padding: 18px 0 0;
+  box-shadow: none;
+}
+
+@media (max-width: 720px) {
+  .ai-connections-hero { align-items: stretch; flex-direction: column; padding: 22px 18px; }
+  .provider-grid, .access-grid, .boundary-review { grid-template-columns: 1fr; }
+  .assistant-step, .connection-list { padding: 20px 18px; }
+  .connection-handoff, .connection-success { margin: 0 18px 20px; }
+  .connection-row { grid-template-columns: 1fr auto; }
+  .connection-row .btn { grid-column: 1 / -1; justify-self: start; }
+}
+
 .settings-card .muted {
   margin: 0;
   color: var(--on-surface-muted);

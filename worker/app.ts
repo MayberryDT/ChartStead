@@ -89,6 +89,8 @@ import {
   executeAirtableEffects,
   reconcileUnknownAirtableEffects,
 } from "./airtable/effects";
+import { handleMcpRequest } from "./mcp";
+import { recordAiConnectionMcpActivityByResource } from "./ai-connections";
 
 
 const MAX_PROPOSAL_BODY_BYTES = 64 * 1_024;
@@ -354,7 +356,16 @@ export function createApp(options: AppOptions = {}) {
         return options.resolveApiKeyPrincipal(bearer, env);
       }
       if (env.AUTH_DB) {
-        return resolvePrincipalFromApiKey(env.AUTH_DB, bearer);
+        const principal = await resolvePrincipalFromApiKey(env.AUTH_DB, bearer);
+        if (principal?.aiAccessProfile) {
+          const pathname = new URL(request.url).pathname;
+          const safeSurface =
+            pathname.startsWith("/api/v1/") ||
+            pathname.startsWith("/events/") ||
+            pathname === "/mcp";
+          if (!safeSurface) return null;
+        }
+        return principal;
       }
       return null;
     }
@@ -363,10 +374,18 @@ export function createApp(options: AppOptions = {}) {
 
   // Course Check routes register on both the UI app and this v1 sub-app.
   const v1App = createV1App({
-    resolvePrincipal,
+    resolvePrincipal: async (request, env) => {
+      const bearer = extractBearerToken(request);
+      if (bearer && env.AUTH_DB) return resolvePrincipalFromApiKey(env.AUTH_DB, bearer);
+      return baseResolvePrincipal(request, env);
+    },
     airtableClientFactory: airtableFactory,
     airtableCredentialClientFactory: airtableCredentialFactory,
-    resolveApiKeyPrincipal: options.resolveApiKeyPrincipal,
+    resolveApiKeyPrincipal: async (token, env) =>
+      (options.resolveApiKeyPrincipal
+        ? await options.resolveApiKeyPrincipal(token, env)
+        : null) ??
+      (env.AUTH_DB ? resolvePrincipalFromApiKey(env.AUTH_DB, token) : null),
   });
   const __courseCheckTargets: Array<{
     app: typeof app;
@@ -384,6 +403,78 @@ export function createApp(options: AppOptions = {}) {
 
 
   app.get("/api/health", (c) => c.json({ status: "ok" }));
+
+  const protectedResource = (c: { req: { url: string; query(name: string): string | undefined }; json(value: unknown): Response }) => {
+    const origin = new URL(c.req.url).origin;
+    const connectionId = c.req.query("connection_id");
+    const resource = connectionId ? `${origin}/mcp?connection_id=${encodeURIComponent(connectionId)}` : `${origin}/mcp`;
+    return c.json({ resource, authorization_servers: [origin], scopes_supported: ["chartstead"] });
+  };
+  app.get("/.well-known/oauth-protected-resource", protectedResource);
+  app.get("/.well-known/oauth-protected-resource/mcp", protectedResource);
+
+  app.get("/.well-known/oauth-authorization-server", (c) => {
+    const origin = new URL(c.req.url).origin;
+    return c.json({
+      issuer: origin,
+      authorization_endpoint: `${origin}/api/v1/ai-connections/authorize`,
+      token_endpoint: `${origin}/api/v1/ai-connections/token`,
+      registration_endpoint: `${origin}/api/v1/ai-connections/register`,
+      response_types_supported: ["code"],
+      grant_types_supported: ["authorization_code", "refresh_token"],
+      code_challenge_methods_supported: ["S256"],
+      scopes_supported: ["chartstead"],
+      token_endpoint_auth_methods_supported: ["none"],
+    });
+  });
+
+  app.all("/mcp", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal?.aiAccessProfile) {
+      const origin = new URL(c.req.url).origin;
+      const connectionId = c.req.query("connection_id");
+      const metadata = connectionId
+        ? `${origin}/.well-known/oauth-protected-resource/mcp?connection_id=${encodeURIComponent(connectionId)}`
+        : `${origin}/.well-known/oauth-protected-resource`;
+      return new Response(JSON.stringify({ error: "Authorization required" }), {
+        status: 401,
+        headers: {
+          "content-type": "application/json",
+          "www-authenticate": `Bearer resource_metadata="${metadata}", scope="chartstead"`,
+        },
+      });
+    }
+    if (principal.aiResourceUri !== c.req.url) {
+      return new Response(JSON.stringify({ error: "This token was issued for a different ChartStead connection." }), { status: 401, headers: { "content-type": "application/json" } });
+    }
+    const authorization = c.req.header("authorization") ?? "";
+    const initiatingHuman = principal.initiatingHuman
+      ? `${principal.initiatingHuman.id}|${principal.initiatingHuman.displayName}`
+      : "";
+    const activityRequest = c.req.raw.clone();
+    const response = await handleMcpRequest({
+      request: c.req.raw,
+      principal,
+      requestV1: async (path, init = {}) => v1App.request(
+        new Request(`${new URL(c.req.url).origin}${path}`, {
+          ...init,
+          headers: { ...Object.fromEntries(new Headers(init.headers).entries()), authorization, "x-chartstead-initiating-human": initiatingHuman },
+        }),
+        undefined,
+        c.env,
+      ),
+    });
+    if (response.ok && c.env.AUTH_DB) {
+      const [requestMessage, responseMessage] = await Promise.all([
+        activityRequest.json().catch(() => null) as Promise<{ method?: unknown } | null>,
+        response.clone().json().catch(() => null) as Promise<{ result?: { isError?: unknown } } | null>,
+      ]);
+      if (requestMessage?.method === "tools/call" && responseMessage?.result?.isError === false) {
+        await recordAiConnectionMcpActivityByResource(c.env.AUTH_DB, c.req.url);
+      }
+    }
+    return response;
+  });
 
   app.all("/api/auth/*", async (c) => {
     const auth = createAuth(c.env);

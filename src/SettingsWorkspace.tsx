@@ -10,14 +10,21 @@ import {
 import {
   ApiError,
   connectAirtableSync,
+  createAiConnection,
   createEventApiKey,
   disconnectAirtableSync,
   fetchAirtableSync,
   listEventApiKeys,
+  listAiConnections,
   pullAirtableSync,
+  revokeAiConnection,
+  testAiConnection,
   updateEventApiKey,
   type CreatedEventApiKey,
   type EventApiKeySummary,
+  type AiAccessProfile,
+  type AiConnectionProvider,
+  type AiConnectionSummary,
 } from "./api";
 
 /** Must match worker/airtable/demo-sandbox.ts */
@@ -248,7 +255,7 @@ function AgentApiKeysCard({ eventId }: { eventId: string }) {
             className="btn btn-primary"
             disabled={createMutation.isPending}
           >
-            {createMutation.isPending ? "Creating…" : "Create agent key"}
+            {createMutation.isPending ? "Creating…" : "Create API key"}
           </button>
         </div>
       </form>
@@ -359,12 +366,121 @@ function AgentApiKeysCard({ eventId }: { eventId: string }) {
   );
 }
 
+const PROVIDERS: Array<{ id: AiConnectionProvider; name: string; detail: string; verified: string }> = [
+  { id: "claude", name: "Claude", detail: "Custom connector through Claude settings", verified: "Guided setup" },
+  { id: "chatgpt", name: "ChatGPT", detail: "Custom app through workspace settings", verified: "Workspace plan may be required" },
+  { id: "copilot", name: "Microsoft Copilot", detail: "Organization approval may be required", verified: "Not yet verified" },
+  { id: "other", name: "Other compatible assistant", detail: "Standards-based connection", verified: "Advanced" },
+];
+
+const PROVIDER_DESTINATIONS: Partial<Record<AiConnectionProvider, string>> = {
+  claude: "https://claude.ai",
+  chatgpt: "https://chatgpt.com",
+  copilot: "https://m365.cloud.microsoft/chat",
+};
+
+function AiConnectionsCard({ eventId }: { eventId: string }) {
+  const queryClient = useQueryClient();
+  const [step, setStep] = useState<"overview" | "provider" | "access" | "success">("overview");
+  const [provider, setProvider] = useState<AiConnectionProvider>("claude");
+  const [accessProfile, setAccessProfile] = useState<AiAccessProfile>("research_prepare");
+  const [active, setActive] = useState<AiConnectionSummary | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const connectionsQuery = useQuery({
+    queryKey: ["ai-connections", eventId],
+    queryFn: () => listAiConnections(eventId),
+  });
+  const createMutation = useMutation({
+    mutationFn: () => createAiConnection(eventId, { provider, accessProfile, approvalPolicy: "important_actions" }),
+    onSuccess: async ({ connection }) => {
+      setActive(connection);
+      setMessage(null);
+      await queryClient.invalidateQueries({ queryKey: ["ai-connections", eventId] });
+    },
+    onError: (error) => setMessage(error instanceof ApiError ? error.message : "Unable to connect assistant."),
+  });
+  const testMutation = useMutation({
+    mutationFn: (id: string) => testAiConnection(eventId, id),
+    onSuccess: async ({ connection }) => {
+      setActive(connection);
+      setStep("success");
+      await queryClient.invalidateQueries({ queryKey: ["ai-connections", eventId] });
+    },
+    onError: (error) => setMessage(error instanceof ApiError ? error.message : "Connection test failed."),
+  });
+  const revokeMutation = useMutation({
+    mutationFn: (id: string) => revokeAiConnection(eventId, id),
+    onSuccess: async (_, id) => {
+      if (active?.id === id) {
+        setActive(null);
+        setStep("overview");
+      }
+      await queryClient.invalidateQueries({ queryKey: ["ai-connections", eventId] });
+    },
+  });
+  const providerName = PROVIDERS.find((entry) => entry.id === provider)?.name ?? "Assistant";
+  const providerDestination = active ? PROVIDER_DESTINATIONS[active.provider] : undefined;
+
+  return (
+    <section className="settings-card ai-connections" aria-labelledby="ai-connections-heading">
+      <div className="ai-connections-hero">
+        <div>
+          <p className="settings-eyebrow">AI connections</p>
+          <h3 id="ai-connections-heading">Use your AI assistant with ChartStead.</h3>
+          <p>Connect ChatGPT, Claude, or Copilot to this conference. ChartStead controls what it can access and asks before important actions.</p>
+        </div>
+        {step === "overview" ? <button className="btn btn-primary" type="button" onClick={() => setStep("provider")}>Choose an assistant</button> : null}
+      </div>
+
+      {step === "provider" ? (
+        <div className="assistant-step">
+          <div className="step-heading"><span>1 of 2</span><h4>Where do you want to use ChartStead?</h4></div>
+          <div className="provider-grid">
+            {PROVIDERS.map((entry) => <button type="button" aria-label={entry.name} key={entry.id} className="provider-card" onClick={() => { setProvider(entry.id); setStep("access"); }}>
+              <strong>{entry.name}</strong><span>{entry.detail}</span><small>{entry.verified}</small>
+            </button>)}
+          </div>
+        </div>
+      ) : null}
+
+      {step === "access" ? (
+        <div className="assistant-step">
+          <div className="step-heading"><span>2 of 2</span><h4>Choose what {providerName} can do</h4></div>
+          <div className="access-grid">
+            {([
+              ["explore", "Explore", "View, search, summarize, and identify missing information."],
+              ["research_prepare", "Research and prepare", "Prepare frozen decision reviews and inspect the work needed before messages, schedules, or publication change."],
+              ["operate_with_approval", "Operate with approval", "Use granted Course Check stages after review. Sends, calendars, publication, and integration effects remain separately controlled."],
+            ] as const).map(([id, label, copy]) => <label className={`access-card ${accessProfile === id ? "selected" : ""}`} key={id}>
+              <input type="radio" name="access-profile" value={id} checked={accessProfile === id} onChange={() => setAccessProfile(id)} />
+              <span><strong>{label}{id === "research_prepare" ? " — recommended" : ""}</strong><small>{copy}</small></span>
+            </label>)}
+          </div>
+          <div className="boundary-review">
+            <div><strong>This connection can</strong><p>View this conference and prepare editable drafts or proposed changes.</p></div>
+            <div><strong>ChartStead will ask before</strong><p>Final decisions, messages, calendar invitations, public release, or broad destructive actions.</p></div>
+            <div><strong>This connection cannot</strong><p>Access other conferences, manage users or credentials, or bypass Course Check.</p></div>
+          </div>
+          <div className="settings-actions"><button type="button" className="btn btn-primary" disabled={createMutation.isPending} onClick={() => createMutation.mutate()}>{createMutation.isPending ? "Connecting…" : "Allow and connect"}</button><button type="button" className="btn btn-ghost" onClick={() => setStep("provider")}>Back</button></div>
+        </div>
+      ) : null}
+
+      {active && step !== "success" ? <div className="connection-handoff" role="status"><strong>{providerName} is ready to authorize</strong><p>Open the provider handoff and let the assistant exchange its one-time authorization. Return here after the assistant has read this conference. No bearer secret is displayed or copied.</p><div className="settings-actions">{active.authorizationUrl ? <a className="btn btn-primary" href={active.authorizationUrl} target="_blank" rel="noreferrer">Open secure handoff</a> : null}<button type="button" className="btn btn-secondary" disabled={testMutation.isPending} onClick={() => testMutation.mutate(active.id)}>{testMutation.isPending ? "Testing…" : "Test connection"}</button></div></div> : null}
+      {step === "success" && active ? <div className="connection-success" role="status"><strong>{active.name} is connected</strong><p>It can research and prepare work for this conference. Important actions still require approval. No changes were made during the test.</p><div className="settings-actions">{providerDestination ? <a className="btn btn-primary" href={providerDestination} target="_blank" rel="noreferrer">Open {active.name}</a> : null}<button type="button" className="btn btn-secondary" onClick={() => setStep("overview")}>View connection</button></div></div> : null}
+      {message ? <p className="form-message error" role="alert">{message}</p> : null}
+
+      {(connectionsQuery.data?.connections.length ?? 0) > 0 ? <div className="connection-list"><h4>Existing connections</h4>{connectionsQuery.data?.connections.map(connection => <div className="connection-row" key={connection.id}><div><strong>{connection.name}</strong><span>Personal assistant · {connection.accessProfile === "research_prepare" ? "Research and prepare" : connection.accessProfile.replaceAll("_", " ")}</span></div><span className={`connection-status ${connection.status}`}>{connection.status === "connected" ? "Connected" : connection.status === "needs_sign_in" ? "Needs sign-in" : connection.status === "paused" ? "Paused" : "Connection not tested"}</span><div className="settings-actions">{connection.status === "connection_not_tested" || connection.status === "needs_sign_in" ? <a className="btn btn-secondary" href={`/api/v1/ai-connections/setup?connectionId=${encodeURIComponent(connection.id)}`} target="_blank" rel="noreferrer">{connection.status === "needs_sign_in" ? "Reconnect" : "Continue setup"}</a> : null}<button type="button" className="btn btn-ghost" onClick={() => revokeMutation.mutate(connection.id)}>Disconnect</button></div></div>)}</div> : null}
+    </section>
+  );
+}
+
 export function SettingsWorkspace({ eventId }: { eventId: string }) {
   const queryClient = useQueryClient();
   const [baseId, setBaseId] = useState("");
   const [accessToken, setAccessToken] = useState("");
   const [formMessage, setFormMessage] = useState<string | null>(null);
   const [formTone, setFormTone] = useState<"success" | "error">("success");
+  const [developerOpen, setDeveloperOpen] = useState(false);
 
   const syncQuery = useQuery({
     queryKey: ["airtable-sync", eventId],
@@ -471,7 +587,11 @@ export function SettingsWorkspace({ eventId }: { eventId: string }) {
           <h2>Settings</h2>
         </div>
         <div className="settings-stack">
-          <AgentApiKeysCard eventId={eventId} />
+          <AiConnectionsCard eventId={eventId} />
+          <section className="settings-card developer-access" aria-labelledby="developer-access-heading">
+            <div className="settings-card-header"><div><h3 id="developer-access-heading">Developer access</h3><p className="muted">API keys, service credentials, webhooks, and custom automation. Use this only when your system cannot connect through the guided assistant flow.</p></div><button type="button" className="btn btn-secondary" onClick={() => setDeveloperOpen(current => !current)}>{developerOpen ? "Close developer access" : "Open developer access"}</button></div>
+            {developerOpen ? <AgentApiKeysCard eventId={eventId} /> : null}
+          </section>
 
           <section className="settings-card" aria-labelledby="airtable-sync-heading">
             <div className="settings-card-header">
