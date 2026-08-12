@@ -4,7 +4,7 @@
 
 **Blocked by:** Course Check 14 — Truthful decision review projection and receipts.
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 ## Source
 
@@ -28,3 +28,4 @@
 - 2026-08-12 — This is functional agent work. Course Check 12 may later polish the batch surface, but does not block this ticket.
 
 - 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.
+- 2026-08-12 — Started in the overnight parallel frontier after Course Check 14; automated verification is required, with demos/review/QA deferred per Tyler's instruction.
