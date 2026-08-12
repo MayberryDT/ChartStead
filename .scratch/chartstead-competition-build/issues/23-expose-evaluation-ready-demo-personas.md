@@ -1,6 +1,6 @@
 # 23 — Expose evaluation-ready demo personas
 
-**Status:** blocked
+**Status:** ready-for-agent
 
 **Blocked by:** 22 — Invite reviewers into track-scoped queues.
 
@@ -31,4 +31,4 @@ Make the isolated demo deployment prove ChartStead's existing multi-role spine w
 - 2026-08-12 — Created blocked on Competition 22 so the demo proves the same reviewer invitation and authorization path that production uses.
 
 
-- 2026-08-12 — frontier-reconcile: Still blocked on: Competition 22 (in-progress).
+- 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.
