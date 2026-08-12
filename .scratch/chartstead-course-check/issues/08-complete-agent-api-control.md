@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Batch decisions and shared workspace; 04 — External sends and effect recovery; 05 — Calendar delivery lifecycle; 06 — Program Publication Course Check; 07 — Airtable consequence effects; Competition 10 — Authenticated HTTP foundation.
 
-**Status:** blocked
+**Status:** ready-for-agent
 
 - [ ] The `v1` contract exposes closed action types, stable event/entity/plan/stage/effect IDs, plan and state revisions, digest, findings, effects, approvals, receipts, and idempotency keys.
 - [ ] API clients can create, inspect, revise, approve, execute, defer, retry, reconcile, and compensate every supported Course Check action.
@@ -25,4 +25,4 @@
 
 Blocked by Course Check 02, 04, 05, 06, and 07, plus Competition Ticket 10 — Airtable mapping and authenticated HTTP foundation.
 
-- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 05 (ready-for-agent).
+- 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.

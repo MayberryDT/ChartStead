@@ -4,7 +4,7 @@
 
 **Blocked by:** 05 — Speaker portal from an applied acceptance; Course Check 03 — Communication drafts and recipient reasoning; Course Check 04 — External sends and effect recovery; Course Check 05 — Calendar delivery lifecycle.
 
-**Status:** blocked
+**Status:** ready-for-agent
 
 - [ ] Internal approve, maybe, or deny state does not imply that a message has been drafted or sent.
 - [ ] Communication state distinguishes draft, queued, sent, delivered, and failed independently from proposal state.
@@ -19,4 +19,4 @@
 
 Blocked pending Course Check 03 — Communication drafts and recipient reasoning, Course Check 04 — External sends and effect recovery, and Course Check 05 — Calendar delivery lifecycle. Competition Ticket 05 is done.
 
-- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 05 (ready-for-agent).
+- 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.
