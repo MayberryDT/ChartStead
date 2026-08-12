@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Batch decisions and shared workspace; 06 — Program Publication Course Check; Competition 10 — Airtable mapping and authenticated HTTP foundation.
 
-**Status:** in-review
+**Status:** done
 
 - [x] Decision, communication, and publication plans show exact mapped Airtable creates or updates before integration approval.
 - [x] `Write to Airtable` remains a separate stage that can be removed, deferred, or executed after valid internal work.
@@ -27,3 +27,4 @@ Blocked by Course Check 02 — Batch decisions and shared workspace, Course Chec
 - 2026-08-11 — Ready for human QA on `http://100.105.117.93:5187/e/pacific-open-data-summit-2026/submissions`. Test exact Airtable previews, internal apply before integration, Write/Defer/Remove actions, degraded unconfigured behavior, and reconciliation/compensation states.
 - 2026-08-11 — Rebuilt the Course Check review surface after QA feedback: removed the accidental nested app grid, adopted the submissions visual language, and made evidence/Airtable effects collapsed by default with visible attention badges. Updated demo: `http://100.105.117.93:5187/e/pacific-open-data-summit-2026/course-checks/17b70e24-e991-40f8-98c6-2b8f162c993a`.
 - 2026-08-11 — Removed dead-end transitions after QA: Apply now opens the linked Communication Course Check; Defer applies the remaining eligible decisions before opening communication; freezing drafts returns to submissions. Also fixed the communication subject/body editor width and stacking.
+- 2026-08-11 — Human QA approved; commit and merge requested. Ticket complete.

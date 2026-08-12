@@ -6,6 +6,9 @@ import {
   type UploadedAssetAnswer,
 } from "../shared/cfp-definition";
 import type {
+  CommunicationDeliverySummary,
+  CommunicationEffect,
+  CommunicationEffectStatus,
   CommunicationPlanBody,
   CommunicationTemplateKind,
   CourseCheckActionType,
@@ -112,11 +115,15 @@ import {
   publicationBodyDigestPayload,
   publicationCommunicationDigestPayload,
 } from "./course-check/publication-planner";
+import { flushCommunicationEffects } from "./course-check/communication-delivery";
+import { createResendCommunicationSender } from "./email";
 import { createStableProposalId } from "./proposals";
 import type { AppBindings } from "./types";
 
 const DEFAULT_THEME_ACCENT = "#2f5d98";
 const THEME_ACCENT_PATTERN = /^#[0-9a-fA-F]{6}$/;
+const COMMUNICATION_SENDING_LEASE_MS = 2 * 60_000;
+const COMMUNICATION_CONFIG_RECHECK_MS = 5 * 60_000;
 
 export function normalizeThemeAccent(value: unknown): string {
   if (typeof value === "string" && THEME_ACCENT_PATTERN.test(value)) {
@@ -436,6 +443,25 @@ interface OutboxRow {
   next_attempt_at: string | null;
 }
 
+interface CommunicationEffectRow {
+  [key: string]: string | number | null;
+  id: string;
+  plan_id: string;
+  plan_version: number;
+  draft_id: string;
+  payload_identity: string;
+  to_email: string;
+  status: string;
+  provider_reference: string | null;
+  attempt_count: number;
+  last_error: string | null;
+  next_attempt_at: string | null;
+  last_attempt_at: string | null;
+  succeeded_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 interface EditTokenRow {
   [key: string]: string | number | null;
   token_id: string;
@@ -614,12 +640,23 @@ function normalizeCourseCheckBody(body: CourseCheckPlanBody): CourseCheckPlanBod
       airtable,
       recipientGroups: body.recipientGroups ?? [],
       drafts: body.drafts ?? [],
+      effects: body.effects ?? [],
+      deliverySummary: body.deliverySummary ?? {
+        total: 0,
+        queued: 0,
+        sending: 0,
+        succeeded: 0,
+        retryScheduled: 0,
+        failed: 0,
+        unknown: 0,
+      },
       recipients: body.recipients ?? [],
       calendarOps: body.calendarOps ?? [],
       evidenceSections: body.evidenceSections ?? [],
       softWarningOverrides: body.softWarningOverrides ?? [],
       linkedPlanIds: body.linkedPlanIds ?? [],
       parentPlanId: body.parentPlanId ?? null,
+      compensation: body.compensation ?? null,
       batchGroupId: body.batchGroupId ?? null,
       splitExplanation: body.splitExplanation ?? null,
       ageWarningHours: body.ageWarningHours ?? DEFAULT_AGE_WARNING_HOURS,
@@ -793,12 +830,56 @@ function mapOutbox(row: OutboxRow): OutboxMessage {
   };
 }
 
+function mapCommunicationEffect(row: CommunicationEffectRow): CommunicationEffect {
+  return {
+    effectId: row.id,
+    planId: row.plan_id,
+    planVersion: Number(row.plan_version),
+    draftId: row.draft_id,
+    payloadIdentity: row.payload_identity,
+    toEmail: row.to_email,
+    status: row.status as CommunicationEffectStatus,
+    providerReference: row.provider_reference,
+    attemptCount: Number(row.attempt_count),
+    lastError: row.last_error,
+    nextAttemptAt: row.next_attempt_at,
+    lastAttemptAt: row.last_attempt_at,
+    succeededAt: row.succeeded_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function summarizeCommunicationEffects(
+  effects: CommunicationEffect[],
+): CommunicationDeliverySummary {
+  return {
+    total: effects.length,
+    queued: effects.filter((effect) => effect.status === "queued").length,
+    sending: effects.filter((effect) => effect.status === "sending").length,
+    succeeded: effects.filter((effect) => effect.status === "succeeded").length,
+    retryScheduled: effects.filter((effect) => effect.status === "retry_scheduled").length,
+    failed: effects.filter(
+      (effect) =>
+        effect.status === "permanent_failure" || effect.status === "exhausted",
+    ).length,
+    unknown: effects.filter((effect) => effect.status === "unknown").length,
+  };
+}
+
 const OUTBOX_SELECT = `id, kind, to_email, subject, html_body, text_body, status,
   proposal_id, error, created_at, updated_at, sent_at, attempt_count, next_attempt_at`;
 
+const COMMUNICATION_EFFECT_SELECT = `id, plan_id, plan_version, draft_id,
+  payload_identity, to_email, status, provider_reference, attempt_count,
+  last_error, next_attempt_at, last_attempt_at, succeeded_at, created_at, updated_at`;
+
 export class EventStore extends DurableObject<AppBindings> {
+  private readonly appEnv: AppBindings;
+
   constructor(ctx: DurableObjectState, env: AppBindings) {
     super(ctx, env);
+    this.appEnv = env;
 
     this.ctx.storage.transactionSync(() => {
       this.ctx.storage.sql.exec(`
@@ -1148,6 +1229,30 @@ export class EventStore extends DurableObject<AppBindings> {
         CREATE INDEX IF NOT EXISTS communication_drafts_plan_idx
         ON communication_drafts (plan_id, plan_version)
       `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS communication_effects (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT NOT NULL,
+          plan_version INTEGER NOT NULL,
+          draft_id TEXT NOT NULL,
+          payload_identity TEXT NOT NULL,
+          to_email TEXT NOT NULL,
+          status TEXT NOT NULL,
+          provider_reference TEXT,
+          attempt_count INTEGER NOT NULL DEFAULT 0,
+          last_error TEXT,
+          next_attempt_at TEXT,
+          last_attempt_at TEXT,
+          succeeded_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (plan_id, draft_id)
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS communication_effects_due_idx
+        ON communication_effects (status, next_attempt_at, created_at)
+      `);
 
       this.ensureColumn("events", "submission_count", "INTEGER NOT NULL DEFAULT 0");
       this.ensureColumn(
@@ -1356,6 +1461,20 @@ export class EventStore extends DurableObject<AppBindings> {
           created_at TEXT NOT NULL
         )
       `);
+    });
+  }
+
+  async alarm(): Promise<void> {
+    const sender = createResendCommunicationSender(this.appEnv);
+    if (!sender) {
+      await this.ctx.storage.setAlarm(Date.now() + COMMUNICATION_CONFIG_RECHECK_MS);
+      return;
+    }
+    await flushCommunicationEffects({
+      store: this,
+      sender,
+      now: new Date(),
+      limit: 50,
     });
   }
 
@@ -5191,8 +5310,16 @@ export class EventStore extends DurableObject<AppBindings> {
       stages: body.stages,
     });
     let nextBody = body;
+    if (body.actionType === "communication") {
+      const effects = this.listCommunicationEffects(plan.id);
+      nextBody = {
+        ...body,
+        effects,
+        deliverySummary: summarizeCommunicationEffects(effects),
+      };
+    }
     if (ageWarning) {
-      nextBody = { ...body, ageWarning };
+      nextBody = { ...nextBody, ageWarning };
     }
 
     // Stage-scoped freshness: mark dependent stages out of date when relevant inputs change.
@@ -6796,6 +6923,1039 @@ export class EventStore extends DurableObject<AppBindings> {
       )
       .toArray()
       .map((row) => JSON.parse(row.frozen_payload_json) as FrozenCommunicationDraft);
+  }
+
+  listCommunicationEffects(planId: string): CommunicationEffect[] {
+    return this.ctx.storage.sql
+      .exec<CommunicationEffectRow>(
+        `SELECT ${COMMUNICATION_EFFECT_SELECT}
+         FROM communication_effects
+         WHERE plan_id = ?
+         ORDER BY created_at ASC, id ASC`,
+        planId,
+      )
+      .toArray()
+      .map(mapCommunicationEffect);
+  }
+
+  async listDueCommunicationEffectIds(
+    nowIso: string,
+    limit: number,
+  ): Promise<string[]> {
+    const staleBefore = new Date(
+      new Date(nowIso).getTime() - COMMUNICATION_SENDING_LEASE_MS,
+    ).toISOString();
+    return this.ctx.storage.sql
+      .exec<{ id: string }>(
+        `SELECT id
+         FROM communication_effects
+         WHERE status = 'queued'
+            OR (status = 'retry_scheduled' AND next_attempt_at <= ?)
+            OR (status = 'sending' AND last_attempt_at <= ?)
+         ORDER BY created_at ASC, id ASC
+         LIMIT ?`,
+        nowIso,
+        staleBefore,
+        limit,
+      )
+      .toArray()
+      .map((row) => row.id);
+  }
+
+  async claimCommunicationEffect(
+    effectId: string,
+    nowIso: string,
+  ): Promise<CommunicationEffect | null> {
+    let claimed: CommunicationEffect | null = null;
+    let attentionPlanId: string | null = null;
+    this.ctx.storage.transactionSync(() => {
+      const row = this.ctx.storage.sql
+        .exec<CommunicationEffectRow>(
+          `SELECT ${COMMUNICATION_EFFECT_SELECT}
+           FROM communication_effects WHERE id = ?`,
+          effectId,
+        )
+        .toArray()[0];
+      if (!row) return;
+      const effect = mapCommunicationEffect(row);
+      const staleBefore = new Date(
+        new Date(nowIso).getTime() - COMMUNICATION_SENDING_LEASE_MS,
+      ).toISOString();
+      if (
+        effect.status === "sending" &&
+        effect.lastAttemptAt &&
+        effect.lastAttemptAt <= staleBefore
+      ) {
+        this.ctx.storage.sql.exec(
+          `UPDATE communication_effects
+           SET status = 'unknown',
+               last_error = ?,
+               next_attempt_at = NULL,
+               updated_at = ?
+           WHERE id = ? AND status = 'sending'`,
+          "The worker stopped before recording the provider outcome. Reconcile before retrying.",
+          nowIso,
+          effectId,
+        );
+        attentionPlanId = effect.planId;
+        return;
+      }
+      const due =
+        effect.status === "queued" ||
+        (effect.status === "retry_scheduled" &&
+          effect.nextAttemptAt !== null &&
+          effect.nextAttemptAt <= nowIso);
+      if (!due) return;
+      this.ctx.storage.sql.exec(
+        `UPDATE communication_effects
+         SET status = 'sending',
+             attempt_count = attempt_count + 1,
+             last_attempt_at = ?,
+             next_attempt_at = NULL,
+             last_error = NULL,
+             updated_at = ?
+         WHERE id = ?`,
+        nowIso,
+        nowIso,
+        effectId,
+      );
+      const claimedRow = this.ctx.storage.sql
+        .exec<CommunicationEffectRow>(
+          `SELECT ${COMMUNICATION_EFFECT_SELECT}
+           FROM communication_effects WHERE id = ?`,
+          effectId,
+        )
+        .toArray()[0];
+      claimed = claimedRow ? mapCommunicationEffect(claimedRow) : null;
+    });
+    if (attentionPlanId) {
+      this.refreshCommunicationDeliveryState(attentionPlanId, nowIso);
+    }
+    if (claimed) {
+      await this.ctx.storage.setAlarm(Date.now() + COMMUNICATION_SENDING_LEASE_MS);
+    }
+    return claimed;
+  }
+
+  async getCommunicationEffectPayload(
+    effectId: string,
+  ): Promise<import("./email").CommunicationOutboundEmail | null> {
+    const row = this.ctx.storage.sql
+      .exec<{
+        id: string;
+        payload_identity: string;
+        frozen_payload_json: string;
+      }>(
+        `SELECT e.id, e.payload_identity, d.frozen_payload_json
+         FROM communication_effects e
+         JOIN communication_drafts d ON d.id = e.draft_id
+         WHERE e.id = ?`,
+        effectId,
+      )
+      .toArray()[0];
+    if (!row) return null;
+    const draft = JSON.parse(row.frozen_payload_json) as FrozenCommunicationDraft;
+    if ((await digestPayload(draft)) !== row.payload_identity) return null;
+    return {
+      idempotencyKey: row.id,
+      to: draft.toEmail,
+      subject: draft.subject,
+      html: draft.bodyHtml,
+      text: draft.bodyText,
+    };
+  }
+
+  async recordCommunicationEffectResult(input: {
+    effectId: string;
+    result: import("./email").CommunicationSendResult;
+    nowIso: string;
+    maxAttempts: number;
+    nextAttemptAt: string | null;
+  }): Promise<void> {
+    const current = this.ctx.storage.sql
+      .exec<CommunicationEffectRow>(
+        `SELECT ${COMMUNICATION_EFFECT_SELECT}
+         FROM communication_effects WHERE id = ?`,
+        input.effectId,
+      )
+      .toArray()[0];
+    if (!current || current.status !== "sending") return;
+    const effect = mapCommunicationEffect(current);
+    let status: CommunicationEffectStatus;
+    let providerReference: string | null = effect.providerReference;
+    let lastError: string | null = null;
+    let nextAttemptAt: string | null = null;
+    let succeededAt: string | null = null;
+
+    if (input.result.outcome === "sent") {
+      status = "succeeded";
+      providerReference = input.result.providerReference;
+      succeededAt = input.nowIso;
+    } else if (input.result.outcome === "unknown") {
+      status = "unknown";
+      providerReference = input.result.providerReference ?? providerReference;
+      lastError = input.result.error.slice(0, 300);
+    } else if (input.result.outcome === "permanent_failure") {
+      status = "permanent_failure";
+      lastError = input.result.error.slice(0, 300);
+    } else if (
+      effect.attemptCount >= input.maxAttempts ||
+      input.nextAttemptAt === null
+    ) {
+      status = "exhausted";
+      lastError = input.result.error.slice(0, 300);
+    } else {
+      status = "retry_scheduled";
+      lastError = input.result.error.slice(0, 300);
+      nextAttemptAt = input.nextAttemptAt;
+    }
+
+    this.ctx.storage.sql.exec(
+      `UPDATE communication_effects
+       SET status = ?, provider_reference = ?, last_error = ?,
+           next_attempt_at = ?, succeeded_at = ?, updated_at = ?
+       WHERE id = ? AND status = 'sending'`,
+      status,
+      providerReference,
+      lastError,
+      nextAttemptAt,
+      succeededAt,
+      input.nowIso,
+      input.effectId,
+    );
+    this.refreshCommunicationDeliveryState(effect.planId, input.nowIso);
+  }
+
+  private refreshCommunicationDeliveryState(planId: string, nowIso: string): void {
+    const row = this.loadCourseCheckPlanRow(planId);
+    if (!row) return;
+    const body = normalizeCourseCheckBody(
+      JSON.parse(row.body_json) as CourseCheckPlanBody,
+    );
+    if (body.actionType !== "communication") return;
+    const effects = this.listCommunicationEffects(planId);
+    const summary = summarizeCommunicationEffects(effects);
+    const active = summary.queued + summary.sending + summary.retryScheduled;
+    let state: CourseCheckPlanState;
+    let delivery: CommunicationPlanBody["stageVisibility"]["delivery"];
+    if (summary.unknown > 0) {
+      state = "Needs attention";
+      delivery = "needs_attention";
+    } else if (active > 0) {
+      const terminal = summary.succeeded + summary.failed;
+      state = terminal > 0 ? "Partially complete" : "In progress";
+      delivery = terminal > 0 ? "partially_complete" : "in_progress";
+    } else if (summary.failed > 0) {
+      state = "Partially complete";
+      delivery = "partially_complete";
+    } else {
+      state = "Complete";
+      delivery = "complete";
+    }
+    const nextBody: CommunicationPlanBody = {
+      ...body,
+      effects,
+      deliverySummary: summary,
+      stageVisibility: { ...body.stageVisibility, delivery },
+    };
+    this.ctx.storage.sql.exec(
+      `UPDATE course_check_plans
+       SET state = ?, body_json = ?, updated_at = ?
+       WHERE id = ?`,
+      state,
+      JSON.stringify(nextBody),
+      nowIso,
+      planId,
+    );
+  }
+
+  async scheduleNextCommunicationAlarm(): Promise<void> {
+    const now = Date.now();
+    const queued = this.ctx.storage.sql
+      .exec<{ total: number }>(
+        `SELECT COUNT(*) AS total FROM communication_effects WHERE status = 'queued'`,
+      )
+      .toArray()[0]?.total;
+    if (Number(queued ?? 0) > 0) {
+      await this.ctx.storage.setAlarm(now);
+      return;
+    }
+    const nextRetry = this.ctx.storage.sql
+      .exec<{ next_attempt_at: string | null }>(
+        `SELECT MIN(next_attempt_at) AS next_attempt_at
+         FROM communication_effects
+         WHERE status = 'retry_scheduled' AND next_attempt_at IS NOT NULL`,
+      )
+      .toArray()[0]?.next_attempt_at;
+    const oldestSending = this.ctx.storage.sql
+      .exec<{ last_attempt_at: string | null }>(
+        `SELECT MIN(last_attempt_at) AS last_attempt_at
+         FROM communication_effects
+         WHERE status = 'sending' AND last_attempt_at IS NOT NULL`,
+      )
+      .toArray()[0]?.last_attempt_at;
+    const candidates = [
+      nextRetry ? new Date(nextRetry).getTime() : Number.POSITIVE_INFINITY,
+      oldestSending
+        ? new Date(oldestSending).getTime() + COMMUNICATION_SENDING_LEASE_MS
+        : Number.POSITIVE_INFINITY,
+    ].filter(Number.isFinite);
+    if (candidates.length === 0) {
+      await this.ctx.storage.deleteAlarm();
+      return;
+    }
+    await this.ctx.storage.setAlarm(Math.max(now, Math.min(...candidates)));
+  }
+
+  async startCommunicationSend(input: {
+    planId: string;
+    planVersion: number;
+    digest: string;
+    stageId: string;
+    idempotencyKey: string;
+    actor: CourseCheckActor;
+  }): Promise<
+    | { ok: true; plan: CourseCheckPlan; created: boolean }
+    | {
+        ok: false;
+        status: 400 | 409;
+        code: string;
+        error: string;
+        recoveryGuidance: string;
+        changedInputs?: string[];
+      }
+  > {
+    const existing = this.readIdempotency("send-communication", input.idempotencyKey);
+    if (existing) {
+      const plan = this.getCourseCheckPlan(existing.planId);
+      if (!plan) throw new Error("Idempotent communication send plan is missing.");
+      return { ok: true, plan, created: false };
+    }
+
+    const row = this.loadCourseCheckPlanRow(input.planId);
+    if (!row) {
+      return {
+        ok: false,
+        status: 400,
+        code: "plan_not_found",
+        error: "Course Check plan not found.",
+        recoveryGuidance: "Create a new Communication Course Check.",
+      };
+    }
+    const plan = this.attachReceipt(
+      mapCourseCheckPlan(row, this.eventIdOrThrow()),
+      row.receipt_id,
+    );
+    if (plan.body.actionType !== "communication") {
+      return {
+        ok: false,
+        status: 400,
+        code: "unsupported_action",
+        error: "Send messages is only valid for Communication Course Checks.",
+        recoveryGuidance: "Open a Communication Course Check.",
+      };
+    }
+    const communicationBody = plan.body;
+    if (input.stageId !== "send-messages") {
+      return {
+        ok: false,
+        status: 400,
+        code: "unknown_stage",
+        error: "Unknown Course Check stage.",
+        recoveryGuidance: "Use the Send messages stage for this plan.",
+      };
+    }
+    if (plan.version !== input.planVersion || plan.digest !== input.digest) {
+      return {
+        ok: false,
+        status: 409,
+        code: "plan_version_mismatch",
+        error: "This Course Check changed since you loaded it.",
+        recoveryGuidance: "Reload the Course Check and review the latest plan version.",
+      };
+    }
+    if (
+      plan.body.stageVisibility.draft !== "complete" ||
+      plan.body.drafts.length === 0
+    ) {
+      return {
+        ok: false,
+        status: 409,
+        code: "drafts_not_frozen",
+        error: "Create the exact communication drafts before sending.",
+        recoveryGuidance: "Run Create drafts, review the frozen payloads, then send.",
+      };
+    }
+    const changed = this.detectCommunicationStaleInputs(plan.body);
+    if (changed.length > 0) {
+      return {
+        ok: false,
+        status: 409,
+        code: "relevant_input_changed",
+        error: "Relevant recipient or proposal inputs changed after draft creation.",
+        recoveryGuidance: "Revise this Communication Course Check from current records.",
+        changedInputs: changed,
+      };
+    }
+    const alreadyStarted = this.listCommunicationEffects(plan.id);
+    if (alreadyStarted.length > 0) {
+      return { ok: true, plan: this.enrichPlan(plan), created: false };
+    }
+
+    const now = new Date().toISOString();
+    const effectSeeds = await Promise.all(
+      plan.body.drafts.map(async (draft) => ({
+        effectId: `effect_${draft.draftId}`,
+        draft,
+        payloadIdentity: await digestPayload(draft),
+      })),
+    );
+    const effects: CommunicationEffect[] = effectSeeds.map((seed) => ({
+      effectId: seed.effectId,
+      planId: plan.id,
+      planVersion: plan.version,
+      draftId: seed.draft.draftId,
+      payloadIdentity: seed.payloadIdentity,
+      toEmail: seed.draft.toEmail,
+      status: "queued",
+      providerReference: null,
+      attemptCount: 0,
+      lastError: null,
+      nextAttemptAt: null,
+      lastAttemptAt: null,
+      succeededAt: null,
+      createdAt: now,
+      updatedAt: now,
+    }));
+    const nextBody: CommunicationPlanBody = {
+      ...plan.body,
+      effects,
+      deliverySummary: summarizeCommunicationEffects(effects),
+      stages: plan.body.stages.map((stage) =>
+        stage.id === "send-messages"
+          ? { ...stage, status: "complete" as const }
+          : stage,
+      ),
+      stageVisibility: {
+        ...plan.body.stageVisibility,
+        send: "complete",
+        delivery: "in_progress",
+      },
+    };
+    const receiptId = crypto.randomUUID();
+    const approval = {
+      stageId: "send-messages",
+      planVersion: plan.version,
+      digest: plan.digest,
+      actor: input.actor,
+      approvedAt: now,
+    };
+    let startedPlan: CourseCheckPlan | null = null;
+
+    try {
+      this.ctx.storage.transactionSync(() => {
+        for (const effect of effects) {
+          this.ctx.storage.sql.exec(
+            `INSERT INTO communication_effects
+              (id, plan_id, plan_version, draft_id, payload_identity, to_email,
+               status, provider_reference, attempt_count, last_error,
+               next_attempt_at, last_attempt_at, succeeded_at, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'queued', NULL, 0, NULL, NULL, NULL, NULL, ?, ?)`,
+            effect.effectId,
+            effect.planId,
+            effect.planVersion,
+            effect.draftId,
+            effect.payloadIdentity,
+            effect.toEmail,
+            now,
+            now,
+          );
+        }
+        this.ctx.storage.sql.exec(
+          `INSERT INTO course_check_receipts
+            (id, plan_id, plan_version, digest, stage_id, applied_at, actor_id, actor_name)
+           VALUES (?, ?, ?, ?, 'send-messages', ?, ?, ?)`,
+          receiptId,
+          plan.id,
+          plan.version,
+          plan.digest,
+          now,
+          input.actor.id,
+          input.actor.displayName,
+        );
+        this.ctx.storage.sql.exec(
+          `UPDATE course_check_plans
+           SET state = 'In progress', body_json = ?, updated_at = ?,
+               approval_json = ?, receipt_id = ?
+           WHERE id = ?`,
+          JSON.stringify(nextBody),
+          now,
+          JSON.stringify(approval),
+          receiptId,
+          plan.id,
+        );
+        this.recordPlanVersion({
+          planId: plan.id,
+          version: plan.version,
+          digest: plan.digest,
+          state: "In progress",
+          body: nextBody,
+          actor: input.actor,
+          at: now,
+          mutationKind: "send",
+          summary: `Approved delivery and queued ${effects.length} address effect(s).`,
+          fromVersion: plan.version,
+        });
+        this.ctx.storage.sql.exec(
+          `INSERT INTO audit_events
+            (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+             committee_note_changed, created_at)
+           VALUES (?, ?, 'course_check.communication.send_started', ?, ?, ?, ?, 0, ?)`,
+          crypto.randomUUID(),
+          communicationBody.recipientGroups[0]?.proposalId || plan.id,
+          input.actor.id,
+          input.actor.displayName,
+          plan.state,
+          `${effects.length} effects queued`,
+          now,
+        );
+        startedPlan = this.attachReceipt(
+          mapCourseCheckPlan(
+            {
+              ...row,
+              state: "In progress",
+              body_json: JSON.stringify(nextBody),
+              updated_at: now,
+              approval_json: JSON.stringify(approval),
+              receipt_id: receiptId,
+            },
+            this.eventIdOrThrow(),
+          ),
+          receiptId,
+        );
+        this.writeIdempotency({
+          command: "send-communication",
+          key: input.idempotencyKey,
+          planId: plan.id,
+          receiptId,
+          response: startedPlan,
+        });
+      });
+    } catch (error) {
+      return {
+        ok: false,
+        status: 409,
+        code: "durable_integrity",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Starting communication delivery violated durable integrity.",
+        recoveryGuidance: "Reload the Course Check and retry the send stage.",
+      };
+    }
+
+    await this.ctx.storage.setAlarm(Date.now());
+    const started = startedPlan ?? this.getCourseCheckPlan(plan.id);
+    if (!started) throw new Error("Started communication plan is missing.");
+    return { ok: true, plan: this.enrichPlan(started), created: true };
+  }
+
+  async retryCommunicationEffect(input: {
+    planId: string;
+    effectId: string;
+    idempotencyKey: string;
+    actor: CourseCheckActor;
+  }): Promise<
+    | { ok: true; plan: CourseCheckPlan; created: boolean }
+    | {
+        ok: false;
+        status: 400 | 409;
+        code: string;
+        error: string;
+        recoveryGuidance: string;
+      }
+  > {
+    const existing = this.readIdempotency("retry-communication", input.idempotencyKey);
+    if (existing) {
+      const plan = this.getCourseCheckPlan(existing.planId);
+      if (!plan) throw new Error("Idempotent retry plan is missing.");
+      return { ok: true, plan, created: false };
+    }
+    const plan = this.getCourseCheckPlan(input.planId);
+    if (!plan || plan.body.actionType !== "communication") {
+      return {
+        ok: false,
+        status: 400,
+        code: "plan_not_found",
+        error: "Communication Course Check not found.",
+        recoveryGuidance: "Reload the Course Check.",
+      };
+    }
+    const communicationBody = plan.body;
+    const effect = this.listCommunicationEffects(plan.id).find(
+      (row) => row.effectId === input.effectId,
+    );
+    if (!effect) {
+      return {
+        ok: false,
+        status: 400,
+        code: "effect_not_found",
+        error: "Communication effect not found.",
+        recoveryGuidance: "Reload the Course Check effect list.",
+      };
+    }
+    if (effect.status === "unknown") {
+      return {
+        ok: false,
+        status: 409,
+        code: "reconciliation_required",
+        error: "This provider outcome is unknown and cannot be retried blindly.",
+        recoveryGuidance:
+          "Check the provider, then reconcile this effect as delivered or not delivered.",
+      };
+    }
+    if (
+      effect.status !== "permanent_failure" &&
+      effect.status !== "exhausted"
+    ) {
+      return {
+        ok: false,
+        status: 409,
+        code: "effect_not_retryable",
+        error: `A ${effect.status} effect is not eligible for manual retry.`,
+        recoveryGuidance: "Reload the Course Check and review the live effect state.",
+      };
+    }
+
+    const now = new Date().toISOString();
+    let response: CourseCheckPlan | null = null;
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        `UPDATE communication_effects
+         SET status = 'queued', last_error = NULL, next_attempt_at = NULL,
+             updated_at = ?
+         WHERE id = ? AND plan_id = ?`,
+        now,
+        effect.effectId,
+        plan.id,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT INTO course_check_mutations
+          (id, plan_id, from_version, to_version, kind, actor_id, actor_name, at, summary)
+         VALUES (?, ?, ?, ?, 'retry', ?, ?, ?, ?)`,
+        crypto.randomUUID(),
+        plan.id,
+        plan.version,
+        plan.version,
+        input.actor.id,
+        input.actor.displayName,
+        now,
+        `Manual retry queued for ${effect.effectId}.`,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT INTO audit_events
+          (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+           committee_note_changed, created_at)
+         VALUES (?, ?, 'course_check.communication.effect_retry', ?, ?, ?, 'queued', 0, ?)`,
+        crypto.randomUUID(),
+        communicationBody.recipientGroups[0]?.proposalId || plan.id,
+        input.actor.id,
+        input.actor.displayName,
+        effect.status,
+        now,
+      );
+      this.refreshCommunicationDeliveryState(plan.id, now);
+      response = this.getCourseCheckPlan(plan.id);
+      if (!response) throw new Error("Retried communication plan is missing.");
+      this.writeIdempotency({
+        command: "retry-communication",
+        key: input.idempotencyKey,
+        planId: plan.id,
+        response,
+      });
+    });
+    await this.ctx.storage.setAlarm(Date.now());
+    return { ok: true, plan: response!, created: true };
+  }
+
+  reconcileCommunicationEffect(input: {
+    planId: string;
+    effectId: string;
+    outcome: "delivered" | "not_delivered";
+    providerReference?: string | null;
+    note: string;
+    idempotencyKey: string;
+    actor: CourseCheckActor;
+  }):
+    | { ok: true; plan: CourseCheckPlan; created: boolean }
+    | {
+        ok: false;
+        status: 400 | 409;
+        code: string;
+        error: string;
+        recoveryGuidance: string;
+      } {
+    const existing = this.readIdempotency(
+      "reconcile-communication",
+      input.idempotencyKey,
+    );
+    if (existing) {
+      const plan = this.getCourseCheckPlan(existing.planId);
+      if (!plan) throw new Error("Idempotent reconciliation plan is missing.");
+      return { ok: true, plan, created: false };
+    }
+    const plan = this.getCourseCheckPlan(input.planId);
+    if (!plan || plan.body.actionType !== "communication") {
+      return {
+        ok: false,
+        status: 400,
+        code: "plan_not_found",
+        error: "Communication Course Check not found.",
+        recoveryGuidance: "Reload the Course Check.",
+      };
+    }
+    const communicationBody = plan.body;
+    const effect = this.listCommunicationEffects(plan.id).find(
+      (row) => row.effectId === input.effectId,
+    );
+    if (!effect) {
+      return {
+        ok: false,
+        status: 400,
+        code: "effect_not_found",
+        error: "Communication effect not found.",
+        recoveryGuidance: "Reload the Course Check effect list.",
+      };
+    }
+    if (effect.status !== "unknown") {
+      return {
+        ok: false,
+        status: 409,
+        code: "effect_not_unknown",
+        error: `A ${effect.status} effect does not need unknown-outcome reconciliation.`,
+        recoveryGuidance: "Reload the Course Check and review the live effect state.",
+      };
+    }
+    const note = input.note.trim();
+    if (!note) {
+      return {
+        ok: false,
+        status: 400,
+        code: "reconciliation_note_required",
+        error: "A reconciliation note is required.",
+        recoveryGuidance: "Record what the provider or staff investigation confirmed.",
+      };
+    }
+    if (input.outcome === "delivered" && !input.providerReference?.trim()) {
+      return {
+        ok: false,
+        status: 400,
+        code: "provider_reference_required",
+        error: "A provider reference is required when reconciling as delivered.",
+        recoveryGuidance: "Copy the matching delivery reference from the provider.",
+      };
+    }
+
+    const now = new Date().toISOString();
+    let response: CourseCheckPlan | null = null;
+    this.ctx.storage.transactionSync(() => {
+      const delivered = input.outcome === "delivered";
+      this.ctx.storage.sql.exec(
+        `UPDATE communication_effects
+         SET status = ?, provider_reference = ?, last_error = ?,
+             next_attempt_at = NULL, succeeded_at = ?, updated_at = ?
+         WHERE id = ? AND plan_id = ? AND status = 'unknown'`,
+        delivered ? "succeeded" : "permanent_failure",
+        delivered ? input.providerReference!.trim() : effect.providerReference,
+        delivered ? null : `Reconciled as not delivered: ${note}`,
+        delivered ? now : null,
+        now,
+        effect.effectId,
+        plan.id,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT INTO course_check_mutations
+          (id, plan_id, from_version, to_version, kind, actor_id, actor_name, at, summary)
+         VALUES (?, ?, ?, ?, 'reconcile', ?, ?, ?, ?)`,
+        crypto.randomUUID(),
+        plan.id,
+        plan.version,
+        plan.version,
+        input.actor.id,
+        input.actor.displayName,
+        now,
+        `Reconciled ${effect.effectId} as ${input.outcome}: ${note}`,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT INTO audit_events
+          (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+           committee_note_changed, created_at)
+         VALUES (?, ?, 'course_check.communication.effect_reconciled', ?, ?,
+                 'unknown', ?, 0, ?)`,
+        crypto.randomUUID(),
+        communicationBody.recipientGroups[0]?.proposalId || plan.id,
+        input.actor.id,
+        input.actor.displayName,
+        input.outcome,
+        now,
+      );
+      this.refreshCommunicationDeliveryState(plan.id, now);
+      response = this.getCourseCheckPlan(plan.id);
+      if (!response) throw new Error("Reconciled communication plan is missing.");
+      this.writeIdempotency({
+        command: "reconcile-communication",
+        key: input.idempotencyKey,
+        planId: plan.id,
+        response,
+      });
+    });
+    return { ok: true, plan: response!, created: true };
+  }
+
+  async createCommunicationCorrection(input: {
+    planId: string;
+    effectId: string;
+    reason: string;
+    subject: string;
+    bodyText: string;
+    bodyHtml?: string;
+    idempotencyKey: string;
+    actor: CourseCheckActor;
+  }): Promise<
+    | { ok: true; plan: CourseCheckPlan; created: boolean }
+    | {
+        ok: false;
+        status: 400 | 409;
+        code: string;
+        error: string;
+        recoveryGuidance: string;
+      }
+  > {
+    const existing = this.readIdempotency(
+      "create-communication-correction",
+      input.idempotencyKey,
+    );
+    if (existing) {
+      const plan = this.getCourseCheckPlan(existing.planId);
+      if (!plan) throw new Error("Idempotent communication correction is missing.");
+      return { ok: true, plan, created: false };
+    }
+
+    const original = this.getCourseCheckPlan(input.planId);
+    if (!original || original.body.actionType !== "communication") {
+      return {
+        ok: false,
+        status: 400,
+        code: "plan_not_found",
+        error: "Communication Course Check not found.",
+        recoveryGuidance: "Reload the Course Check.",
+      };
+    }
+    const originalCommunicationBody = original.body;
+    const effect = this.listCommunicationEffects(original.id).find(
+      (row) => row.effectId === input.effectId,
+    );
+    if (!effect) {
+      return {
+        ok: false,
+        status: 400,
+        code: "effect_not_found",
+        error: "Communication effect not found.",
+        recoveryGuidance: "Reload the Course Check effect list.",
+      };
+    }
+    if (effect.status !== "succeeded") {
+      return {
+        ok: false,
+        status: 409,
+        code: "effect_not_delivered",
+        error: "Corrections can only be linked to a confirmed delivered effect.",
+        recoveryGuidance:
+          "Resolve or reconcile the original effect before creating a correction.",
+      };
+    }
+
+    const reason = input.reason.trim();
+    const subject = input.subject.trim();
+    const bodyText = input.bodyText.trim();
+    if (!reason || !subject || !bodyText) {
+      return {
+        ok: false,
+        status: 400,
+        code: "correction_fields_required",
+        error: "reason, subject, and bodyText are required for a correction.",
+        recoveryGuidance: "Explain the correction and review its exact message content.",
+      };
+    }
+
+    const originalDraft = this.listCommunicationDrafts(original.id).find(
+      (draft) => draft.draftId === effect.draftId,
+    );
+    if (!originalDraft) {
+      return {
+        ok: false,
+        status: 409,
+        code: "frozen_payload_missing",
+        error: "The original frozen message payload is unavailable.",
+        recoveryGuidance: "Investigate the effect ledger before creating a correction.",
+      };
+    }
+    const originalGroup = originalCommunicationBody.recipientGroups.find(
+      (group) => group.groupId === originalDraft.groupId,
+    );
+    const originalRecipient = originalGroup?.recipients.find(
+      (recipient) => recipient.address.toLowerCase() === effect.toEmail.toLowerCase(),
+    );
+    const planId = crypto.randomUUID();
+    const settings = this.courseCheckSettings();
+    const content = defaultCommunicationContent({
+      templateKind: "custom",
+      outcome: originalGroup?.outcome ?? null,
+      label: originalGroup?.label ?? originalDraft.recipientName,
+      subject,
+      bodyText,
+      bodyHtml: input.bodyHtml,
+    });
+    const body = planCommunicationCascade({
+      planId,
+      source: {
+        kind: "compensation",
+        decisionPlanId: null,
+        decisionPlanVersion: null,
+        decisionPlanDigest: null,
+        selection: null,
+      },
+      templateKind: "custom",
+      subject: content.subject,
+      bodyText: content.bodyText,
+      bodyHtml: content.bodyHtml,
+      groups: [
+        {
+          proposalId: originalDraft.proposalId,
+          sessionId: originalDraft.sessionId,
+          label: originalGroup?.label ?? originalDraft.recipientName,
+          outcome: originalGroup?.outcome ?? null,
+          speakers: [
+            {
+              speakerId: originalRecipient?.speakerId ?? null,
+              name: originalRecipient?.name ?? originalDraft.recipientName,
+              email: effect.toEmail,
+              role: originalRecipient?.role ?? "speaker",
+            },
+          ],
+          priorCommunications: [
+            {
+              id: effect.effectId,
+              kind: "delivered_message",
+              status: "sent",
+              toEmail: effect.toEmail,
+              subject: originalDraft.subject,
+              createdAt: effect.createdAt,
+              sentAt: effect.succeededAt,
+              proposalId: originalDraft.proposalId,
+            },
+          ],
+        },
+      ],
+      linkedPlanIds: [original.id],
+      parentPlanId: original.id,
+      ageWarningHours: settings.ageWarningHours,
+    });
+    body.compensation = {
+      originalPlanId: original.id,
+      originalEffectId: effect.effectId,
+      reason,
+    };
+    for (const proposalId of body.relevantRevisions.proposalIds) {
+      const proposal = this.getProposal(proposalId);
+      if (proposal) {
+        body.relevantRevisions.proposalRevisions[proposalId] = proposal.reviewVersion;
+      }
+    }
+
+    const digest = await digestPayload(communicationBodyDigestPayload(body));
+    const now = new Date().toISOString();
+    const state: CourseCheckPlanState = hasCommunicationBlockers(body.findings)
+      ? "Needs attention"
+      : "Ready";
+    let correction: CourseCheckPlan | null = null;
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        `INSERT INTO course_check_plans
+          (id, action_type, state, version, digest, body_json, created_at, updated_at,
+           created_by_id, created_by_name, approval_json, receipt_id)
+         VALUES (?, 'communication', ?, 1, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+        planId,
+        state,
+        digest,
+        JSON.stringify(body),
+        now,
+        now,
+        input.actor.id,
+        input.actor.displayName,
+      );
+      this.recordPlanVersion({
+        planId,
+        version: 1,
+        digest,
+        state,
+        body,
+        actor: input.actor,
+        at: now,
+        mutationKind: "compensate",
+        summary: `Created reviewed correction for delivered effect ${effect.effectId}.`,
+        fromVersion: 0,
+      });
+
+      const linkedPlanIds = [
+        ...new Set([...originalCommunicationBody.linkedPlanIds, planId]),
+      ];
+      const nextOriginalBody: CommunicationPlanBody = {
+        ...originalCommunicationBody,
+        linkedPlanIds,
+      };
+      this.ctx.storage.sql.exec(
+        `UPDATE course_check_plans SET body_json = ?, updated_at = ? WHERE id = ?`,
+        JSON.stringify(nextOriginalBody),
+        now,
+        original.id,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT INTO course_check_mutations
+          (id, plan_id, from_version, to_version, kind, actor_id, actor_name, at, summary)
+         VALUES (?, ?, ?, ?, 'compensate', ?, ?, ?, ?)`,
+        crypto.randomUUID(),
+        original.id,
+        original.version,
+        original.version,
+        input.actor.id,
+        input.actor.displayName,
+        now,
+        `Linked reviewed correction ${planId} to delivered effect ${effect.effectId}; original effect retained.`,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT INTO audit_events
+          (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+           committee_note_changed, created_at)
+         VALUES (?, ?, 'course_check.communication.correction_created', ?, ?, ?, ?, 0, ?)`,
+        crypto.randomUUID(),
+        originalDraft.proposalId || original.id,
+        input.actor.id,
+        input.actor.displayName,
+        effect.status,
+        planId,
+        now,
+      );
+      correction = this.getCourseCheckPlan(planId);
+      if (!correction) throw new Error("Communication correction was not persisted.");
+      this.writeIdempotency({
+        command: "create-communication-correction",
+        key: input.idempotencyKey,
+        planId,
+        response: correction,
+      });
+    });
+    return { ok: true, plan: correction!, created: true };
   }
 
   projectCourseCheckPlan(

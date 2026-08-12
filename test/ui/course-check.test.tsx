@@ -172,6 +172,16 @@ const communicationBody: CommunicationPlanBody = {
   recipientGroups: [],
   recipients: [],
   drafts: [],
+  effects: [],
+  deliverySummary: {
+    total: 0,
+    queued: 0,
+    sending: 0,
+    succeeded: 0,
+    retryScheduled: 0,
+    failed: 0,
+    unknown: 0,
+  },
   calendarOps: [],
   deltas: [],
   findings: [],
@@ -189,6 +199,7 @@ const communicationBody: CommunicationPlanBody = {
   },
   linkedPlanIds: [plan.id],
   parentPlanId: plan.id,
+  compensation: null,
   batchGroupId: null,
   splitExplanation: null,
   relevantRevisions: {
@@ -427,7 +438,7 @@ describe("Course Check review workspace", () => {
     ]);
   });
 
-  it("returns to the submissions queue after freezing communication drafts", async () => {
+  it("continues directly to the send stage after freezing communication drafts", async () => {
     const user = userEvent.setup();
     const frozenPlan: CourseCheckPlan = {
       ...communicationPlan,
@@ -470,10 +481,9 @@ describe("Course Check review workspace", () => {
 
     await user.click(await screen.findByRole("button", { name: "Create drafts" }));
 
-    await waitFor(() => {
-      expect(router.state.location.pathname).toBe(
-        "/e/pacific-open-data-summit-2026/submissions",
-      );
-    });
+    expect(await screen.findByRole("button", { name: "Send messages" })).toBeEnabled();
+    expect(router.state.location.pathname).toBe(
+      "/e/pacific-open-data-summit-2026/course-checks/plan-1",
+    );
   });
 });

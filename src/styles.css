@@ -2285,6 +2285,101 @@ table.grid tbody tr[aria-selected="true"] td:first-child {
   background: var(--surface);
 }
 
+.course-check-effects {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.course-check-effect {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--outline);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+}
+
+.course-check-effect[data-status="unknown"],
+.course-check-effect[data-status="permanent_failure"],
+.course-check-effect[data-status="exhausted"] {
+  border-color: var(--error);
+}
+
+.course-check-effect-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.course-check-effect-heading > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.course-check-effect-status {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--surface-container, var(--surface));
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.course-check-effect-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.course-check-effect-meta dt {
+  color: var(--on-surface-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.course-check-effect-meta dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.course-check-effect-recovery,
+.course-check-correction > div {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--outline);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.course-check-correction summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.course-check-correction[open] summary {
+  margin-bottom: 10px;
+}
+
+.stack-field {
+  display: grid;
+  gap: 5px;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .course-check-evidence-list {
   display: grid;
   gap: 0;

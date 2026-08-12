@@ -3,7 +3,8 @@ import {
   pullAirtableForEvent,
   resolveAirtableConnection,
 } from "./airtable/sync";
-import { createResendSender } from "./email";
+import { createResendCommunicationSender, createResendSender } from "./email";
+import { flushCommunicationEffects } from "./course-check/communication-delivery";
 import { flushEventOutbox } from "./outbox";
 import { seedEvents } from "./seed-events";
 import type { AppBindings } from "./types";
@@ -25,6 +26,7 @@ export default {
   fetch: (request, env, ctx) => app.fetch(request, env, ctx),
   async scheduled(_controller, env) {
     const sender = createResendSender(env);
+    const communicationSender = createResendCommunicationSender(env);
     const now = new Date();
     for (const event of seedEvents) {
       const store = env.EVENT_STORE.getByName(event.id);
@@ -32,6 +34,14 @@ export default {
         await flushEventOutbox({
           store,
           sender,
+          now,
+          limit: 50,
+        });
+      }
+      if (communicationSender) {
+        await flushCommunicationEffects({
+          store,
+          sender: communicationSender,
           now,
           limit: 50,
         });

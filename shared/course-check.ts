@@ -202,7 +202,11 @@ export interface PlanMutationRecord {
     | "airtable_remove"
     | "airtable_execute"
     | "airtable_reconcile"
-    | "airtable_compensate";
+    | "airtable_compensate"
+    | "send"
+    | "retry"
+    | "reconcile"
+    | "compensate";
   actor: CourseCheckActor;
   at: string;
   summary: string;
@@ -362,8 +366,48 @@ export type CommunicationDraftStatus = "planned" | "frozen";
 export type CommunicationStageState =
   | "not_started"
   | "ready"
+  | "in_progress"
+  | "partially_complete"
+  | "needs_attention"
   | "complete"
   | "out_of_date";
+
+export type CommunicationEffectStatus =
+  | "queued"
+  | "sending"
+  | "retry_scheduled"
+  | "succeeded"
+  | "permanent_failure"
+  | "exhausted"
+  | "unknown";
+
+export interface CommunicationEffect {
+  effectId: string;
+  planId: string;
+  planVersion: number;
+  draftId: string;
+  payloadIdentity: string;
+  toEmail: string;
+  status: CommunicationEffectStatus;
+  providerReference: string | null;
+  attemptCount: number;
+  lastError: string | null;
+  nextAttemptAt: string | null;
+  lastAttemptAt: string | null;
+  succeededAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CommunicationDeliverySummary {
+  total: number;
+  queued: number;
+  sending: number;
+  succeeded: number;
+  retryScheduled: number;
+  failed: number;
+  unknown: number;
+}
 
 export type CommunicationPurpose =
   | "calendar_update"
@@ -426,7 +470,7 @@ export interface FrozenCommunicationDraft {
 }
 
 export interface CommunicationPlanSource {
-  kind: "linked_decision" | "selection" | "publication";
+  kind: "linked_decision" | "selection" | "publication" | "compensation";
   decisionPlanId: string | null;
   decisionPlanVersion: number | null;
   decisionPlanDigest: string | null;
@@ -451,6 +495,8 @@ export interface CommunicationPlanBody {
   /** @deprecated Prefer recipientGroups; kept empty for older stub readers. */
   recipients: CommunicationRecipient[];
   drafts: FrozenCommunicationDraft[];
+  effects: CommunicationEffect[];
+  deliverySummary: CommunicationDeliverySummary;
   calendarOps: Array<{
     sessionId: string;
     kind: "create" | "update" | "cancel";
@@ -472,6 +518,12 @@ export interface CommunicationPlanBody {
   };
   linkedPlanIds: string[];
   parentPlanId: string | null;
+  /** A correction is a new reviewed plan linked to an immutable sent effect. */
+  compensation: {
+    originalPlanId: string;
+    originalEffectId: string;
+    reason: string;
+  } | null;
   batchGroupId: string | null;
   splitExplanation: string | null;
   relevantRevisions: {
