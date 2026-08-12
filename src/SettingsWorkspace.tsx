@@ -10,21 +10,14 @@ import {
 import {
   ApiError,
   connectAirtableSync,
-  createAiConnection,
   createEventApiKey,
   disconnectAirtableSync,
   fetchAirtableSync,
   listEventApiKeys,
-  listAiConnections,
   pullAirtableSync,
-  revokeAiConnection,
-  testAiConnection,
   updateEventApiKey,
   type CreatedEventApiKey,
   type EventApiKeySummary,
-  type AiAccessProfile,
-  type AiConnectionProvider,
-  type AiConnectionSummary,
 } from "./api";
 
 /** Must match worker/airtable/demo-sandbox.ts */
@@ -89,8 +82,9 @@ function formatTimestamp(value: string | null): string {
   }).format(date);
 }
 
-function AgentApiKeysCard({ eventId }: { eventId: string }) {
+function AutomationAccessCard({ eventId }: { eventId: string }) {
   const queryClient = useQueryClient();
+  const [tab, setTab] = useState<"api" | "mcp">("api");
   const [name, setName] = useState("Program ops agent");
   const [mode, setMode] = useState<AgentOperatingMode>("propose_only");
   const [grantAll, setGrantAll] = useState(false);
@@ -98,7 +92,10 @@ function AgentApiKeysCard({ eventId }: { eventId: string }) {
   const [message, setMessage] = useState<string | null>(null);
   const [tone, setTone] = useState<"success" | "error">("success");
   const [revealed, setRevealed] = useState<CreatedEventApiKey | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"token" | "url" | "config" | null>(null);
+
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const mcpUrl = `${origin}/mcp`;
 
   const keysQuery = useQuery({
     queryKey: ["event-api-keys", eventId],
@@ -115,16 +112,14 @@ function AgentApiKeysCard({ eventId }: { eventId: string }) {
       }),
     onSuccess: async (result) => {
       setRevealed(result.apiKey);
-      setCopied(false);
+      setCopied(null);
       setTone("success");
-      setMessage(
-        "Agent key created. Copy the token now — ChartStead only shows it once.",
-      );
+      setMessage("Key created. Copy the secret now — ChartStead only shows it once.");
       await queryClient.invalidateQueries({ queryKey: ["event-api-keys", eventId] });
     },
     onError: (error) => {
       setTone("error");
-      setMessage(error instanceof ApiError ? error.message : "Unable to create agent key.");
+      setMessage(error instanceof ApiError ? error.message : "Unable to create key.");
     },
   });
 
@@ -132,7 +127,7 @@ function AgentApiKeysCard({ eventId }: { eventId: string }) {
     mutationFn: (keyId: string) => updateEventApiKey(eventId, keyId, { revoke: true }),
     onSuccess: async () => {
       setTone("success");
-      setMessage("Key revoked. It cannot call the API on the next request.");
+      setMessage("Key revoked. It cannot call the API or MCP on the next request.");
       await queryClient.invalidateQueries({ queryKey: ["event-api-keys", eventId] });
     },
     onError: (error) => {
@@ -144,9 +139,7 @@ function AgentApiKeysCard({ eventId }: { eventId: string }) {
   function toggleScope(scope: CourseCheckScope) {
     setGrantAll(false);
     setScopes((current) =>
-      current.includes(scope)
-        ? current.filter((entry) => entry !== scope)
-        : [...current, scope],
+      current.includes(scope) ? current.filter((entry) => entry !== scope) : [...current, scope],
     );
   }
 
@@ -161,14 +154,13 @@ function AgentApiKeysCard({ eventId }: { eventId: string }) {
     createMutation.mutate();
   }
 
-  async function copyToken() {
-    if (!revealed?.token) return;
+  async function copyText(value: string, kind: "token" | "url" | "config") {
     try {
-      await navigator.clipboard.writeText(revealed.token);
-      setCopied(true);
+      await navigator.clipboard.writeText(value);
+      setCopied(kind);
     } catch {
       setTone("error");
-      setMessage("Could not copy automatically — select the token and copy manually.");
+      setMessage("Could not copy automatically — select the text and copy manually.");
     }
   }
 
@@ -176,123 +168,312 @@ function AgentApiKeysCard({ eventId }: { eventId: string }) {
     (key) => key.principalKind === "agent" && !key.revokedAt,
   );
 
+  const mcpConfig = revealed?.token
+    ? JSON.stringify(
+        {
+          mcpServers: {
+            chartstead: {
+              url: mcpUrl,
+              headers: { Authorization: `Bearer ${revealed.token}` },
+            },
+          },
+        },
+        null,
+        2,
+      )
+    : JSON.stringify(
+        {
+          mcpServers: {
+            chartstead: {
+              url: mcpUrl,
+              headers: { Authorization: "Bearer cs_live_…" },
+            },
+          },
+        },
+        null,
+        2,
+      );
+
+  const claudeCommand = revealed?.token
+    ? `claude mcp add --transport http chartstead ${mcpUrl} --header "Authorization: Bearer ${revealed.token}"`
+    : `claude mcp add --transport http chartstead ${mcpUrl} --header "Authorization: Bearer cs_live_…"`;
+
   return (
-    <section className="settings-card" aria-labelledby="agent-api-heading">
+    <section className="settings-card automation-access" aria-labelledby="automation-access-heading">
       <div className="settings-card-header">
         <div>
-          <h3 id="agent-api-heading">Agent API keys</h3>
+          <h3 id="automation-access-heading">Automation access</h3>
           <p className="muted">
-            Give a scoped AI agent the same Course Check path as organizers. New keys are
-            propose-only with no stages until you grant them. The secret token is shown once.
+            Give integrations and AI agents scoped access to this conference. Same key works for the
+            HTTP API and MCP. Secrets are shown once.
           </p>
         </div>
       </div>
 
-      <form className="settings-form settings-form-wide" onSubmit={onCreate}>
-        <p className="settings-form-legend">Create agent key</p>
-
-        <label className="settings-label" htmlFor="agent-key-name">
-          Name
-        </label>
-        <input
-          id="agent-key-name"
-          className="settings-input"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Program ops agent"
-          autoComplete="off"
-        />
-
-        <label className="settings-label" htmlFor="agent-key-mode">
-          Operating mode
-        </label>
-        <select
-          id="agent-key-mode"
-          className="settings-input"
-          value={mode}
-          onChange={(e) => setMode(e.target.value as AgentOperatingMode)}
+      <div className="automation-tabs" role="tablist" aria-label="Access method">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "api"}
+          className={`automation-tab ${tab === "api" ? "active" : ""}`}
+          onClick={() => setTab("api")}
         >
-          <option value="propose_only">Propose only — create and revise plans</option>
-          <option value="delegated_execution">
-            Delegated execution — may apply granted stages
-          </option>
-          <option value="autonomous_policy">
-            Autonomous policy — explicit unsupervised execution
-          </option>
-        </select>
+          API
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "mcp"}
+          className={`automation-tab ${tab === "mcp" ? "active" : ""}`}
+          onClick={() => setTab("mcp")}
+        >
+          MCP
+        </button>
+      </div>
 
-        <fieldset className="settings-scope-fieldset">
-          <legend className="settings-label">Course Check stages</legend>
-          <label className="settings-check">
+      {tab === "api" ? (
+        <div role="tabpanel" className="automation-panel">
+          <p className="muted">
+            Use the HTTP API for scripts, n8n, Make, or custom agents. Send{" "}
+            <code>Authorization: Bearer &lt;token&gt;</code> to{" "}
+            <code>{origin || "https://your-host"}/api/v1/…</code>.
+          </p>
+
+          <form className="settings-form settings-form-wide" onSubmit={onCreate}>
+            <p className="settings-form-legend">Create API key</p>
+
+            <label className="settings-label" htmlFor="agent-key-name">
+              Name
+            </label>
             <input
-              type="checkbox"
-              checked={grantAll}
-              onChange={(e) => {
-                setGrantAll(e.target.checked);
-                if (e.target.checked) setScopes([...COURSE_CHECK_SCOPES]);
-              }}
+              id="agent-key-name"
+              className="settings-input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Program ops agent"
+              autoComplete="off"
             />
-            <span>All stages (stored as expanded individual scopes)</span>
-          </label>
-          <div className="settings-scope-grid">
-            {COURSE_CHECK_SCOPES.map((scope) => (
-              <label key={scope} className="settings-check">
+
+            <label className="settings-label" htmlFor="agent-key-mode">
+              Operating mode
+            </label>
+            <select
+              id="agent-key-mode"
+              className="settings-input"
+              value={mode}
+              onChange={(e) => setMode(e.target.value as AgentOperatingMode)}
+            >
+              <option value="propose_only">Propose only — create and revise plans</option>
+              <option value="delegated_execution">
+                Delegated execution — may apply granted stages
+              </option>
+              <option value="autonomous_policy">
+                Autonomous policy — explicit unsupervised execution
+              </option>
+            </select>
+
+            <fieldset className="settings-scope-fieldset">
+              <legend className="settings-label">Course Check stages</legend>
+              <label className="settings-check">
                 <input
                   type="checkbox"
-                  checked={grantAll || scopes.includes(scope)}
-                  disabled={grantAll}
-                  onChange={() => toggleScope(scope)}
+                  checked={grantAll}
+                  onChange={(e) => {
+                    setGrantAll(e.target.checked);
+                    if (e.target.checked) setScopes([...COURSE_CHECK_SCOPES]);
+                  }}
                 />
-                <span>{SCOPE_LABELS[scope]}</span>
+                <span>All stages (stored as expanded individual scopes)</span>
               </label>
-            ))}
-          </div>
-        </fieldset>
+              <div className="settings-scope-grid">
+                {COURSE_CHECK_SCOPES.map((scope) => (
+                  <label key={scope} className="settings-check">
+                    <input
+                      type="checkbox"
+                      checked={grantAll || scopes.includes(scope)}
+                      disabled={grantAll}
+                      onChange={() => toggleScope(scope)}
+                    />
+                    <span>{SCOPE_LABELS[scope]}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
 
-        <div className="settings-actions">
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={createMutation.isPending}
-          >
-            {createMutation.isPending ? "Creating…" : "Create API key"}
-          </button>
+            <div className="settings-actions">
+              <button type="submit" className="btn btn-primary" disabled={createMutation.isPending}>
+                {createMutation.isPending ? "Creating…" : "Create API key"}
+              </button>
+            </div>
+          </form>
+
+          {revealed ? (
+            <div className="settings-token-reveal" role="status">
+              <strong>Copy this token now</strong>
+              <p className="muted">
+                {revealed.name} · {MODE_LABELS[revealed.agentMode ?? "propose_only"]} ·{" "}
+                {revealed.courseCheckScopes.length === 0
+                  ? "no stages"
+                  : revealed.courseCheckScopes.join(", ")}
+              </p>
+              <code className="settings-token-value">{revealed.token}</code>
+              <div className="settings-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => void copyText(revealed.token, "token")}
+                >
+                  {copied === "token" ? "Copied" : "Copy token"}
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={() => setRevealed(null)}>
+                  Hide
+                </button>
+              </div>
+              <p className="muted">
+                Base URL: <code>{origin}/api/v1</code>
+                {" · "}
+                Header: <code>Authorization: Bearer …</code>
+              </p>
+            </div>
+          ) : null}
         </div>
-      </form>
-
-      {revealed ? (
-        <div className="settings-token-reveal" role="status">
-          <strong>Copy this token now</strong>
+      ) : (
+        <div role="tabpanel" className="automation-panel">
           <p className="muted">
-            {revealed.name} · {MODE_LABELS[revealed.agentMode ?? "propose_only"]} ·{" "}
-            {revealed.courseCheckScopes.length === 0
-              ? "no stages"
-              : revealed.courseCheckScopes.join(", ")}
+            Connect Claude Code, Cursor, Codex, or any MCP client with the same agent API key. No
+            OAuth wizard — paste the server URL and Authorization header.
           </p>
-          <code className="settings-token-value">{revealed.token}</code>
-          <div className="settings-actions">
-            <button type="button" className="btn btn-secondary" onClick={() => void copyToken()}>
-              {copied ? "Copied" : "Copy token"}
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => setRevealed(null)}
+
+          <div className="mcp-field">
+            <label className="settings-label" htmlFor="mcp-url">
+              MCP server URL
+            </label>
+            <div className="mcp-copy-row">
+              <code id="mcp-url" className="settings-token-value">
+                {mcpUrl || "/mcp"}
+              </code>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => void copyText(mcpUrl, "url")}
+              >
+                {copied === "url" ? "Copied" : "Copy URL"}
+              </button>
+            </div>
+          </div>
+
+          <form className="settings-form settings-form-wide" onSubmit={onCreate}>
+            <p className="settings-form-legend">Create an MCP token</p>
+            <p className="muted">
+              This creates the same scoped agent key used by the API tab. Defaults stay propose-only
+              until you grant stages.
+            </p>
+            <label className="settings-label" htmlFor="mcp-key-name">
+              Name
+            </label>
+            <input
+              id="mcp-key-name"
+              className="settings-input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Claude Code"
+              autoComplete="off"
+            />
+            <label className="settings-label" htmlFor="mcp-key-mode">
+              Operating mode
+            </label>
+            <select
+              id="mcp-key-mode"
+              className="settings-input"
+              value={mode}
+              onChange={(e) => setMode(e.target.value as AgentOperatingMode)}
             >
-              Hide
-            </button>
+              <option value="propose_only">Propose only — create and revise plans</option>
+              <option value="delegated_execution">
+                Delegated execution — may apply granted stages
+              </option>
+              <option value="autonomous_policy">
+                Autonomous policy — explicit unsupervised execution
+              </option>
+            </select>
+            <fieldset className="settings-scope-fieldset">
+              <legend className="settings-label">Course Check stages</legend>
+              <label className="settings-check">
+                <input
+                  type="checkbox"
+                  checked={grantAll}
+                  onChange={(e) => {
+                    setGrantAll(e.target.checked);
+                    if (e.target.checked) setScopes([...COURSE_CHECK_SCOPES]);
+                  }}
+                />
+                <span>All stages</span>
+              </label>
+              <div className="settings-scope-grid">
+                {COURSE_CHECK_SCOPES.map((scope) => (
+                  <label key={scope} className="settings-check">
+                    <input
+                      type="checkbox"
+                      checked={grantAll || scopes.includes(scope)}
+                      disabled={grantAll}
+                      onChange={() => toggleScope(scope)}
+                    />
+                    <span>{SCOPE_LABELS[scope]}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <div className="settings-actions">
+              <button type="submit" className="btn btn-primary" disabled={createMutation.isPending}>
+                {createMutation.isPending ? "Creating…" : "Create MCP token"}
+              </button>
+            </div>
+          </form>
+
+          {revealed ? (
+            <div className="settings-token-reveal" role="status">
+              <strong>Token (shown once)</strong>
+              <code className="settings-token-value">{revealed.token}</code>
+              <div className="settings-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => void copyText(revealed.token, "token")}
+                >
+                  {copied === "token" ? "Copied" : "Copy token"}
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mcp-config-block">
+            <strong>Cursor / generic MCP config</strong>
+            <p className="muted">Add to <code>.cursor/mcp.json</code> or your client’s MCP settings.</p>
+            <pre className="mcp-config-pre">{mcpConfig}</pre>
+            <div className="settings-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => void copyText(mcpConfig, "config")}
+              >
+                {copied === "config" ? "Copied" : "Copy config"}
+              </button>
+            </div>
           </div>
+
+          <div className="mcp-config-block">
+            <strong>Claude Code</strong>
+            <pre className="mcp-config-pre">{claudeCommand}</pre>
+          </div>
+
           <p className="muted">
-            Base URL for agents:{" "}
-            <code>{typeof window !== "undefined" ? window.location.origin : ""}</code>
-            {" · "}
-            Header: <code>Authorization: Bearer …</code>
+            Treat the token like a password. Revoke it below when access should end.
           </p>
         </div>
-      ) : null}
+      )}
 
       {keysQuery.isPending ? (
-        <p className="empty-state padded">Loading agent keys…</p>
+        <p className="empty-state padded">Loading keys…</p>
       ) : keysQuery.error instanceof ApiError ? (
         <p className="form-message error" role="alert">
           {keysQuery.error.message}
@@ -340,7 +521,7 @@ function AgentApiKeysCard({ eventId }: { eventId: string }) {
                       onClick={() => {
                         if (
                           window.confirm(
-                            `Revoke “${key.name}”? The agent loses access on the next call.`,
+                            `Revoke “${key.name}”? The agent loses API and MCP access on the next call.`,
                           )
                         ) {
                           revokeMutation.mutate(key.id);
@@ -366,122 +547,12 @@ function AgentApiKeysCard({ eventId }: { eventId: string }) {
   );
 }
 
-const PROVIDERS: Array<{ id: AiConnectionProvider; name: string; detail: string; verified: string }> = [
-  { id: "claude", name: "Claude", detail: "Custom connector through Claude settings", verified: "Guided setup" },
-  { id: "chatgpt", name: "ChatGPT", detail: "Custom app through workspace settings", verified: "Workspace plan may be required" },
-  { id: "copilot", name: "Microsoft Copilot", detail: "Organization approval may be required", verified: "Not yet verified" },
-  { id: "other", name: "Other compatible assistant", detail: "Standards-based connection", verified: "Advanced" },
-];
-
-const PROVIDER_DESTINATIONS: Partial<Record<AiConnectionProvider, string>> = {
-  claude: "https://claude.ai",
-  chatgpt: "https://chatgpt.com",
-  copilot: "https://m365.cloud.microsoft/chat",
-};
-
-function AiConnectionsCard({ eventId }: { eventId: string }) {
-  const queryClient = useQueryClient();
-  const [step, setStep] = useState<"overview" | "provider" | "access" | "success">("overview");
-  const [provider, setProvider] = useState<AiConnectionProvider>("claude");
-  const [accessProfile, setAccessProfile] = useState<AiAccessProfile>("research_prepare");
-  const [active, setActive] = useState<AiConnectionSummary | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const connectionsQuery = useQuery({
-    queryKey: ["ai-connections", eventId],
-    queryFn: () => listAiConnections(eventId),
-  });
-  const createMutation = useMutation({
-    mutationFn: () => createAiConnection(eventId, { provider, accessProfile, approvalPolicy: "important_actions" }),
-    onSuccess: async ({ connection }) => {
-      setActive(connection);
-      setMessage(null);
-      await queryClient.invalidateQueries({ queryKey: ["ai-connections", eventId] });
-    },
-    onError: (error) => setMessage(error instanceof ApiError ? error.message : "Unable to connect assistant."),
-  });
-  const testMutation = useMutation({
-    mutationFn: (id: string) => testAiConnection(eventId, id),
-    onSuccess: async ({ connection }) => {
-      setActive(connection);
-      setStep("success");
-      await queryClient.invalidateQueries({ queryKey: ["ai-connections", eventId] });
-    },
-    onError: (error) => setMessage(error instanceof ApiError ? error.message : "Connection test failed."),
-  });
-  const revokeMutation = useMutation({
-    mutationFn: (id: string) => revokeAiConnection(eventId, id),
-    onSuccess: async (_, id) => {
-      if (active?.id === id) {
-        setActive(null);
-        setStep("overview");
-      }
-      await queryClient.invalidateQueries({ queryKey: ["ai-connections", eventId] });
-    },
-  });
-  const providerName = PROVIDERS.find((entry) => entry.id === provider)?.name ?? "Assistant";
-  const providerDestination = active ? PROVIDER_DESTINATIONS[active.provider] : undefined;
-
-  return (
-    <section className="settings-card ai-connections" aria-labelledby="ai-connections-heading">
-      <div className="ai-connections-hero">
-        <div>
-          <p className="settings-eyebrow">AI connections</p>
-          <h3 id="ai-connections-heading">Use your AI assistant with ChartStead.</h3>
-          <p>Connect ChatGPT, Claude, or Copilot to this conference. ChartStead controls what it can access and asks before important actions.</p>
-        </div>
-        {step === "overview" ? <button className="btn btn-primary" type="button" onClick={() => setStep("provider")}>Choose an assistant</button> : null}
-      </div>
-
-      {step === "provider" ? (
-        <div className="assistant-step">
-          <div className="step-heading"><span>1 of 2</span><h4>Where do you want to use ChartStead?</h4></div>
-          <div className="provider-grid">
-            {PROVIDERS.map((entry) => <button type="button" aria-label={entry.name} key={entry.id} className="provider-card" onClick={() => { setProvider(entry.id); setStep("access"); }}>
-              <strong>{entry.name}</strong><span>{entry.detail}</span><small>{entry.verified}</small>
-            </button>)}
-          </div>
-        </div>
-      ) : null}
-
-      {step === "access" ? (
-        <div className="assistant-step">
-          <div className="step-heading"><span>2 of 2</span><h4>Choose what {providerName} can do</h4></div>
-          <div className="access-grid">
-            {([
-              ["explore", "Explore", "View, search, summarize, and identify missing information."],
-              ["research_prepare", "Research and prepare", "Prepare frozen decision reviews and inspect the work needed before messages, schedules, or publication change."],
-              ["operate_with_approval", "Operate with approval", "Use granted Course Check stages after review. Sends, calendars, publication, and integration effects remain separately controlled."],
-            ] as const).map(([id, label, copy]) => <label className={`access-card ${accessProfile === id ? "selected" : ""}`} key={id}>
-              <input type="radio" name="access-profile" value={id} checked={accessProfile === id} onChange={() => setAccessProfile(id)} />
-              <span><strong>{label}{id === "research_prepare" ? " — recommended" : ""}</strong><small>{copy}</small></span>
-            </label>)}
-          </div>
-          <div className="boundary-review">
-            <div><strong>This connection can</strong><p>View this conference and prepare editable drafts or proposed changes.</p></div>
-            <div><strong>ChartStead will ask before</strong><p>Final decisions, messages, calendar invitations, public release, or broad destructive actions.</p></div>
-            <div><strong>This connection cannot</strong><p>Access other conferences, manage users or credentials, or bypass Course Check.</p></div>
-          </div>
-          <div className="settings-actions"><button type="button" className="btn btn-primary" disabled={createMutation.isPending} onClick={() => createMutation.mutate()}>{createMutation.isPending ? "Connecting…" : "Allow and connect"}</button><button type="button" className="btn btn-ghost" onClick={() => setStep("provider")}>Back</button></div>
-        </div>
-      ) : null}
-
-      {active && step !== "success" ? <div className="connection-handoff" role="status"><strong>{providerName} is ready to authorize</strong><p>Open the provider handoff and let the assistant exchange its one-time authorization. Return here after the assistant has read this conference. No bearer secret is displayed or copied.</p><div className="settings-actions">{active.authorizationUrl ? <a className="btn btn-primary" href={active.authorizationUrl} target="_blank" rel="noreferrer">Open secure handoff</a> : null}<button type="button" className="btn btn-secondary" disabled={testMutation.isPending} onClick={() => testMutation.mutate(active.id)}>{testMutation.isPending ? "Testing…" : "Test connection"}</button></div></div> : null}
-      {step === "success" && active ? <div className="connection-success" role="status"><strong>{active.name} is connected</strong><p>It can research and prepare work for this conference. Important actions still require approval. No changes were made during the test.</p><div className="settings-actions">{providerDestination ? <a className="btn btn-primary" href={providerDestination} target="_blank" rel="noreferrer">Open {active.name}</a> : null}<button type="button" className="btn btn-secondary" onClick={() => setStep("overview")}>View connection</button></div></div> : null}
-      {message ? <p className="form-message error" role="alert">{message}</p> : null}
-
-      {(connectionsQuery.data?.connections.length ?? 0) > 0 ? <div className="connection-list"><h4>Existing connections</h4>{connectionsQuery.data?.connections.map(connection => <div className="connection-row" key={connection.id}><div><strong>{connection.name}</strong><span>Personal assistant · {connection.accessProfile === "research_prepare" ? "Research and prepare" : connection.accessProfile.replaceAll("_", " ")}</span></div><span className={`connection-status ${connection.status}`}>{connection.status === "connected" ? "Connected" : connection.status === "needs_sign_in" ? "Needs sign-in" : connection.status === "paused" ? "Paused" : "Connection not tested"}</span><div className="settings-actions">{connection.status === "connection_not_tested" || connection.status === "needs_sign_in" ? <a className="btn btn-secondary" href={`/api/v1/ai-connections/setup?connectionId=${encodeURIComponent(connection.id)}`} target="_blank" rel="noreferrer">{connection.status === "needs_sign_in" ? "Reconnect" : "Continue setup"}</a> : null}<button type="button" className="btn btn-ghost" onClick={() => revokeMutation.mutate(connection.id)}>Disconnect</button></div></div>)}</div> : null}
-    </section>
-  );
-}
-
 export function SettingsWorkspace({ eventId }: { eventId: string }) {
   const queryClient = useQueryClient();
   const [baseId, setBaseId] = useState("");
   const [accessToken, setAccessToken] = useState("");
   const [formMessage, setFormMessage] = useState<string | null>(null);
   const [formTone, setFormTone] = useState<"success" | "error">("success");
-  const [developerOpen, setDeveloperOpen] = useState(false);
-
   const syncQuery = useQuery({
     queryKey: ["airtable-sync", eventId],
     queryFn: () => fetchAirtableSync(eventId),
@@ -587,11 +658,7 @@ export function SettingsWorkspace({ eventId }: { eventId: string }) {
           <h2>Settings</h2>
         </div>
         <div className="settings-stack">
-          <AiConnectionsCard eventId={eventId} />
-          <section className="settings-card developer-access" aria-labelledby="developer-access-heading">
-            <div className="settings-card-header"><div><h3 id="developer-access-heading">Developer access</h3><p className="muted">API keys, service credentials, webhooks, and custom automation. Use this only when your system cannot connect through the guided assistant flow.</p></div><button type="button" className="btn btn-secondary" onClick={() => setDeveloperOpen(current => !current)}>{developerOpen ? "Close developer access" : "Open developer access"}</button></div>
-            {developerOpen ? <AgentApiKeysCard eventId={eventId} /> : null}
-          </section>
+          <AutomationAccessCard eventId={eventId} />
 
           <section className="settings-card" aria-labelledby="airtable-sync-heading">
             <div className="settings-card-header">

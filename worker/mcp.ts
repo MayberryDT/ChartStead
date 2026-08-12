@@ -10,7 +10,11 @@ export async function handleMcpRequest(input: {
   requestV1: V1Requester;
 }): Promise<Response> {
   const origin = input.request.headers.get("origin");
-  const allowedOrigins = new Set([new URL(input.request.url).origin, "https://claude.ai", "https://chatgpt.com"]);
+  const allowedOrigins = new Set([
+    new URL(input.request.url).origin,
+    "https://claude.ai",
+    "https://chatgpt.com",
+  ]);
   if (origin && !allowedOrigins.has(origin)) {
     return jsonRpcError(null, -32000, "Untrusted Origin header.", 403);
   }
@@ -35,17 +39,12 @@ export async function handleMcpRequest(input: {
   }
   if (message.id === undefined) return new Response(null, { status: 202 });
   if (message.method === "initialize") {
-    const params = message.params && typeof message.params === "object"
-      ? message.params as { protocolVersion?: unknown }
-      : {};
-    const protocolVersion = params.protocolVersion === PROTOCOL_VERSION
-      ? PROTOCOL_VERSION
-      : PROTOCOL_VERSION;
     return jsonRpcResult(message.id, {
-      protocolVersion,
+      protocolVersion: PROTOCOL_VERSION,
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: "chartstead", title: "ChartStead", version: "0.1.0" },
-      instructions: "Use event-scoped ChartStead tools. Preparing work does not send, publish, or apply final decisions.",
+      instructions:
+        "Call ChartStead organizer tools with the event id you are authorized for. Course Check scopes and agent mode from the API key still apply.",
     });
   }
   if (message.method === "ping") return jsonRpcResult(message.id, {});
@@ -65,13 +64,18 @@ function mcpTools() {
     {
       name: "chartstead_event_api",
       title: "Use the conference organizer API",
-      description: "Call an event-scoped ChartStead v1 organizer endpoint. The connection's access profile, approval policy, Course Check scopes, and credential restrictions remain enforced by the API.",
+      description:
+        "Call an event-scoped ChartStead v1 organizer endpoint. Course Check scopes and agent mode from the API key remain enforced.",
       inputSchema: {
         type: "object",
         properties: {
           eventId: { type: "string" },
           method: { type: "string", enum: ["GET", "POST", "PATCH"] },
-          path: { type: "string", description: "Path below /events/{eventId}, such as /submissions, /sessions/session-id, or /course-checks." },
+          path: {
+            type: "string",
+            description:
+              "Path below /events/{eventId}, such as /submissions, /sessions/session-id, or /course-checks.",
+          },
           body: { type: "object" },
           idempotencyKey: { type: "string" },
         },
@@ -83,12 +87,16 @@ function mcpTools() {
     {
       name: "chartstead_list_event_work",
       title: "List conference program work",
-      description: "Read proposals, speakers, sessions, tasks, or communications for the authorized conference.",
+      description:
+        "Read proposals, speakers, sessions, tasks, or communications for the authorized conference.",
       inputSchema: {
         type: "object",
         properties: {
           eventId: { type: "string" },
-          resource: { type: "string", enum: ["submissions", "speakers", "sessions", "tasks", "communications", "program"] },
+          resource: {
+            type: "string",
+            enum: ["submissions", "speakers", "sessions", "tasks", "communications", "program"],
+          },
         },
         required: ["eventId", "resource"],
         additionalProperties: false,
@@ -98,7 +106,8 @@ function mcpTools() {
     {
       name: "chartstead_prepare_decision",
       title: "Prepare a proposal decision",
-      description: "Create a frozen Course Check proposal decision for human review. Does not apply the decision or notify speakers.",
+      description:
+        "Create a frozen Course Check proposal decision for human review. Does not apply the decision or notify speakers.",
       inputSchema: {
         type: "object",
         properties: {
@@ -136,27 +145,36 @@ async function callTool(
 ): Promise<Response> {
   const args = rawArguments && typeof rawArguments === "object" ? rawArguments as Record<string, unknown> : {};
   const eventId = typeof args.eventId === "string" ? args.eventId : "";
-  if (!eventId || !principal.eventIds.includes(eventId)) return toolError(id, "Choose an event authorized for this connection.");
+  if (!eventId || !principal.eventIds.includes(eventId)) {
+    return toolError(id, "Choose an event authorized for this API key.");
+  }
   let response: Response;
   if (name === "chartstead_event_api") {
     const method = typeof args.method === "string" ? args.method : "";
     const path = typeof args.path === "string" ? args.path : "";
     let decodedPath = "";
-    try { decodedPath = decodeURIComponent(path); } catch { /* rejected below */ }
+    try {
+      decodedPath = decodeURIComponent(path);
+    } catch {
+      /* rejected below */
+    }
     const eventPrefix = `/events/${encodeURIComponent(eventId)}`;
     const normalizedPath = decodedPath
       ? new URL(`${eventPrefix}${decodedPath}`, "https://chartstead.invalid").pathname
       : "";
     if (
       !["GET", "POST", "PATCH"].includes(method) ||
-      !decodedPath.startsWith("/") || decodedPath.includes("..") || decodedPath.includes("\\") ||
-      decodedPath.includes("?") || decodedPath.includes("#") ||
+      !decodedPath.startsWith("/") ||
+      decodedPath.includes("..") ||
+      decodedPath.includes("\\") ||
+      decodedPath.includes("?") ||
+      decodedPath.includes("#") ||
       !normalizedPath.startsWith(`${eventPrefix}/`)
     ) {
       return toolError(id, "Choose a supported method and a relative event API path.");
     }
-    if (/^\/(?:ai-connections|api-keys|integrations)(?:\/|$)/.test(decodedPath)) {
-      return toolError(id, "Personal assistants cannot manage connections, credentials, or integration configuration.");
+    if (/^\/(?:api-keys|integrations)(?:\/|$)/.test(decodedPath)) {
+      return toolError(id, "Agents cannot manage credentials or integration configuration.");
     }
     const headers = new Headers();
     if (method !== "GET") headers.set("content-type", "application/json");
@@ -168,15 +186,19 @@ async function callTool(
     });
   } else if (name === "chartstead_list_event_work") {
     const resource = typeof args.resource === "string" ? args.resource : "";
-    if (!["submissions", "speakers", "sessions", "tasks", "communications", "program"].includes(resource)) return toolError(id, "Choose a supported event resource.");
+    if (!["submissions", "speakers", "sessions", "tasks", "communications", "program"].includes(resource)) {
+      return toolError(id, "Choose a supported event resource.");
+    }
     response = await requestV1(`/events/${encodeURIComponent(eventId)}/${resource}`);
   } else if (name === "chartstead_list_course_checks") {
     response = await requestV1(`/events/${encodeURIComponent(eventId)}/course-checks`);
   } else if (name === "chartstead_prepare_decision") {
-    if (principal.aiAccessProfile === "explore") return toolError(id, "Explore access can read but cannot prepare decisions.");
     response = await requestV1(`/events/${encodeURIComponent(eventId)}/course-checks/decisions`, {
       method: "POST",
-      headers: { "content-type": "application/json", "idempotency-key": String(args.idempotencyKey ?? "") },
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": String(args.idempotencyKey ?? ""),
+      },
       body: JSON.stringify({
         proposalId: args.proposalId,
         outcome: args.outcome,

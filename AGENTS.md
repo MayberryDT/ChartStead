@@ -59,7 +59,7 @@ Use the single-context domain-doc layout. See [docs/agents/domain.md](docs/agent
 - Cloudflare bindings and environments: [`wrangler.jsonc`](wrangler.jsonc)
 - Implementation work: [`.scratch/chartstead-competition-build/`](.scratch/chartstead-competition-build/)
 - Course Check specification and implementation work: [`.scratch/chartstead-course-check/`](.scratch/chartstead-course-check/)
-- AI assistant connection lifecycle and host setup: [`docs/ai-connections.md`](docs/ai-connections.md)
+- Automation access (API keys + MCP): [`docs/ai-connections.md`](docs/ai-connections.md)
 
 ## Private / bulk source material
 

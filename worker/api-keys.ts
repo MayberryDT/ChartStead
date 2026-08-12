@@ -43,9 +43,6 @@ export interface ApiKeyRow {
   last_used_at: string | null;
   expires_at: string | null;
   initiating_human_json: string | null;
-  ai_access_profile: string | null;
-  ai_resource_uri: string | null;
-  ai_approval_policy: string | null;
 }
 
 export async function ensureApiKeysTable(db: D1Like): Promise<void> {
@@ -71,9 +68,6 @@ export async function ensureApiKeysTable(db: D1Like): Promise<void> {
         last_used_at TEXT
         , expires_at TEXT
         , initiating_human_json TEXT
-        , ai_access_profile TEXT
-        , ai_resource_uri TEXT
-        , ai_approval_policy TEXT
       )`,
     )
     .run();
@@ -90,9 +84,6 @@ export async function ensureApiKeysTable(db: D1Like): Promise<void> {
     `ALTER TABLE api_keys ADD COLUMN course_check_scopes_by_event_json TEXT`,
     `ALTER TABLE api_keys ADD COLUMN expires_at TEXT`,
     `ALTER TABLE api_keys ADD COLUMN initiating_human_json TEXT`,
-    `ALTER TABLE api_keys ADD COLUMN ai_access_profile TEXT`,
-    `ALTER TABLE api_keys ADD COLUMN ai_resource_uri TEXT`,
-    `ALTER TABLE api_keys ADD COLUMN ai_approval_policy TEXT`,
   ]) {
     try {
       await db.prepare(ddl).run();
@@ -115,9 +106,6 @@ export async function createApiKey(input: {
   eventId?: string;
   expiresAt?: string | null;
   initiatingHuman?: OrganizerPrincipal["initiatingHuman"];
-  aiAccessProfile?: OrganizerPrincipal["aiAccessProfile"];
-  aiResourceUri?: string | null;
-  aiApprovalPolicy?: OrganizerPrincipal["aiApprovalPolicy"];
 }): Promise<{
   id: string;
   name: string;
@@ -171,8 +159,8 @@ export async function createApiKey(input: {
         event_ids_json, roles_by_event_json, track_ids_by_event_json,
         principal_kind, agent_id, agent_mode, course_check_scopes_by_event_json,
         created_at, revoked_at, last_used_at, expires_at,
-        initiating_human_json, ai_access_profile, ai_resource_uri, ai_approval_policy
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)`,
+        initiating_human_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
     )
     .bind(
       id,
@@ -192,9 +180,6 @@ export async function createApiKey(input: {
       now,
       input.expiresAt ?? null,
       input.initiatingHuman ? JSON.stringify(input.initiatingHuman) : null,
-      input.aiAccessProfile ?? null,
-      input.aiResourceUri ?? null,
-      input.aiApprovalPolicy ?? null,
     )
     .run();
 
@@ -362,8 +347,7 @@ export async function resolvePrincipalFromApiKey(
       `SELECT id, name, key_prefix, key_hash, user_id, display_name, role,
               event_ids_json, roles_by_event_json, track_ids_by_event_json,
               principal_kind, agent_id, agent_mode, course_check_scopes_by_event_json,
-               created_at, revoked_at, last_used_at, expires_at
-               , initiating_human_json, ai_access_profile, ai_resource_uri, ai_approval_policy
+              created_at, revoked_at, last_used_at, expires_at, initiating_human_json
        FROM api_keys
        WHERE key_hash = ? AND revoked_at IS NULL
          AND (expires_at IS NULL OR expires_at > ?)
@@ -373,17 +357,6 @@ export async function resolvePrincipalFromApiKey(
     .first<ApiKeyRow>();
 
   if (!row) return null;
-
-  if (row.ai_access_profile) {
-    const activeConnection = await db.prepare(
-      `SELECT c.id FROM ai_connections c
-       JOIN event_memberships m
-         ON m.event_id = c.event_id AND m.user_id = c.owner_user_id
-       WHERE c.api_key_id = ? AND c.revoked_at IS NULL AND m.role = 'admin'
-       LIMIT 1`,
-    ).bind(row.id).first<{ id: string }>();
-    if (!activeConnection) return null;
-  }
 
   await db
     .prepare(`UPDATE api_keys SET last_used_at = ? WHERE id = ?`)
@@ -416,17 +389,6 @@ export async function resolvePrincipalFromApiKey(
       : DEFAULT_AGENT_MODE;
     principal.courseCheckScopesByEvent = scopesByEvent;
     principal.initiatingHuman = parseInitiatingHuman(row.initiating_human_json);
-    if (
-      row.ai_access_profile === "explore" ||
-      row.ai_access_profile === "research_prepare" ||
-      row.ai_access_profile === "operate_with_approval"
-    ) {
-      principal.aiAccessProfile = row.ai_access_profile;
-    }
-    if (row.ai_resource_uri) principal.aiResourceUri = row.ai_resource_uri;
-    if (row.ai_approval_policy === "any_change" || row.ai_approval_policy === "important_actions") {
-      principal.aiApprovalPolicy = row.ai_approval_policy;
-    }
   }
 
   return principal;

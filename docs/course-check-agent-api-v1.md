@@ -31,13 +31,13 @@ Full resource foundation: [http-api-v1.md](./http-api-v1.md).
 
 ## Where organizers mint keys (UI)
 
-**Settings → Agent API keys** in the organizer app.
+**Settings → Automation access** in the organizer app (API and MCP tabs share one key type).
 
 1. Open the event → **Settings** (left nav).
-2. In **Agent API keys**, set name, operating mode, and Course Check stages.
-3. Click **Create agent key**.
+2. In **Automation access**, choose **API** or **MCP**, then set name, operating mode, and Course Check stages.
+3. Click **Create API key** / **Create MCP token**.
 4. **Copy the token immediately** — it is shown once.
-5. Give the agent: base URL (this origin), `Authorization: Bearer <token>`, and optional `X-ChartStead-Initiating-Human: id|Name`.
+5. Give the agent: base URL (this origin), `Authorization: Bearer <token>`, and optional `X-ChartStead-Initiating-Human: id|Name`. For MCP clients, also use server URL `/mcp` (see [ai-connections.md](./ai-connections.md)).
 6. **Revoke** from the same table when access should end (takes effect before the next stage call).
 
 Default for a new key is propose-only; grant stages (or all) deliberately.

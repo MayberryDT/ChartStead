@@ -1371,62 +1371,6 @@ export interface CreatedEventApiKey extends EventApiKeySummary {
   courseCheckScopesByEvent?: Record<string, string[]>;
 }
 
-export type AiConnectionProvider = "claude" | "chatgpt" | "copilot" | "other";
-export type AiAccessProfile = "explore" | "research_prepare" | "operate_with_approval";
-export interface AiConnectionSummary {
-  id: string;
-  name: string;
-  provider: AiConnectionProvider;
-  accessProfile: AiAccessProfile;
-  approvalPolicy: "any_change" | "important_actions";
-  status: "connection_not_tested" | "connected" | "needs_sign_in" | "paused" | "revoked";
-  createdAt: string;
-  lastUsedAt: string | null;
-  lastTestAt: string | null;
-  authorizationUrl?: string;
-}
-
-export async function listAiConnections(eventId: string): Promise<{ connections: AiConnectionSummary[] }> {
-  const response = await fetch(`/api/v1/events/${eventId}/ai-connections`);
-  const body = await readJson<{ connections: AiConnectionSummary[] } | { error: string }>(response);
-  if (!response.ok || !("connections" in body)) throw new ApiError("error" in body ? body.error : "Unable to load AI connections", response.status, body);
-  return body;
-}
-
-export async function createAiConnection(
-  eventId: string,
-  input: { provider: AiConnectionProvider; accessProfile: AiAccessProfile; approvalPolicy: "any_change" | "important_actions" },
-): Promise<{ connection: AiConnectionSummary }> {
-  const response = await fetch(`/api/v1/events/${eventId}/ai-connections`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  const body = await readJson<{ connection: AiConnectionSummary } | { error: string }>(response);
-  if (!response.ok || !("connection" in body)) throw new ApiError("error" in body ? body.error : "Unable to connect assistant", response.status, body);
-  return body;
-}
-
-export async function testAiConnection(eventId: string, connectionId: string): Promise<{
-  connection: AiConnectionSummary;
-  test: { acceptedSpeakersMissingBiography: number; changedRecords: number };
-}> {
-  const response = await fetch(`/api/v1/events/${eventId}/ai-connections/${connectionId}/test`, { method: "POST" });
-  const body = await readJson<{
-    connection: AiConnectionSummary;
-    test: { acceptedSpeakersMissingBiography: number; changedRecords: number };
-  } | { error: string }>(response);
-  if (!response.ok || !("connection" in body)) throw new ApiError("error" in body ? body.error : "Unable to test connection", response.status, body);
-  return body;
-}
-
-export async function revokeAiConnection(eventId: string, connectionId: string): Promise<{ revoked: true }> {
-  const response = await fetch(`/api/v1/events/${eventId}/ai-connections/${connectionId}`, { method: "DELETE" });
-  const body = await readJson<{ revoked: true } | { error: string }>(response);
-  if (!response.ok || !("revoked" in body)) throw new ApiError("error" in body ? body.error : "Unable to disconnect assistant", response.status, body);
-  return body;
-}
-
 export async function listEventApiKeys(
   eventId: string,
 ): Promise<{ apiKeys: EventApiKeySummary[] }> {
