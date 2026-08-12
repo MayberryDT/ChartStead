@@ -130,8 +130,8 @@ function CourseCheckPolicyCard({ eventId }: { eventId: string }) {
         <div>
           <h3 id="cc-policy-heading">Course Check policy</h3>
           <p className="muted">
-            Optional stricter approvals. Policy can only add gates — never disable digest,
-            authorization, freshness, or break-glass controls.
+            Optional stricter approvals. Policy can only add gates — it cannot turn off
+            plan matching, authorization, freshness checks, or hard safety blocks.
           </p>
         </div>
       </div>

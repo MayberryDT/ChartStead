@@ -1218,14 +1218,29 @@ export async function applyCourseCheckPlan(
     },
   );
   const body = await readJson<
-    CourseCheckPlan | { error: string; recoveryGuidance?: string }
+    | CourseCheckPlan
+    | {
+        error: string;
+        recoveryGuidance?: string;
+        changedInputs?: string[];
+        code?: string;
+      }
   >(response);
   if (!response.ok || !("id" in body)) {
+    const err = body as {
+      error?: string;
+      recoveryGuidance?: string;
+      changedInputs?: string[];
+    };
+    const changed =
+      err.changedInputs && err.changedInputs.length > 0
+        ? ` Changed inputs: ${err.changedInputs.join("; ")}.`
+        : "";
     const message =
-      "error" in body
-        ? body.recoveryGuidance
-          ? `${body.error} ${body.recoveryGuidance}`
-          : body.error
+      err.error != null
+        ? err.recoveryGuidance
+          ? `${err.error} ${err.recoveryGuidance}${changed}`
+          : `${err.error}${changed}`
         : "Unable to apply Course Check";
     throw new ApiError(message, response.status, body);
   }

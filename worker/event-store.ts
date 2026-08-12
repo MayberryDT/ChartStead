@@ -65,6 +65,12 @@ import type {
 } from "../shared/airtable";
 import { AIRTABLE_HEALTH_GUIDANCE } from "../shared/airtable";
 import { applyPullWinsToLocalRecord } from "../shared/airtable-field-map";
+import {
+  buildCourseCheckDemoProposals,
+  COURSE_CHECK_DEMO_EVENT_ID,
+  COURSE_CHECK_DEMO_IDENTITY,
+  COURSE_CHECK_DEMO_PRIOR_OUTBOX,
+} from "./seed-course-check-demo";
 import type {
   AgendaWorkspaceResponse,
   CalendarIntentRecord,
@@ -1901,6 +1907,158 @@ export class EventStore extends DurableObject<AppBindings> {
           JSON.stringify(tracks),
         );
       }
+    });
+  }
+
+  /**
+   * Course Check killer-demo extras: reserved proposals, identity reuse speaker, prior outbox.
+   * Inserts missing demo rows even when proposals-v1 already ran. Never overwrites ops data.
+   */
+  seedCourseCheckDemoIfNeeded(): void {
+    const event = this.getEvent();
+    if (!event || event.id !== COURSE_CHECK_DEMO_EVENT_ID) return;
+
+    const marker = this.ctx.storage.sql
+      .exec<{ name: string }>(
+        "SELECT name FROM seed_markers WHERE name = 'course-check-demo-v1'",
+      )
+      .toArray()[0];
+    if (marker) return;
+
+    const demoProposals = buildCourseCheckDemoProposals(event.id);
+
+    this.ctx.storage.transactionSync(() => {
+      for (const proposal of demoProposals) {
+        this.ctx.storage.sql.exec(
+          `INSERT INTO proposals (
+            id, form_id, form_definition_version, answers_json, title, abstract,
+            track_id, track_name, speaker_name, speaker_email,
+            biography, supporting_link, session_format, workshop_duration,
+            co_speakers_json, supporting_file_json, status, committee_note,
+            private_note, review_version, submitted_at, confirmation_email_status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO NOTHING`,
+          proposal.id,
+          proposal.formId,
+          proposal.formDefinitionVersion,
+          JSON.stringify(proposal.answers ?? {}),
+          proposal.title,
+          proposal.abstract,
+          proposal.trackId,
+          proposal.trackName,
+          proposal.speakerName,
+          proposal.speakerEmail,
+          proposal.biography,
+          proposal.supportingLink,
+          proposal.sessionFormat ?? "",
+          proposal.workshopDuration ?? "",
+          JSON.stringify(proposal.coSpeakers ?? []),
+          proposal.supportingFile ? JSON.stringify(proposal.supportingFile) : "",
+          proposal.status,
+          proposal.committeeNote,
+          proposal.privateNote,
+          proposal.reviewVersion ?? 0,
+          proposal.submittedAt,
+          proposal.confirmationEmailStatus ?? "",
+        );
+      }
+
+      const eventRow = this.ctx.storage.sql
+        .exec<{ tracks_json: string }>("SELECT tracks_json FROM events LIMIT 1")
+        .toArray()[0];
+      if (eventRow) {
+        const tracks = JSON.parse(eventRow.tracks_json) as EventRecord["tracks"];
+        const hasDemoTrack = tracks.some((track) => track.id === "course-check-demo");
+        const nextTracks = hasDemoTrack
+          ? tracks
+          : [
+              ...tracks,
+              {
+                id: "course-check-demo",
+                name: "Course Check Demo",
+                proposalCount: demoProposals.length,
+              },
+            ];
+        const counts = this.ctx.storage.sql
+          .exec<ProposalCountRow>(
+            `SELECT track_id, COUNT(*) AS proposal_count
+             FROM proposals
+             GROUP BY track_id`,
+          )
+          .toArray();
+        const countByTrack = new Map(
+          counts.map((row) => [row.track_id, row.proposal_count]),
+        );
+        const syncedTracks = nextTracks.map((track) => ({
+          ...track,
+          proposalCount: countByTrack.get(track.id) ?? track.proposalCount,
+        }));
+        const totals = this.ctx.storage.sql
+          .exec<{ total: number; unreviewed: number }>(
+            `SELECT COUNT(*) AS total,
+                    SUM(CASE WHEN status = 'unreviewed' THEN 1 ELSE 0 END) AS unreviewed
+             FROM proposals`,
+          )
+          .toArray()[0];
+        this.ctx.storage.sql.exec(
+          `UPDATE events
+           SET submission_count = ?, unreviewed_count = ?, tracks_json = ?`,
+          totals?.total ?? 0,
+          totals?.unreviewed ?? 0,
+          JSON.stringify(syncedTracks),
+        );
+      }
+
+      this.upsertSpeakerForTest({
+        name: COURSE_CHECK_DEMO_IDENTITY.name,
+        email: COURSE_CHECK_DEMO_IDENTITY.email,
+        biography: COURSE_CHECK_DEMO_IDENTITY.biography,
+      });
+
+      const priorProposal = this.ctx.storage.sql
+        .exec<{ id: string }>(
+          `SELECT id FROM proposals WHERE id = ? LIMIT 1`,
+          COURSE_CHECK_DEMO_PRIOR_OUTBOX.proposalId,
+        )
+        .toArray()[0];
+      const priorOutbox = this.ctx.storage.sql
+        .exec<{ id: string }>(
+          `SELECT id FROM outbox_messages WHERE id = 'seed-cc-demo-prior-outbox' LIMIT 1`,
+        )
+        .toArray()[0];
+      if (priorProposal && !priorOutbox) {
+        this.queueOutboxMessage({
+          id: "seed-cc-demo-prior-outbox",
+          kind: "submission_confirmation",
+          toEmail: COURSE_CHECK_DEMO_PRIOR_OUTBOX.toEmail,
+          subject: COURSE_CHECK_DEMO_PRIOR_OUTBOX.subject,
+          textBody: COURSE_CHECK_DEMO_PRIOR_OUTBOX.textBody,
+          htmlBody: COURSE_CHECK_DEMO_PRIOR_OUTBOX.htmlBody,
+          proposalId: COURSE_CHECK_DEMO_PRIOR_OUTBOX.proposalId,
+        });
+        this.ctx.storage.sql.exec(
+          `UPDATE outbox_messages
+           SET status = 'sent',
+               sent_at = ?,
+               updated_at = ?,
+               attempt_count = 1
+           WHERE id = 'seed-cc-demo-prior-outbox'`,
+          "2026-08-01T12:00:00.000Z",
+          "2026-08-01T12:00:00.000Z",
+        );
+        this.ctx.storage.sql.exec(
+          `UPDATE proposals
+           SET confirmation_email_status = 'sent'
+           WHERE id = ?`,
+          COURSE_CHECK_DEMO_PRIOR_OUTBOX.proposalId,
+        );
+      }
+
+      this.ctx.storage.sql.exec(
+        `INSERT INTO seed_markers (name, applied_at)
+         VALUES ('course-check-demo-v1', ?)`,
+        new Date().toISOString(),
+      );
     });
   }
 

@@ -67,7 +67,7 @@ describe("ChartStead Worker", () => {
     expect(list.events).toEqual([
       expect.objectContaining({
         id: "pacific-open-data-summit-2026",
-        submissionCount: 47,
+        submissionCount: 57,
       }),
       expect.objectContaining({
         id: "ai-engineer-worlds-fair-2026",

@@ -738,7 +738,7 @@ function CommunicationEffectCard({
           <summary>Create a reviewed correction</summary>
           <div>
             <p className="muted">
-              The original delivery remains immutable. This creates a linked plan that
+              The original delivery stays on record. This creates a linked plan that
               must be reviewed, frozen, and sent separately.
             </p>
             <label className="stack-field">
@@ -1230,7 +1230,7 @@ export function CourseCheckPage() {
     },
     onSuccess: (next) => {
       queryClient.setQueryData(["course-check", eventId, planId], next);
-      setMessage("Saved a new immutable communication plan version. Draft approval cleared.");
+      setMessage("Saved a new communication plan version. Draft approval cleared.");
     },
   });
 
@@ -1459,10 +1459,10 @@ export function CourseCheckPage() {
           </h1>
           <p className="lede">
             {isCommunication
-              ? "Review exact recipients, approve delivery, and recover every address from a durable effect ledger."
+              ? "Review exact recipients, approve delivery, and recover every address from the delivery results."
               : isPublication
-                ? "Inspect the public program delta before publish, unpublish, or restore. Communication stays separate."
-                : "Resumable event resource. Another authorized administrator can inspect and continue this exact versioned batch."}
+                ? "Inspect the public program changes before you publish, unpublish, or restore. Communication stays separate."
+                : "Shared Course Check workspace. Another authorized administrator can open this exact batch and continue."}
           </p>
         </div>
         <div className="course-check-header-tools">
@@ -1482,6 +1482,14 @@ export function CourseCheckPage() {
           </Link>
         </div>
       </header>
+
+      {currentPlan.state === "Out of date" ? (
+        <p className="form-message" data-tone="warning" role="status">
+          This Course Check is out of date. A relevant input changed after it was
+          reviewed. Refresh the plan or open a new Course Check, then approve the
+          updated exact result before applying.
+        </p>
+      ) : null}
 
       {isDecision ? (
         <DecisionBatchBody
@@ -1657,8 +1665,8 @@ export function CourseCheckPage() {
         {isCommunication && draftsComplete && !deliveryStarted ? (
           <>
             <p className="form-message" data-tone="success" role="status">
-              Drafts frozen. Sending will approve these exact payloads and create one
-              durable effect per address.
+              Drafts frozen. Sending will approve these exact messages and track one
+              delivery result per address.
             </p>
             <button
               type="button"

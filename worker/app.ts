@@ -311,6 +311,7 @@ async function loadEvent(
   await store.seedIfEmpty(seed);
   await store.seedPublishedFormIfEmpty(createSeedCfp(seed));
   await store.seedProposalsIfNeeded(createSeedProposals(seed));
+  await store.seedCourseCheckDemoIfNeeded();
   const event = await store.getEvent();
   if (!event) {
     throw new Error(`Event ${seed.id} was not initialized.`);
