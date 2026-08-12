@@ -19,4 +19,4 @@
 
 Blocked pending Course Check 03 — Communication drafts and recipient reasoning, Course Check 04 — External sends and effect recovery, and Course Check 05 — Calendar delivery lifecycle. Competition Ticket 05 is done.
 
-- 2026-08-11 — frontier-reconcile: Still blocked on: Course Check 04 (ready-for-agent); Course Check 05 (blocked).
+- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 05 (ready-for-agent).

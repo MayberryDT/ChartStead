@@ -22,4 +22,4 @@ Filed from Ticket 03 human QA (2026-08-10): end-user public form is solid after 
 
 2026-08-11 — Not agent-ready. Polish work is human-led with an agent in tandem; do not grab this as a solo agent ticket. Same rule for future polish issues.
 
-- 2026-08-11 — frontier-reconcile: Blockers satisfied; remains human-tandem only (not agent-ready).
+- 2026-08-12 — frontier-reconcile: Blockers satisfied; remains human-tandem only (not agent-ready).
