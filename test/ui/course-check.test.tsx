@@ -7,10 +7,15 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { CourseCheckPlan, DecisionPlanBody } from "../../shared/course-check";
+import type {
+  CommunicationPlanBody,
+  CourseCheckPlan,
+  DecisionPlanBody,
+} from "../../shared/course-check";
 import { CourseCheckPage } from "../../src/CourseCheckPage";
 
 const warning = {
@@ -124,6 +129,96 @@ const plan: CourseCheckPlan = {
   mutations: [],
 };
 
+const appliedPlan: CourseCheckPlan = {
+  ...plan,
+  state: "Complete",
+  body: {
+    ...body,
+    items: body.items.map((item) => ({ ...item, status: "applied" as const })),
+    aggregateProgress: { total: 1, active: 0, deferred: 0, applied: 1 },
+  },
+  approval: {
+    stageId: "apply-decision",
+    planVersion: 1,
+    digest: plan.digest,
+    actor: plan.createdBy,
+    approvedAt: "2026-08-11T12:01:00.000Z",
+  },
+  receipt: {
+    id: "receipt-1",
+    planId: plan.id,
+    planVersion: 1,
+    digest: plan.digest,
+    stageId: "apply-decision",
+    appliedAt: "2026-08-11T12:01:00.000Z",
+    actor: plan.createdBy,
+  },
+};
+
+const communicationBody: CommunicationPlanBody = {
+  actionType: "communication",
+  source: {
+    kind: "linked_decision",
+    decisionPlanId: plan.id,
+    decisionPlanVersion: 1,
+    decisionPlanDigest: plan.digest,
+    selection: null,
+  },
+  purpose: "decision",
+  templateKind: "acceptance",
+  subject: "Your session has been accepted",
+  bodyText: "Hello,\n\nWe are pleased to accept your session.",
+  bodyHtml: "<p>Hello,</p><p>We are pleased to accept your session.</p>",
+  recipientGroups: [],
+  recipients: [],
+  drafts: [],
+  calendarOps: [],
+  deltas: [],
+  findings: [],
+  stages: [
+    { id: "create-drafts", label: "Create drafts", status: "ready", verb: "Create drafts" },
+  ],
+  airtable: { configured: false, disposition: "removed", summary: "No mapped Airtable writes.", effects: [] },
+  evidenceSections: [],
+  softWarningOverrides: [],
+  stageVisibility: {
+    decision: "complete",
+    draft: "ready",
+    send: "not_started",
+    delivery: "not_started",
+  },
+  linkedPlanIds: [plan.id],
+  parentPlanId: plan.id,
+  batchGroupId: null,
+  splitExplanation: null,
+  relevantRevisions: {
+    proposalIds: [body.proposalId],
+    proposalRevisions: { [body.proposalId]: body.proposalRevision },
+    speakerEmails: [],
+    contentFingerprint: "content-1",
+  },
+  ageWarningHours: 24,
+  ageWarning: null,
+};
+
+const communicationPlan: CourseCheckPlan = {
+  ...plan,
+  id: "communication-plan-1",
+  actionType: "communication",
+  state: "Ready",
+  digest: "communication-digest-1",
+  body: communicationBody,
+  approval: null,
+  receipt: null,
+};
+
+function jsonResponse(value: unknown, status = 200) {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
 function renderCourseCheck() {
   const rootRoute = createRootRoute({ component: () => <Outlet /> });
   const courseCheckRoute = createRoute({
@@ -148,11 +243,12 @@ function renderCourseCheck() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
+  return { ...view, router };
 }
 
 describe("Course Check review workspace", () => {
@@ -206,5 +302,178 @@ describe("Course Check review workspace", () => {
     expect(effect).toHaveTextContent(
       "session-with-a-long-stable-identifier-that-must-not-collapse",
     );
+  });
+
+  it("opens the linked communication workspace immediately after applying a decision", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "GET" && url.endsWith("/course-checks/plan-1")) {
+        return jsonResponse(plan);
+      }
+      if (method === "POST" && url.endsWith("/course-checks/plan-1/apply")) {
+        return jsonResponse(appliedPlan);
+      }
+      if (method === "POST" && url.endsWith("/course-checks/communications")) {
+        return jsonResponse(communicationPlan, 201);
+      }
+      if (method === "GET" && url.endsWith("/course-checks/communication-plan-1")) {
+        return jsonResponse(communicationPlan);
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    });
+    const { router } = renderCourseCheck();
+
+    await user.click(await screen.findByRole("button", { name: "Apply decision" }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(
+        "/e/pacific-open-data-summit-2026/course-checks/communication-plan-1",
+      );
+    });
+  });
+
+  it("defers blocked items, applies the remainder, and advances to communication", async () => {
+    const user = userEvent.setup();
+    const blocker = {
+      id: "missing-authority",
+      severity: "blocker" as const,
+      code: "missing_authority",
+      message: "One decision needs follow-up.",
+      recoveryGuidance: "Defer it and continue with the remaining decision.",
+    };
+    const blockedBody: DecisionPlanBody = {
+      ...body,
+      proposalId: "SUB-BLOCKED",
+      findings: [blocker, warning],
+      items: [
+        { ...body.items[0]!, itemId: "blocked-item", proposalId: "SUB-BLOCKED", findings: [blocker] },
+        { ...body.items[0]!, itemId: "ready-item", proposalId: "SUB-READY", findings: [warning] },
+      ],
+      aggregateProgress: { total: 2, active: 2, deferred: 0, applied: 0 },
+    };
+    const blockedPlan: CourseCheckPlan = {
+      ...plan,
+      state: "Needs attention",
+      body: blockedBody,
+    };
+    const deferredBody: DecisionPlanBody = {
+      ...blockedBody,
+      findings: [warning],
+      items: [
+        { ...blockedBody.items[0]!, status: "deferred", deferralReason: "Needs follow-up" },
+        blockedBody.items[1]!,
+      ],
+      aggregateProgress: { total: 2, active: 1, deferred: 1, applied: 0 },
+    };
+    const deferredPlan: CourseCheckPlan = {
+      ...blockedPlan,
+      state: "Ready",
+      version: 2,
+      digest: "digest-2",
+      body: deferredBody,
+    };
+    const partiallyCompletePlan: CourseCheckPlan = {
+      ...appliedPlan,
+      state: "Partially complete",
+      version: 2,
+      digest: "digest-2",
+      body: {
+        ...deferredBody,
+        items: deferredBody.items.map((item) =>
+          item.status === "active" ? { ...item, status: "applied" as const } : item,
+        ),
+        aggregateProgress: { total: 2, active: 0, deferred: 1, applied: 1 },
+      },
+    };
+    const requests: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      requests.push(`${method} ${url}`);
+      if (method === "GET" && url.endsWith("/course-checks/plan-1")) {
+        return jsonResponse(blockedPlan);
+      }
+      if (method === "POST" && url.endsWith("/course-checks/plan-1/defer")) {
+        return jsonResponse(deferredPlan);
+      }
+      if (method === "POST" && url.endsWith("/course-checks/plan-1/apply")) {
+        return jsonResponse(partiallyCompletePlan);
+      }
+      if (method === "POST" && url.endsWith("/course-checks/communications")) {
+        return jsonResponse(communicationPlan, 201);
+      }
+      if (method === "GET" && url.endsWith("/course-checks/communication-plan-1")) {
+        return jsonResponse(communicationPlan);
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    });
+    const { router } = renderCourseCheck();
+
+    await user.click(await screen.findByRole("checkbox", { name: /SUB-BLOCKED/ }));
+    await user.type(screen.getByPlaceholderText("Why defer these items?"), "Needs follow-up");
+    await user.click(screen.getByRole("button", { name: "Defer to follow-up" }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(
+        "/e/pacific-open-data-summit-2026/course-checks/communication-plan-1",
+      );
+    });
+    expect(requests.filter((request) => request.startsWith("POST "))).toEqual([
+      "POST /api/events/pacific-open-data-summit-2026/course-checks/plan-1/defer",
+      "POST /api/events/pacific-open-data-summit-2026/course-checks/plan-1/apply",
+      "POST /api/events/pacific-open-data-summit-2026/course-checks/communications",
+    ]);
+  });
+
+  it("returns to the submissions queue after freezing communication drafts", async () => {
+    const user = userEvent.setup();
+    const frozenPlan: CourseCheckPlan = {
+      ...communicationPlan,
+      state: "Complete",
+      body: {
+        ...communicationBody,
+        stageVisibility: { ...communicationBody.stageVisibility, draft: "complete" },
+        drafts: [
+          {
+            draftId: "draft-1",
+            groupId: "group-1",
+            proposalId: body.proposalId,
+            sessionId: null,
+            toEmail: "speaker@example.test",
+            recipientName: "Example Speaker",
+            subject: communicationBody.subject,
+            bodyText: communicationBody.bodyText,
+            bodyHtml: communicationBody.bodyHtml,
+            attachmentRefs: [],
+            calendarIntent: null,
+            status: "frozen",
+            frozenAt: "2026-08-11T12:02:00.000Z",
+            frozenPlanVersion: 1,
+          },
+        ],
+      },
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "GET" && url.endsWith("/course-checks/plan-1")) {
+        return jsonResponse(communicationPlan);
+      }
+      if (method === "POST" && url.endsWith("/course-checks/communication-plan-1/create-drafts")) {
+        return jsonResponse(frozenPlan);
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    });
+    const { router } = renderCourseCheck();
+
+    await user.click(await screen.findByRole("button", { name: "Create drafts" }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(
+        "/e/pacific-open-data-summit-2026/submissions",
+      );
+    });
   });
 });

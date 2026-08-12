@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
 import type {
@@ -576,7 +576,7 @@ function CommunicationBody({
         </p>
       </section>
 
-      <section className="panel">
+      <section className="panel course-check-message-content">
         <h2>Message content</h2>
         <label className="stack-field">
           Subject
@@ -702,6 +702,7 @@ export function CourseCheckPage() {
     from: "/e/$eventId/course-checks/$planId",
   });
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [message, setMessage] = useState<string | null>(null);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [deferReason, setDeferReason] = useState("");
@@ -795,6 +796,12 @@ export function CourseCheckPage() {
             ? "Remaining batch applied. Deferred items stay in the follow-up queue."
             : "Decision applied. Internal records updated; no speaker email was sent.",
       );
+      if (
+        next.body.actionType === "decision" &&
+        (next.state === "Complete" || next.state === "Partially complete")
+      ) {
+        linkCommunicationMutation.mutate(next);
+      }
     },
   });
 
@@ -811,7 +818,20 @@ export function CourseCheckPage() {
       queryClient.setQueryData(["course-check", eventId, planId], next);
       setSelectedItemIds(new Set());
       setDeferReason("");
-      setMessage("Deferred items moved to the follow-up queue as a new plan version.");
+      if (
+        next.body.actionType === "decision" &&
+        next.body.aggregateProgress.active > 0
+      ) {
+        setMessage("Deferred items moved to follow-up. Applying the remaining decisions…");
+        applyMutation.mutate(next);
+      } else {
+        setMessage("All selected decisions were deferred to follow-up.");
+        void navigate({
+          to: "/e/$eventId/submissions",
+          params: { eventId },
+          search: { q: undefined, status: undefined, track: undefined, sort: undefined },
+        });
+      }
     },
   });
 
@@ -886,9 +906,12 @@ export function CourseCheckPage() {
     },
     onSuccess: (next) => {
       queryClient.setQueryData(["course-check", eventId, planId], next);
-      setMessage(
-        "Drafts frozen with exact subject, body, and recipients. Nothing was sent.",
-      );
+      void queryClient.invalidateQueries({ queryKey: ["course-checks", eventId] });
+      void navigate({
+        to: "/e/$eventId/submissions",
+        params: { eventId },
+        search: { q: undefined, status: undefined, track: undefined, sort: undefined },
+      });
     },
   });
 
@@ -899,7 +922,10 @@ export function CourseCheckPage() {
         idempotencyKey: linkCommKey,
       }),
     onSuccess: (next) => {
-      window.location.assign(`/e/${eventId}/course-checks/${next.id}`);
+      void navigate({
+        to: "/e/$eventId/course-checks/$planId",
+        params: { eventId, planId: next.id },
+      });
     },
   });
 

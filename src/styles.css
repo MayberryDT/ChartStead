@@ -2183,6 +2183,55 @@ table.grid tbody tr[aria-selected="true"] td:first-child {
   font-size: 14px;
 }
 
+.course-check-message-content {
+  display: grid;
+  gap: 16px;
+}
+
+.course-check-message-content > h2 {
+  margin-bottom: 0;
+}
+
+.course-check-message-content .stack-field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  color: var(--on-surface-variant);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.course-check-message-content input,
+.course-check-message-content textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--outline);
+  border-radius: var(--r-control);
+  background: var(--surface);
+  color: var(--on-surface);
+  font: inherit;
+  font-weight: 400;
+}
+
+.course-check-message-content input {
+  min-height: 44px;
+}
+
+.course-check-message-content textarea {
+  min-height: 176px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.course-check-message-content input:focus,
+.course-check-message-content textarea:focus {
+  border-color: var(--primary);
+  outline: 2px solid color-mix(in srgb, var(--primary) 18%, transparent);
+  outline-offset: 1px;
+}
+
 .course-check-findings,
 .course-check-deltas {
   list-style: none;
