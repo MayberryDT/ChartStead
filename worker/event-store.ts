@@ -163,6 +163,94 @@ const THEME_ACCENT_PATTERN = /^#[0-9a-fA-F]{6}$/;
 const COMMUNICATION_SENDING_LEASE_MS = 2 * 60_000;
 const COMMUNICATION_CONFIG_RECHECK_MS = 5 * 60_000;
 
+export class EventConfigurationError extends Error {
+  constructor(
+    message: string,
+    readonly code: "invalid_configuration" | "resource_in_use",
+  ) {
+    super(message);
+  }
+}
+
+function isIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function isIanaTimezone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function validateResourceId(id: string, kind: "event" | "track" | "room"): void {
+  const label = kind.charAt(0).toUpperCase() + kind.slice(1);
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) {
+    throw new EventConfigurationError(
+      `${label} identifiers must use lowercase letters, numbers, and single hyphens.`,
+      "invalid_configuration",
+    );
+  }
+}
+
+function validateUniqueIds(
+  resources: Array<{ id: string; name: string }>,
+  kind: "track" | "room",
+): void {
+  const seen = new Set<string>();
+  for (const resource of resources) {
+    validateResourceId(resource.id, kind);
+    if (!resource.name.trim()) {
+      throw new EventConfigurationError(
+        `${kind === "track" ? "Track" : "Room"} names cannot be empty.`,
+        "invalid_configuration",
+      );
+    }
+    if (seen.has(resource.id)) {
+      throw new EventConfigurationError(
+        `Duplicate ${kind} identifier “${resource.id}”. Use a different identifier.`,
+        "invalid_configuration",
+      );
+    }
+    seen.add(resource.id);
+  }
+}
+
+export function validateEventIdentity(input: {
+  id: string;
+  name: string;
+  startsOn: string;
+  endsOn: string;
+  timezone: string;
+}): void {
+  validateResourceId(input.id, "event");
+  if (!input.name.trim()) {
+    throw new EventConfigurationError("Event name is required.", "invalid_configuration");
+  }
+  if (!isIsoDate(input.startsOn) || !isIsoDate(input.endsOn)) {
+    throw new EventConfigurationError(
+      "Enter valid start and end dates in YYYY-MM-DD format.",
+      "invalid_configuration",
+    );
+  }
+  if (input.endsOn < input.startsOn) {
+    throw new EventConfigurationError(
+      "End date must be on or after the start date.",
+      "invalid_configuration",
+    );
+  }
+  if (!isIanaTimezone(input.timezone)) {
+    throw new EventConfigurationError(
+      "Choose a valid IANA timezone, such as America/Denver.",
+      "invalid_configuration",
+    );
+  }
+}
+
 export function normalizeThemeAccent(value: unknown): string {
   if (typeof value === "string" && THEME_ACCENT_PATTERN.test(value)) {
     return value.toLowerCase();
@@ -176,6 +264,7 @@ interface EventRow {
   name: string;
   starts_on: string;
   ends_on: string;
+  timezone: string;
   submission_count: number;
   unreviewed_count: number;
   tracks_json: string;
@@ -972,6 +1061,7 @@ export class EventStore extends DurableObject<AppBindings> {
           name TEXT NOT NULL,
           starts_on TEXT NOT NULL,
           ends_on TEXT NOT NULL,
+          timezone TEXT NOT NULL DEFAULT 'UTC',
           submission_count INTEGER NOT NULL DEFAULT 0,
           unreviewed_count INTEGER NOT NULL DEFAULT 0,
           tracks_json TEXT NOT NULL,
@@ -1344,6 +1434,7 @@ export class EventStore extends DurableObject<AppBindings> {
       `);
 
       this.ensureColumn("events", "submission_count", "INTEGER NOT NULL DEFAULT 0");
+      this.ensureColumn("events", "timezone", "TEXT NOT NULL DEFAULT 'UTC'");
       this.ensureColumn(
         "events",
         "course_check_age_warning_hours",
@@ -1648,13 +1739,14 @@ export class EventStore extends DurableObject<AppBindings> {
     const themeAccent = normalizeThemeAccent(event.themeAccent);
     this.ctx.storage.sql.exec(
       `INSERT INTO events
-        (id, name, starts_on, ends_on, submission_count, unreviewed_count, tracks_json, rooms_json, theme_accent)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, name, starts_on, ends_on, timezone, submission_count, unreviewed_count, tracks_json, rooms_json, theme_accent)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO NOTHING`,
       event.id,
       event.name,
       event.startsOn,
       event.endsOn,
+      event.timezone,
       event.submissionCount,
       event.unreviewedCount,
       JSON.stringify(event.tracks),
@@ -2497,7 +2589,7 @@ export class EventStore extends DurableObject<AppBindings> {
     const row = this.ctx.storage.sql
       .exec<EventRow>(
         `SELECT id, name, starts_on, ends_on, submission_count,
-                unreviewed_count, tracks_json, rooms_json, theme_accent
+                unreviewed_count, tracks_json, rooms_json, theme_accent, timezone
          FROM events
          LIMIT 1`,
       )
@@ -2512,12 +2604,124 @@ export class EventStore extends DurableObject<AppBindings> {
       name: row.name,
       startsOn: row.starts_on,
       endsOn: row.ends_on,
+      timezone: row.timezone || "UTC",
       submissionCount: row.submission_count,
       unreviewedCount: row.unreviewed_count,
       tracks: JSON.parse(row.tracks_json) as EventRecord["tracks"],
       rooms: JSON.parse(row.rooms_json) as EventRecord["rooms"],
       themeAccent: normalizeThemeAccent(row.theme_accent),
     };
+  }
+
+  updateEventConfiguration(input: {
+    name?: string;
+    startsOn?: string;
+    endsOn?: string;
+    timezone?: string;
+    tracks?: Array<{ id: string; name: string }>;
+    rooms?: Array<{ id: string; name: string; readiness: "ready" | "pending" }>;
+  }): EventRecord {
+    const current = this.getEvent();
+    if (!current) throw new Error("Event is not initialized.");
+
+    const nextTracks = (input.tracks ?? current.tracks).map((track) => ({
+      id: track.id.trim(),
+      name: track.name.trim(),
+      proposalCount:
+        current.tracks.find((candidate) => candidate.id === track.id.trim())
+          ?.proposalCount ?? 0,
+    }));
+    const nextRooms = (input.rooms ?? current.rooms).map((room) => ({
+      id: room.id.trim(),
+      name: room.name.trim(),
+      readiness: room.readiness,
+    }));
+    validateUniqueIds(nextTracks, "track");
+    validateUniqueIds(nextRooms, "room");
+    if (nextRooms.some((room) => room.readiness !== "ready" && room.readiness !== "pending")) {
+      throw new EventConfigurationError(
+        "Room readiness must be ready or pending.",
+        "invalid_configuration",
+      );
+    }
+
+    const next = {
+      id: current.id,
+      name: input.name?.trim() ?? current.name,
+      startsOn: input.startsOn ?? current.startsOn,
+      endsOn: input.endsOn ?? current.endsOn,
+      timezone: input.timezone?.trim() ?? current.timezone,
+    };
+    validateEventIdentity(next);
+
+    const nextTrackIds = new Set(nextTracks.map((track) => track.id));
+    for (const removed of current.tracks.filter((track) => !nextTrackIds.has(track.id))) {
+      const proposal = this.ctx.storage.sql
+        .exec<{ title: string }>(
+          `SELECT title FROM proposals WHERE track_id = ? LIMIT 1`,
+          removed.id,
+        )
+        .toArray()[0];
+      if (proposal) {
+        throw new EventConfigurationError(
+          `Track “${removed.name}” is used by proposal “${proposal.title}”. Move that proposal before removing the track.`,
+          "resource_in_use",
+        );
+      }
+      const session = this.ctx.storage.sql
+        .exec<{ title: string }>(
+          `SELECT title FROM sessions WHERE track_id = ? LIMIT 1`,
+          removed.id,
+        )
+        .toArray()[0];
+      if (session) {
+        throw new EventConfigurationError(
+          `Track “${removed.name}” is used by session “${session.title}”. Move that session before removing the track.`,
+          "resource_in_use",
+        );
+      }
+    }
+
+    const nextRoomIds = new Set(nextRooms.map((room) => room.id));
+    for (const removed of current.rooms.filter((room) => !nextRoomIds.has(room.id))) {
+      const session = this.ctx.storage.sql
+        .exec<{ title: string }>(
+          `SELECT title FROM sessions WHERE room_id = ? LIMIT 1`,
+          removed.id,
+        )
+        .toArray()[0];
+      if (session) {
+        throw new EventConfigurationError(
+          `Room “${removed.name}” is used by session “${session.title}”. Move that session before removing the room.`,
+          "resource_in_use",
+        );
+      }
+    }
+
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        `UPDATE events
+         SET name = ?, starts_on = ?, ends_on = ?, timezone = ?,
+             tracks_json = ?, rooms_json = ?
+         WHERE id = ?`,
+        next.name,
+        next.startsOn,
+        next.endsOn,
+        next.timezone,
+        JSON.stringify(nextTracks),
+        JSON.stringify(nextRooms),
+        current.id,
+      );
+      for (const track of nextTracks) {
+        this.ctx.storage.sql.exec(
+          `UPDATE proposals SET track_name = ? WHERE track_id = ?`,
+          track.name,
+          track.id,
+        );
+      }
+    });
+
+    return this.getEvent()!;
   }
 
   createProposal(input: {

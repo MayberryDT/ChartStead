@@ -11,6 +11,7 @@ import type {
   CfpDefinitionV1,
   CfpFormResponse,
   EventListResponse,
+  EventRecord,
   OnboardingBoard,
   OnboardingCompletionRequirement,
   OnboardingReminderDraft,
@@ -67,6 +68,56 @@ export async function fetchEvents(): Promise<EventListResponse> {
     );
   }
   return body;
+}
+
+export async function createEventWorkspace(input: {
+  id: string;
+  name: string;
+  startsOn: string;
+  endsOn: string;
+  timezone: string;
+}): Promise<EventRecord> {
+  const response = await fetch("/api/events", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<{ event: EventRecord } | { error: string }>(response);
+  if (!response.ok || !("event" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to create event workspace",
+      response.status,
+      body,
+    );
+  }
+  return body.event;
+}
+
+export async function updateEventConfiguration(
+  eventId: string,
+  input: {
+    name: string;
+    startsOn: string;
+    endsOn: string;
+    timezone: string;
+    tracks: Array<{ id: string; name: string }>;
+    rooms: Array<{ id: string; name: string; readiness: "ready" | "pending" }>;
+  },
+): Promise<EventRecord> {
+  const response = await fetch(`/api/events/${eventId}/configuration`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<{ event: EventRecord } | { error: string }>(response);
+  if (!response.ok || !("event" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to save event configuration",
+      response.status,
+      body,
+    );
+  }
+  return body.event;
 }
 
 export async function fetchCfp(

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useEffect, useState } from "react";
 
 import type { AirtableSyncHealth, AirtableSyncState } from "../shared/airtable";
+import type { EventRecord } from "../shared/events";
 import {
   COURSE_CHECK_SCOPES,
   type AgentOperatingMode,
@@ -22,6 +23,7 @@ import {
   type CreatedEventApiKey,
   type EventApiKeySummary,
 } from "./api";
+import { EventConfigurationCard } from "./EventWorkspaceManagement";
 
 /** Must match worker/airtable/demo-sandbox.ts */
 const DEMO_BASE_ID = "appChartSteadDemo";
@@ -675,7 +677,16 @@ function AutomationAccessCard({ eventId }: { eventId: string }) {
   );
 }
 
-export function SettingsWorkspace({ eventId }: { eventId: string }) {
+export function SettingsWorkspace({
+  event,
+  eventId: legacyEventId,
+  onEventUpdated = () => {},
+}: {
+  event?: EventRecord;
+  eventId?: string;
+  onEventUpdated?: (event: EventRecord) => void;
+}) {
+  const eventId = event?.id ?? legacyEventId ?? "";
   const queryClient = useQueryClient();
   const [baseId, setBaseId] = useState("");
   const [accessToken, setAccessToken] = useState("");
@@ -787,6 +798,9 @@ export function SettingsWorkspace({ eventId }: { eventId: string }) {
           <h2>Settings</h2>
         </div>
         <div className="settings-stack">
+          {event ? (
+            <EventConfigurationCard event={event} onUpdated={onEventUpdated} />
+          ) : null}
           <CourseCheckPolicyCard eventId={eventId} />
           <AutomationAccessCard eventId={eventId} />
 

@@ -10,13 +10,26 @@ import {
   handleDemoPersonaRequest,
   resolveDemoPrincipal,
 } from "./demo-personas";
-import { seedEvents } from "./seed-events";
+import { listAllEventWorkspaceIds } from "./event-catalog";
 import type { AppBindings } from "./types";
 
 export { EventStore } from "./event-store";
 
 const app = createApp({
-  resolvePrincipal: resolveDemoPrincipal,
+  resolvePrincipal: async (request, env) => {
+    const principal = await resolveDemoPrincipal(request, env);
+    if (principal?.id === "demo-admin") {
+      const now = Date.now();
+      await env.AUTH_DB.prepare(
+        `INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt)
+         VALUES ('demo-admin', 'Demo Administrator', 'demo-admin@chartstead.test', 1, ?, ?)
+         ON CONFLICT(id) DO NOTHING`,
+      )
+        .bind(now, now)
+        .run();
+    }
+    return principal;
+  },
   // Demo/e2e only — production uses BETTER_AUTH_SECRET from the environment.
   signingSecret: "demo-local-signing-secret-not-for-production",
 });
@@ -28,8 +41,8 @@ export default {
     const sender = createResendSender(env);
     const communicationSender = createResendCommunicationSender(env);
     const now = new Date();
-    for (const event of seedEvents) {
-      const store = env.EVENT_STORE.getByName(event.id);
+    for (const eventId of await listAllEventWorkspaceIds(env.AUTH_DB)) {
+      const store = env.EVENT_STORE.getByName(eventId);
       if (sender) {
         await flushEventOutbox({
           store,

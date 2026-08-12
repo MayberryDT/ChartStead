@@ -352,7 +352,9 @@ export function AgendaWorkspace({ event }: { event: EventRecord }) {
             <span className="agenda-pool-count">{pool.length}</span>
           </div>
           {pool.length === 0 ? (
-            <p className="empty-state padded">All sessions are fully placed.</p>
+            <p className="empty-state padded">
+              {sessions.length === 0 ? "No sessions yet." : "All sessions are fully placed."}
+            </p>
           ) : (
             <ul className="agenda-pool-list">
               {pool.map((session) => (

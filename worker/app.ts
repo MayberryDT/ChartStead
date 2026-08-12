@@ -51,13 +51,19 @@ import type {
 import {
   ASSET_PURGE_AFTER_MS,
   DraftConflictError,
+  EventConfigurationError,
   HEADSHOT_MAX_BYTES,
   HEADSHOT_MIME_TYPES,
   TASK_FILE_MAX_BYTES,
 } from "./event-store";
-import { createSeedCfp } from "./seed-cfp";
-import { seedEvents } from "./seed-events";
-import { createSeedProposals } from "./seed-proposals";
+import {
+  enrichPrincipalMemberships,
+  findKnownEvent,
+  listEventWorkspaces,
+  loadEventWorkspace,
+  rememberEvent,
+} from "./event-catalog";
+import { validateEventIdentity } from "./event-store";
 import {
   createTokenId,
   signEditToken,
@@ -340,12 +346,7 @@ async function loadEvent(
   env: AppBindings,
   seed: EventRecord,
 ): Promise<EventRecord> {
-  const store = env.EVENT_STORE.getByName(seed.id);
-  await store.seedIfEmpty(seed);
-  await store.seedPublishedFormIfEmpty(createSeedCfp(seed));
-  await store.seedProposalsIfNeeded(createSeedProposals(seed));
-  await store.seedCourseCheckDemoIfNeeded();
-  const event = await store.getEvent();
+  const event = await loadEventWorkspace(env, seed.id);
   if (!event) {
     throw new Error(`Event ${seed.id} was not initialized.`);
   }
@@ -364,7 +365,7 @@ async function submissionClientKey(request: Request): Promise<string> {
 }
 
 function findSeed(eventId: string): EventRecord | undefined {
-  return seedEvents.find((event) => event.id === eventId);
+  return findKnownEvent(eventId);
 }
 
 function publicBaseUrl(request: Request, env: AppBindings): string {
@@ -400,8 +401,21 @@ export function createApp(options: AppOptions = {}) {
       }
       return null;
     }
-    return baseResolvePrincipal(request, env);
+    return enrichPrincipalMemberships(
+      env?.AUTH_DB,
+      await baseResolvePrincipal(request, env),
+    );
   };
+
+  const hydrateEvent = async (
+    c: { req: { param(name: string): string }; env: AppBindings },
+    next: () => Promise<void>,
+  ) => {
+    await loadEventWorkspace(c.env, c.req.param("eventId"));
+    await next();
+  };
+  app.use("/api/events/:eventId", hydrateEvent);
+  app.use("/api/events/:eventId/*", hydrateEvent);
 
   // Course Check routes register on both the UI app and this v1 sub-app.
   const v1App = createV1App({
@@ -603,17 +617,80 @@ export function createApp(options: AppOptions = {}) {
     return auth.handler(c.req.raw);
   });
 
+  app.post("/api/events", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal) return c.json({ error: "Unauthorized" }, 401);
+    const canCreate =
+      principal.role === "admin" ||
+      Object.values(principal.rolesByEvent ?? {}).includes("admin");
+    if (!canCreate) {
+      return c.json({ error: "Administrator access required to create an event." }, 403);
+    }
+
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body) return c.json({ error: "Event details are required." }, 400);
+    const input = {
+      id: typeof body.id === "string" ? body.id.trim() : "",
+      name: typeof body.name === "string" ? body.name.trim() : "",
+      startsOn: typeof body.startsOn === "string" ? body.startsOn : "",
+      endsOn: typeof body.endsOn === "string" ? body.endsOn : "",
+      timezone: typeof body.timezone === "string" ? body.timezone.trim() : "",
+    };
+    try {
+      validateEventIdentity(input);
+    } catch (error) {
+      return c.json({ error: errorMessage(error) }, 400);
+    }
+
+    if (await loadEventWorkspace(c.env, input.id)) {
+      return c.json(
+        {
+          error: `Event identifier “${input.id}” is already in use. Choose a different identifier.`,
+        },
+        409,
+      );
+    }
+
+    const event: EventRecord = {
+      ...input,
+      submissionCount: 0,
+      unreviewedCount: 0,
+      tracks: [],
+      rooms: [],
+    };
+    await c.env.AUTH_DB.prepare(
+      `INSERT INTO event_memberships (event_id, user_id, role)
+       VALUES (?, ?, 'admin')
+       ON CONFLICT(event_id, user_id) DO UPDATE SET role = 'admin'`,
+    )
+      .bind(event.id, principal.id)
+      .run();
+    try {
+      const store = c.env.EVENT_STORE.getByName(event.id);
+      await store.seedIfEmpty(event);
+      const created = await store.getEvent();
+      if (!created) throw new Error("Event workspace could not be initialized.");
+      rememberEvent(created);
+      return c.json({ event: created }, 201);
+    } catch (error) {
+      await c.env.AUTH_DB.prepare(
+        `DELETE FROM event_memberships WHERE event_id = ? AND user_id = ?`,
+      )
+        .bind(event.id, principal.id)
+        .run();
+      throw error;
+    }
+  });
+
   app.get("/api/events", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
     if (!principal) {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
-    const visibleSeeds = seedEvents.filter((event) =>
-      canAccessEvent(principal, event.id),
-    );
+    const visibleEvents = await listEventWorkspaces(c.env, principal);
     const events = await Promise.all(
-      visibleSeeds.map(async (event) =>
+      visibleEvents.map(async (event) =>
         scopeEventForPrincipal(c.env, await loadEvent(c.env, event), principal),
       ),
     );
@@ -640,6 +717,100 @@ export function createApp(options: AppOptions = {}) {
       ),
       principal,
     });
+  });
+
+  app.patch("/api/events/:eventId/configuration", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const event = await loadEventWorkspace(c.env, eventId);
+    if (!event) return c.json({ error: "Event not found" }, 404);
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body) return c.json({ error: "Event configuration is required." }, 400);
+
+    const tracks = Array.isArray(body.tracks)
+      ? body.tracks.map((value) => {
+          const track = value as Record<string, unknown>;
+          return {
+            id: typeof track.id === "string" ? track.id : "",
+            name: typeof track.name === "string" ? track.name : "",
+          };
+        })
+      : undefined;
+    const rooms: Array<{
+      id: string;
+      name: string;
+      readiness: "ready" | "pending";
+    }> | undefined = Array.isArray(body.rooms)
+      ? body.rooms.map((value) => {
+          const room = value as Record<string, unknown>;
+          return {
+            id: typeof room.id === "string" ? room.id : "",
+            name: typeof room.name === "string" ? room.name : "",
+            readiness:
+              room.readiness === "ready" || room.readiness === "pending"
+                ? room.readiness
+                : ("" as "ready"),
+          };
+        })
+      : undefined;
+
+    if (tracks) {
+      const removedIds = event.tracks
+        .filter((track) => !tracks.some((candidate) => candidate.id === track.id))
+        .map((track) => track.id);
+      if (removedIds.length > 0) {
+        const assignment = await c.env.AUTH_DB.prepare(
+          `SELECT track_id FROM reviewer_track_assignments
+           WHERE event_id = ? AND track_id IN (${removedIds.map(() => "?").join(", ")})
+           LIMIT 1`,
+        )
+          .bind(eventId, ...removedIds)
+          .first<{ track_id: string }>();
+        if (assignment) {
+          const track = event.tracks.find((candidate) => candidate.id === assignment.track_id);
+          return c.json(
+            {
+              error: `Track “${track?.name ?? assignment.track_id}” is assigned to a reviewer. Remove that assignment before removing the track.`,
+            },
+            409,
+          );
+        }
+      }
+    }
+
+    try {
+      const updated = await c.env.EVENT_STORE.getByName(eventId).updateEventConfiguration({
+        name: typeof body.name === "string" ? body.name : undefined,
+        startsOn: typeof body.startsOn === "string" ? body.startsOn : undefined,
+        endsOn: typeof body.endsOn === "string" ? body.endsOn : undefined,
+        timezone: typeof body.timezone === "string" ? body.timezone : undefined,
+        tracks,
+        rooms,
+      });
+      rememberEvent(updated);
+      return c.json({ event: updated });
+    } catch (error) {
+      if (
+        error instanceof EventConfigurationError ||
+        (error &&
+          typeof error === "object" &&
+          "code" in error &&
+          (error.code === "invalid_configuration" || error.code === "resource_in_use"))
+      ) {
+        const code = (error as { code: "invalid_configuration" | "resource_in_use" }).code;
+        return c.json(
+          { error: errorMessage(error), code },
+          code === "resource_in_use" ? 409 : 400,
+        );
+      }
+      throw error;
+    }
   });
 
   app.get("/api/events/:eventId/cfp", async (c) => {

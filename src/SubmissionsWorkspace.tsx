@@ -369,8 +369,9 @@ export function SubmissionsWorkspace({
             </div>
           ) : proposals.length === 0 ? (
             <p className="empty-state">
-              No proposals match these queue filters. Try another status, track,
-              or search.
+              {event.submissionCount === 0
+                ? "No submissions yet."
+                : "No proposals match these queue filters. Try another status, track, or search."}
             </p>
           ) : (
             <table className="grid" aria-label="Submissions">

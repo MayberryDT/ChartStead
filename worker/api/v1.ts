@@ -39,10 +39,14 @@ import {
   scopeEventForPrincipal,
 } from "../authz";
 import { resolveProductionPrincipal } from "../auth";
-import { seedEvents } from "../seed-events";
 import type { AppBindings } from "../types";
-import { createSeedCfp } from "../seed-cfp";
-import { createSeedProposals } from "../seed-proposals";
+import {
+  enrichPrincipalMemberships,
+  findKnownEvent,
+  listEventWorkspaces,
+  loadEventWorkspace,
+} from "../event-catalog";
+import type { EventRecord } from "../../shared/events";
 
 export type PrincipalResolver = (
   request: Request,
@@ -61,15 +65,11 @@ export interface V1AppOptions {
 }
 
 function findSeed(eventId: string) {
-  return seedEvents.find((event) => event.id === eventId);
+  return findKnownEvent(eventId);
 }
 
-async function loadEvent(env: AppBindings, seed: (typeof seedEvents)[number]) {
-  const store = env.EVENT_STORE.getByName(seed.id);
-  await store.seedIfEmpty(seed);
-  await store.seedPublishedFormIfEmpty(createSeedCfp(seed));
-  await store.seedProposalsIfNeeded(createSeedProposals(seed));
-  const event = await store.getEvent();
+async function loadEvent(env: AppBindings, seed: EventRecord) {
+  const event = await loadEventWorkspace(env, seed.id);
   if (!event) throw new Error(`Event ${seed.id} failed to load`);
   return event;
 }
@@ -84,14 +84,14 @@ async function resolveV1Principal(
     if (options.resolveApiKeyPrincipal) {
       return options.resolveApiKeyPrincipal(bearer, env);
     }
-    if (env.AUTH_DB) {
+    if (env?.AUTH_DB) {
       return resolvePrincipalFromApiKey(env.AUTH_DB, bearer);
     }
     return null;
   }
 
   const resolve = options.resolvePrincipal ?? resolveProductionPrincipal;
-  return resolve(request, env);
+  return enrichPrincipalMemberships(env?.AUTH_DB, await resolve(request, env));
 }
 
 
@@ -100,6 +100,15 @@ export function createV1App(options: V1AppOptions = {}) {
   const airtableFactory =
     options.airtableClientFactory ?? defaultAirtableClientFactory;
   const airtableCredentialFactory = options.airtableCredentialClientFactory;
+
+  app.use("/events/:eventId", async (c, next) => {
+    await loadEventWorkspace(c.env, c.req.param("eventId"));
+    await next();
+  });
+  app.use("/events/:eventId/*", async (c, next) => {
+    await loadEventWorkspace(c.env, c.req.param("eventId"));
+    await next();
+  });
 
   app.get("/health", (c) =>
     c.json({
@@ -152,11 +161,9 @@ export function createV1App(options: V1AppOptions = {}) {
     const principal = await resolveV1Principal(c.req.raw, c.env, options);
     if (!principal) return c.json({ error: "Unauthorized" }, 401);
 
-    const visibleSeeds = seedEvents.filter((event) =>
-      canAccessEvent(principal, event.id),
-    );
+    const visibleEvents = await listEventWorkspaces(c.env, principal);
     const events = await Promise.all(
-      visibleSeeds.map(async (event) =>
+      visibleEvents.map(async (event) =>
         scopeEventForPrincipal(c.env, await loadEvent(c.env, event), principal),
       ),
     );

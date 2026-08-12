@@ -6,7 +6,7 @@ import {
 import { createResendCommunicationSender, createResendSender } from "./email";
 import { flushCommunicationEffects } from "./course-check/communication-delivery";
 import { flushEventOutbox } from "./outbox";
-import { seedEvents } from "./seed-events";
+import { listAllEventWorkspaceIds } from "./event-catalog";
 import type { AppBindings } from "./types";
 
 export { EventStore } from "./event-store";
@@ -20,8 +20,8 @@ export default {
     const communicationSender = createResendCommunicationSender(env);
     const now = new Date();
 
-    for (const event of seedEvents) {
-      const store = env.EVENT_STORE.getByName(event.id);
+    for (const eventId of await listAllEventWorkspaceIds(env.AUTH_DB)) {
+      const store = env.EVENT_STORE.getByName(eventId);
       if (sender) {
         await flushEventOutbox({
           store,

@@ -34,6 +34,7 @@ const eventsResponse: EventListResponse = {
       name: "Pacific Open Data Summit 2026",
       startsOn: "2026-10-07",
       endsOn: "2026-10-08",
+      timezone: "America/Los_Angeles",
       submissionCount: 12,
       unreviewedCount: 3,
       tracks: [

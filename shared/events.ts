@@ -31,6 +31,7 @@ export interface EventRecord {
   name: string;
   startsOn: string;
   endsOn: string;
+  timezone: string;
   submissionCount: number;
   unreviewedCount: number;
   tracks: TrackRecord[];

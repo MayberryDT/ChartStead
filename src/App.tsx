@@ -1,5 +1,5 @@
 import { Button } from "@base-ui/react/button";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import { FormEvent, useEffect, useState } from "react";
 
@@ -13,6 +13,7 @@ import { AgendaWorkspace } from "./AgendaWorkspace";
 import { OnboardingWorkspace } from "./OnboardingWorkspace";
 import { MessagesWorkspace } from "./MessagesWorkspace";
 import { SettingsWorkspace } from "./SettingsWorkspace";
+import { CreateEventDialog } from "./EventWorkspaceManagement";
 import {
   SubmissionsWorkspace,
   type ProposalQueueState,
@@ -189,7 +190,7 @@ function OverviewWorkspace({ event }: { event: EventRecord }) {
             <p className="eyebrow">Program readiness</p>
             <h2 id="readiness-title">The working chart</h2>
           </div>
-          <span className="status-indicator">Seeded demo</span>
+          <span className="status-indicator">Event workspace</span>
         </div>
         <div className="metric-strip">
           <div aria-label={`${event.submissionCount} submissions`}>
@@ -217,8 +218,11 @@ function OverviewWorkspace({ event }: { event: EventRecord }) {
             <h2 id="tracks-title">Tracks</h2>
             <span>{event.tracks.length} active</span>
           </div>
-          <ul className="operation-list">
-            {event.tracks.map((track, index) => (
+          {event.tracks.length === 0 ? (
+            <p className="empty-state padded">No tracks configured yet.</p>
+          ) : (
+            <ul className="operation-list">
+              {event.tracks.map((track, index) => (
               <li key={track.id}>
                 <span
                   className={`track-line track-${index + 1}`}
@@ -227,16 +231,20 @@ function OverviewWorkspace({ event }: { event: EventRecord }) {
                 <strong>{track.name}</strong>
                 <span>{track.proposalCount} proposals</span>
               </li>
-            ))}
-          </ul>
+              ))}
+            </ul>
+          )}
         </section>
         <section className="operations-panel" aria-labelledby="rooms-title">
           <div className="panel-heading">
             <h2 id="rooms-title">Rooms</h2>
             <span>{event.rooms.length} configured</span>
           </div>
-          <ul className="operation-list">
-            {event.rooms.map((room, index) => (
+          {event.rooms.length === 0 ? (
+            <p className="empty-state padded">No rooms configured yet.</p>
+          ) : (
+            <ul className="operation-list">
+              {event.rooms.map((room, index) => (
               <li key={room.id}>
                 <span className="room-index">
                   {String(index + 1).padStart(2, "0")}
@@ -244,8 +252,9 @@ function OverviewWorkspace({ event }: { event: EventRecord }) {
                 <strong>{room.name}</strong>
                 <span>{room.readiness === "ready" ? "Ready" : "Pending"}</span>
               </li>
-            ))}
-          </ul>
+              ))}
+            </ul>
+          )}
         </section>
       </div>
     </div>
@@ -270,6 +279,7 @@ function EventDesk({
   repairField?: string | null;
 }) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [selectedEventId, setSelectedEventId] = useState(() => {
     if (initialEventId && data.events.some((event) => event.id === initialEventId)) {
       localStorage.setItem("chartstead:event", initialEventId);
@@ -282,6 +292,7 @@ function EventDesk({
     return data.events[0]?.id ?? null;
   });
   const [activeNav, setActiveNav] = useState<NavItem>(initialNav);
+  const [createEventOpen, setCreateEventOpen] = useState(false);
   const event =
     data.events.find((candidate) => candidate.id === selectedEventId) ?? data.events[0];
 
@@ -441,6 +452,46 @@ function EventDesk({
               : formatDateRange(event.startsOn, event.endsOn);
   const currentRole = data.principal.rolesByEvent?.[event.id] ?? data.principal.role;
 
+  function updateEvent(updated: EventRecord) {
+    queryClient.setQueryData<EventListResponse>(["events"], (current) =>
+      current
+        ? {
+            ...current,
+            events: current.events.map((candidate) =>
+              candidate.id === updated.id ? updated : candidate,
+            ),
+          }
+        : current,
+    );
+  }
+
+  function eventCreated(created: EventRecord) {
+    queryClient.setQueryData<EventListResponse>(["events"], (current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        events: current.events.some((candidate) => candidate.id === created.id)
+          ? current.events.map((candidate) =>
+              candidate.id === created.id ? created : candidate,
+            )
+          : [...current.events, created],
+        principal: {
+          ...current.principal,
+          eventIds: [...new Set([...current.principal.eventIds, created.id])],
+          rolesByEvent: {
+            ...current.principal.rolesByEvent,
+            [created.id]: "admin",
+          },
+        },
+      };
+    });
+    localStorage.setItem("chartstead:event", created.id);
+    setSelectedEventId(created.id);
+    setActiveNav("Overview");
+    setCreateEventOpen(false);
+    void navigate({ to: "/" });
+  }
+
   return (
     <div className="app">
       <aside className="sidebar">
@@ -496,6 +547,16 @@ function EventDesk({
             onValueChange={selectEvent}
             variant="sidebar"
           />
+          {currentRole === "admin" ? (
+            <button
+              type="button"
+              className="event-create-trigger"
+              onClick={() => setCreateEventOpen(true)}
+            >
+              <span aria-hidden="true">＋</span>
+              Create event
+            </button>
+          ) : null}
         </div>
       </aside>
 
@@ -577,7 +638,7 @@ function EventDesk({
             }}
           />
         ) : activeNav === "Settings" ? (
-          <SettingsWorkspace eventId={event.id} />
+          <SettingsWorkspace event={event} onEventUpdated={updateEvent} />
         ) : (
           <div className="workspace">
             <section className="operations-panel">
@@ -591,6 +652,11 @@ function EventDesk({
           </div>
         )}
       </main>
+      <CreateEventDialog
+        open={createEventOpen}
+        onClose={() => setCreateEventOpen(false)}
+        onCreated={eventCreated}
+      />
     </div>
   );
 }

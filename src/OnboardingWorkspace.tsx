@@ -310,7 +310,10 @@ export function OnboardingWorkspace({ eventId }: { eventId: string }) {
           </p>
         ) : null}
         {speakers.length === 0 ? (
-          <p className="empty-state padded">No event speakers yet.</p>
+          <div className="empty-state padded">
+            <p>No event speakers yet.</p>
+            <p>No onboarding tasks yet.</p>
+          </div>
         ) : filteredSpeakers.length === 0 ? (
           <p className="empty-state padded">No speakers match this search and filter.</p>
         ) : (

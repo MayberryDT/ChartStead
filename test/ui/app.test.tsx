@@ -184,6 +184,7 @@ const eventsPayload = {
       name: "Pacific Open Data Summit 2026",
       startsOn: "2026-10-07",
       endsOn: "2026-10-08",
+      timezone: "America/Los_Angeles",
       submissionCount: 57,
       unreviewedCount: 18,
       tracks: [
@@ -203,13 +204,19 @@ const eventsPayload = {
       name: "AI Engineer World's Fair 2026",
       startsOn: "2026-06-25",
       endsOn: "2026-06-27",
+      timezone: "America/Los_Angeles",
       submissionCount: 32,
       unreviewedCount: 9,
       tracks: [{ id: "agents", name: "Agents", proposalCount: 12 }],
       rooms: [{ id: "main-stage", name: "Main Stage", readiness: "ready" }],
     },
   ],
-  principal: { displayName: "Demo Administrator", role: "admin" },
+  principal: {
+    id: "demo-admin",
+    displayName: "Demo Administrator",
+    role: "admin",
+    eventIds: ["pacific-open-data-summit-2026", "ai-engineer-worlds-fair-2026"],
+  },
 };
 
 describe("organizer application", () => {
@@ -265,6 +272,174 @@ describe("organizer application", () => {
       "page",
     );
     expect(await screen.findByLabelText("Unplaced sessions")).toBeVisible();
+  });
+
+  it("creates and configures a truthful empty event workspace", async () => {
+    const requests: Array<{ url: string; method: string; body: unknown }> = [];
+    let workspaceCreated = false;
+    const createdEvent = {
+      id: "front-range-systems-2027",
+      name: "Front Range Systems 2027",
+      startsOn: "2027-05-10",
+      endsOn: "2027-05-12",
+      timezone: "America/Denver",
+      submissionCount: 0,
+      unreviewedCount: 0,
+      tracks: [] as Array<{ id: string; name: string; proposalCount: number }>,
+      rooms: [] as Array<{ id: string; name: string; readiness: "ready" | "pending" }>,
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const method = init?.method ?? "GET";
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+      requests.push({ url, method, body });
+      if (url.endsWith("/api/events") && method === "POST") {
+        workspaceCreated = true;
+        return new Response(JSON.stringify({ event: createdEvent }), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith(`/${createdEvent.id}/configuration`) && method === "PATCH") {
+        const patch = body as {
+          tracks: typeof createdEvent.tracks;
+          rooms: typeof createdEvent.rooms;
+        };
+        createdEvent.tracks = patch.tracks.map((track) => ({
+          ...track,
+          proposalCount: 0,
+        }));
+        createdEvent.rooms = patch.rooms;
+        return new Response(JSON.stringify({ event: createdEvent }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith(`/${createdEvent.id}/proposals`) && method === "GET") {
+        return new Response(JSON.stringify({ proposals: [] }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith(`/${createdEvent.id}/onboarding`) && method === "GET") {
+        return new Response(
+          JSON.stringify({ eventId: createdEvent.id, speakers: [], drafts: [] }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.endsWith(`/${createdEvent.id}/sessions`) && method === "GET") {
+        return new Response(
+          JSON.stringify({
+            eventId: createdEvent.id,
+            sessions: [],
+            unplacedSessions: [],
+            conflicts: [],
+            counts: { unplaced: 0, partial: 0, placed: 0, conflicts: 0 },
+            calendarIntents: [],
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("/integrations/airtable")) {
+        return new Response(
+          JSON.stringify({
+            sync: {
+              configured: false,
+              health: "unconfigured",
+              baseId: null,
+              hasAccessToken: false,
+              lastAttemptAt: null,
+              lastSuccessAt: null,
+              lastError: null,
+              guidance: null,
+            },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("/course-checks/policy")) {
+        return new Response(
+          JSON.stringify({
+            policy: {
+              requireTwoPersonApproval: false,
+              requireDistinctApprover: false,
+              requireReasonOnApprove: false,
+              maxAgentMode: "propose_only",
+            },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("/api-keys")) {
+        return new Response(JSON.stringify({ apiKeys: [] }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/api/events") && workspaceCreated) {
+        return new Response(
+          JSON.stringify({
+            ...eventsPayload,
+            events: [...eventsPayload.events, createdEvent],
+            principal: {
+              ...eventsPayload.principal,
+              eventIds: [...eventsPayload.principal.eventIds, createdEvent.id],
+              rolesByEvent: {
+                [createdEvent.id]: "admin",
+              },
+            },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify(eventsPayload), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    renderAt("/");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Create event" }));
+    await user.type(screen.getByRole("textbox", { name: "Event name" }), createdEvent.name);
+    fireEvent.change(screen.getByLabelText("Start date"), {
+      target: { value: createdEvent.startsOn },
+    });
+    fireEvent.change(screen.getByLabelText("End date"), {
+      target: { value: createdEvent.endsOn },
+    });
+    await user.selectOptions(screen.getByLabelText("Timezone"), createdEvent.timezone);
+    await user.click(screen.getByRole("button", { name: "Create workspace" }));
+
+    expect(await screen.findByRole("heading", { name: createdEvent.name })).toBeVisible();
+    expect(screen.getByLabelText("0 submissions")).toBeVisible();
+    expect(screen.getByText("No tracks configured yet.")).toBeVisible();
+    expect(screen.getByText("No rooms configured yet.")).toBeVisible();
+    await user.click(screen.getByRole("combobox", { name: "Event" }));
+    expect(screen.getByRole("option", { name: createdEvent.name })).toBeVisible();
+    await user.keyboard("{Escape}");
+
+    await user.click(screen.getByRole("link", { name: /Submissions/ }));
+    expect(await screen.findByText("No submissions yet.")).toBeVisible();
+    await user.click(screen.getByRole("link", { name: "Speakers" }));
+    expect(await screen.findByText("No event speakers yet.")).toBeVisible();
+    expect(screen.getByText("No onboarding tasks yet.")).toBeVisible();
+    await user.click(screen.getByRole("link", { name: "Agenda" }));
+    expect(await screen.findByText("No sessions yet.")).toBeVisible();
+
+    await user.click(screen.getByRole("link", { name: "Settings" }));
+    expect(await screen.findByRole("heading", { name: "Event configuration" })).toBeVisible();
+    await user.type(screen.getByRole("textbox", { name: "New track name" }), "Main stage");
+    await user.click(screen.getByRole("button", { name: "Add track" }));
+    await user.type(screen.getByRole("textbox", { name: "New room name" }), "Ballroom");
+    await user.click(screen.getByRole("button", { name: "Add room" }));
+    await user.click(screen.getByRole("button", { name: "Save event configuration" }));
+
+    expect(await screen.findByText("Event configuration saved.")).toBeVisible();
+    const save = requests.find(
+      (request) => request.url.endsWith(`/${createdEvent.id}/configuration`) && request.method === "PATCH",
+    );
+    expect(save?.body).toMatchObject({
+      tracks: [{ id: "main-stage", name: "Main stage" }],
+      rooms: [{ id: "ballroom", name: "Ballroom", readiness: "ready" }],
+    });
   });
 
   it("builds an exact speaker announcement and hands the frozen review scope to Course Check", async () => {
