@@ -588,6 +588,23 @@ export interface CourseCheckActor {
   initiatingHuman?: { id: string; displayName: string } | null;
 }
 
+/** Organizer-facing actor line — agents never look like silent human impersonation. */
+export function formatCourseCheckActorLabel(
+  actor: Pick<
+    CourseCheckActor,
+    "displayName" | "kind" | "initiatingHuman"
+  > | null | undefined,
+): string {
+  if (!actor) return "Unknown";
+  const name = actor.displayName.trim() || "Unknown";
+  if (actor.kind === "agent") {
+    const human = actor.initiatingHuman?.displayName?.trim();
+    if (human) return `${name} (agent on behalf of ${human})`;
+    return `${name} (agent)`;
+  }
+  return name;
+}
+
 export interface CourseCheckApproval {
   stageId: string;
   planVersion: number;

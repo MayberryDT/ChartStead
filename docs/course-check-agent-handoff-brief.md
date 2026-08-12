@@ -24,7 +24,9 @@ Every request:
 - `Authorization: Bearer PASTE_KEY_HERE`
 - `Content-Type: application/json` when sending a body
 - Prefer a unique `Idempotency-Key` (or body `idempotencyKey`) on every mutation
-- Optional: `X-ChartStead-Initiating-Human: tyler|Tyler`
+- **Always** send initiating human when acting for a person:  
+  `X-ChartStead-Initiating-Human: tyler|Tyler`  
+  The UI will show: `Program ops agent (agent on behalf of Tyler)`.
 
 Course Check paths (same contract as the organizer UI):
 

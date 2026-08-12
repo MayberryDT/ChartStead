@@ -5252,8 +5252,9 @@ export class EventStore extends DurableObject<AppBindings> {
         applied_at: string;
         actor_id: string;
         actor_name: string;
+        actor_json: string | null;
       }>(
-        `SELECT id, plan_id, plan_version, digest, stage_id, applied_at, actor_id, actor_name
+        `SELECT id, plan_id, plan_version, digest, stage_id, applied_at, actor_id, actor_name, actor_json
          FROM course_check_receipts
          WHERE id = ?`,
         receiptId,
@@ -5269,7 +5270,7 @@ export class EventStore extends DurableObject<AppBindings> {
         digest: row.digest,
         stageId: row.stage_id,
         appliedAt: row.applied_at,
-        actor: { id: row.actor_id, displayName: row.actor_name },
+        actor: parseCourseCheckActor(row.actor_id, row.actor_name, row.actor_json),
       },
     };
   }
@@ -5339,10 +5340,11 @@ export class EventStore extends DurableObject<AppBindings> {
         kind: string;
         actor_id: string;
         actor_name: string;
+        actor_json: string | null;
         at: string;
         summary: string;
       }>(
-        `SELECT id, plan_id, from_version, to_version, kind, actor_id, actor_name, at, summary
+        `SELECT id, plan_id, from_version, to_version, kind, actor_id, actor_name, actor_json, at, summary
          FROM course_check_mutations
          WHERE plan_id = ?
          ORDER BY to_version DESC, at DESC`,
@@ -5355,7 +5357,7 @@ export class EventStore extends DurableObject<AppBindings> {
         fromVersion: Number(row.from_version),
         toVersion: Number(row.to_version),
         kind: row.kind as PlanMutationRecord["kind"],
-        actor: { id: row.actor_id, displayName: row.actor_name },
+        actor: parseCourseCheckActor(row.actor_id, row.actor_name, row.actor_json),
         at: row.at,
         summary: row.summary,
       }));
@@ -5376,12 +5378,13 @@ export class EventStore extends DurableObject<AppBindings> {
     this.ctx.storage.sql.exec(
       `INSERT INTO course_check_plan_versions
         (plan_id, version, digest, state, body_json, created_at, created_by_id,
-         created_by_name, mutation_kind, summary)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         created_by_name, created_by_json, mutation_kind, summary)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(plan_id, version) DO UPDATE SET
          digest = excluded.digest,
          state = excluded.state,
          body_json = excluded.body_json,
+         created_by_json = excluded.created_by_json,
          mutation_kind = excluded.mutation_kind,
          summary = excluded.summary`,
       input.planId,
@@ -5392,13 +5395,14 @@ export class EventStore extends DurableObject<AppBindings> {
       input.at,
       input.actor.id,
       input.actor.displayName,
+      serializeCourseCheckActor(input.actor),
       input.mutationKind,
       input.summary,
     );
     this.ctx.storage.sql.exec(
       `INSERT INTO course_check_mutations
-        (id, plan_id, from_version, to_version, kind, actor_id, actor_name, at, summary)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (id, plan_id, from_version, to_version, kind, actor_id, actor_name, actor_json, at, summary)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       crypto.randomUUID(),
       input.planId,
       input.fromVersion,
@@ -5406,6 +5410,7 @@ export class EventStore extends DurableObject<AppBindings> {
       input.mutationKind,
       input.actor.id,
       input.actor.displayName,
+      serializeCourseCheckActor(input.actor),
       input.at,
       input.summary,
     );
@@ -6994,8 +6999,8 @@ export class EventStore extends DurableObject<AppBindings> {
 
         this.ctx.storage.sql.exec(
           `INSERT INTO course_check_receipts
-            (id, plan_id, plan_version, digest, stage_id, applied_at, actor_id, actor_name)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            (id, plan_id, plan_version, digest, stage_id, applied_at, actor_id, actor_name, actor_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           receiptId,
           plan.id,
           plan.version,
@@ -7004,6 +7009,7 @@ export class EventStore extends DurableObject<AppBindings> {
           now,
           input.actor.id,
           input.actor.displayName,
+          serializeCourseCheckActor(input.actor),
         );
 
         // Draft creation completes the draft stage only — send/delivery remain independent.
@@ -7566,8 +7572,8 @@ export class EventStore extends DurableObject<AppBindings> {
         }
         this.ctx.storage.sql.exec(
           `INSERT INTO course_check_receipts
-            (id, plan_id, plan_version, digest, stage_id, applied_at, actor_id, actor_name)
-           VALUES (?, ?, ?, ?, 'send-messages', ?, ?, ?)`,
+            (id, plan_id, plan_version, digest, stage_id, applied_at, actor_id, actor_name, actor_json)
+           VALUES (?, ?, ?, ?, 'send-messages', ?, ?, ?, ?)`,
           receiptId,
           plan.id,
           plan.version,
@@ -7575,6 +7581,7 @@ export class EventStore extends DurableObject<AppBindings> {
           now,
           input.actor.id,
           input.actor.displayName,
+          serializeCourseCheckActor(input.actor),
         );
         this.ctx.storage.sql.exec(
           `UPDATE course_check_plans
@@ -7734,14 +7741,15 @@ export class EventStore extends DurableObject<AppBindings> {
       );
       this.ctx.storage.sql.exec(
         `INSERT INTO course_check_mutations
-          (id, plan_id, from_version, to_version, kind, actor_id, actor_name, at, summary)
-         VALUES (?, ?, ?, ?, 'retry', ?, ?, ?, ?)`,
+          (id, plan_id, from_version, to_version, kind, actor_id, actor_name, actor_json, at, summary)
+         VALUES (?, ?, ?, ?, 'retry', ?, ?, ?, ?, ?)`,
         crypto.randomUUID(),
         plan.id,
         plan.version,
         plan.version,
         input.actor.id,
         input.actor.displayName,
+        serializeCourseCheckActor(input.actor),
         now,
         `Manual retry queued for ${effect.effectId}.`,
       );
@@ -7868,14 +7876,15 @@ export class EventStore extends DurableObject<AppBindings> {
       );
       this.ctx.storage.sql.exec(
         `INSERT INTO course_check_mutations
-          (id, plan_id, from_version, to_version, kind, actor_id, actor_name, at, summary)
-         VALUES (?, ?, ?, ?, 'reconcile', ?, ?, ?, ?)`,
+          (id, plan_id, from_version, to_version, kind, actor_id, actor_name, actor_json, at, summary)
+         VALUES (?, ?, ?, ?, 'reconcile', ?, ?, ?, ?, ?)`,
         crypto.randomUUID(),
         plan.id,
         plan.version,
         plan.version,
         input.actor.id,
         input.actor.displayName,
+        serializeCourseCheckActor(input.actor),
         now,
         `Reconciled ${effect.effectId} as ${input.outcome}: ${note}`,
       );
@@ -8160,14 +8169,15 @@ export class EventStore extends DurableObject<AppBindings> {
       );
       this.ctx.storage.sql.exec(
         `INSERT INTO course_check_mutations
-          (id, plan_id, from_version, to_version, kind, actor_id, actor_name, at, summary)
-         VALUES (?, ?, ?, ?, 'compensate', ?, ?, ?, ?)`,
+          (id, plan_id, from_version, to_version, kind, actor_id, actor_name, actor_json, at, summary)
+         VALUES (?, ?, ?, ?, 'compensate', ?, ?, ?, ?, ?)`,
         crypto.randomUUID(),
         original.id,
         original.version,
         original.version,
         input.actor.id,
         input.actor.displayName,
+        serializeCourseCheckActor(input.actor),
         now,
         `Linked reviewed correction ${planId} to delivered effect ${effect.effectId}; original effect retained.`,
       );
@@ -8604,8 +8614,8 @@ export class EventStore extends DurableObject<AppBindings> {
         };
         this.ctx.storage.sql.exec(
           `INSERT INTO course_check_receipts
-            (id, plan_id, plan_version, digest, stage_id, applied_at, actor_id, actor_name)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            (id, plan_id, plan_version, digest, stage_id, applied_at, actor_id, actor_name, actor_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           receiptId,
           plan.id,
           plan.version,
@@ -8614,6 +8624,7 @@ export class EventStore extends DurableObject<AppBindings> {
           now,
           input.actor.id,
           input.actor.displayName,
+          serializeCourseCheckActor(input.actor),
         );
         const hasDeferredDecisionItems =
           plan.body.actionType === "decision" &&

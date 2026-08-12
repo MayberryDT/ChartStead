@@ -6,7 +6,10 @@ import {
   COURSE_CHECK_SCOPES,
   expandCourseCheckScopes,
 } from "../../shared/agent-api";
-import type { CourseCheckPlan } from "../../shared/course-check";
+import {
+  formatCourseCheckActorLabel,
+  type CourseCheckPlan,
+} from "../../shared/course-check";
 import type { OrganizerPrincipal, OrganizerProposal } from "../../shared/events";
 import { createApp } from "../../worker/app";
 
@@ -193,6 +196,28 @@ describe("Course Check 08 agent API control", () => {
     const expanded = expandCourseCheckScopes(["all"]);
     expect(expanded).toEqual([...COURSE_CHECK_SCOPES]);
     expect(expanded).not.toContain("all");
+  });
+
+  it("labels agents as acting on behalf of the initiating human", () => {
+    expect(
+      formatCourseCheckActorLabel({
+        displayName: "Program ops agent",
+        kind: "agent",
+        initiatingHuman: { id: "tyler", displayName: "Tyler" },
+      }),
+    ).toBe("Program ops agent (agent on behalf of Tyler)");
+    expect(
+      formatCourseCheckActorLabel({
+        displayName: "Program ops agent",
+        kind: "agent",
+      }),
+    ).toBe("Program ops agent (agent)");
+    expect(
+      formatCourseCheckActorLabel({
+        displayName: "Demo Administrator",
+        kind: "human",
+      }),
+    ).toBe("Demo Administrator");
   });
 
   it("exposes closed action types and agent contract on v1 health", async () => {
