@@ -84,6 +84,12 @@ import type {
   SpeakerDirectoryCreateInput,
   SpeakerDirectoryIdentityMatch,
   SpeakerDirectoryMutation,
+  SpeakerCsvColumnMapping,
+  SpeakerCsvImportApplyResult,
+  SpeakerCsvImportPreview,
+  SpeakerCsvMappedRow,
+  SpeakerCsvPreviewOutcome,
+  SpeakerCsvResolution,
   OrganizerCfpForm,
   OrganizerCfpFormSummary,
   OrganizerProposal,
@@ -1469,6 +1475,17 @@ export class EventStore extends DurableObject<AppBindings> {
       this.ctx.storage.sql.exec(`
         CREATE INDEX IF NOT EXISTS onboarding_history_speaker_created_idx
         ON onboarding_history (speaker_id, created_at DESC)
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS speaker_imports (
+          id TEXT PRIMARY KEY,
+          idempotency_key TEXT NOT NULL UNIQUE,
+          preview_digest TEXT NOT NULL,
+          result_json TEXT NOT NULL,
+          actor_id TEXT NOT NULL,
+          actor_name TEXT NOT NULL,
+          applied_at TEXT NOT NULL
+        )
       `);
       this.ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS public_program_revisions (
@@ -3989,6 +4006,302 @@ export class EventStore extends DurableObject<AppBindings> {
       ok: true,
       value: { speaker, reused, sessionLinkage: "course_check_required" },
     };
+  }
+
+  async previewSpeakerCsvImport(input: {
+    headers: string[];
+    mapping: SpeakerCsvColumnMapping;
+    rows: SpeakerCsvMappedRow[];
+  }): Promise<SpeakerCsvImportPreview> {
+    const emailCounts = new Map<string, number>();
+    const rowCounts = new Map<string, number>();
+    const rowFingerprint = (row: SpeakerCsvMappedRow) =>
+      JSON.stringify([
+        row.values.name.trim(),
+        row.values.email.trim().toLowerCase(),
+        (row.values.biography ?? "").trim(),
+        row.values.titleSnapshot.trim(),
+        row.values.organizationSnapshot.trim(),
+      ]);
+    for (const row of input.rows) {
+      const email = row.values.email.trim().toLowerCase();
+      if (email) emailCounts.set(email, (emailCounts.get(email) ?? 0) + 1);
+      const fingerprint = rowFingerprint(row);
+      rowCounts.set(fingerprint, (rowCounts.get(fingerprint) ?? 0) + 1);
+    }
+    const boardById = new Map(
+      this.getOnboardingBoard().speakers.map((speaker) => [speaker.speakerId, speaker]),
+    );
+    const rows = input.rows.map((row) => {
+      const values: SpeakerDirectoryCreateInput = {
+        ...row.values,
+        name: row.values.name.trim(),
+        email: row.values.email.trim().toLowerCase(),
+        biography: (row.values.biography ?? "").trim(),
+        titleSnapshot: row.values.titleSnapshot.trim(),
+        organizationSnapshot: row.values.organizationSnapshot.trim(),
+        role: row.values.role?.trim() || "invited",
+      };
+      const feedback = [...row.parseFeedback];
+      if (!values.name) feedback.push("Name is required.");
+      if (!values.email) feedback.push("Email is required.");
+      else if (!values.email.includes("@")) feedback.push("Enter a valid email address.");
+      if (!values.titleSnapshot) feedback.push("Title is required.");
+      if (!values.organizationSnapshot) feedback.push("Organization is required.");
+      if ((rowCounts.get(rowFingerprint(row)) ?? 0) > 1) {
+        feedback.push("This row is duplicated elsewhere in the CSV.");
+      }
+      if ((emailCounts.get(values.email) ?? 0) > 1) {
+        feedback.push("Email is duplicated by another CSV row.");
+      }
+
+      const matches = feedback.length
+        ? []
+        : this.directoryIdentityMatches({ name: values.name, email: values.email });
+      let outcome: SpeakerCsvPreviewOutcome = "invalid";
+      let selectedSpeakerId: string | null = null;
+      if (feedback.length === 0 && matches.length === 0) {
+        outcome = "create";
+        feedback.push("A new speaker identity and event participation will be created.");
+      } else if (feedback.length === 0) {
+        const exactEmail = matches.filter((match) => match.signal === "email");
+        if (exactEmail.length !== 1 || matches.length !== 1) {
+          feedback.push(
+            "Identity match is ambiguous; choose an existing identity or skip this row.",
+          );
+        } else {
+          selectedSpeakerId = exactEmail[0]!.speakerId;
+          const current = boardById.get(selectedSpeakerId);
+          if (!current) {
+            outcome = "reuse";
+            feedback.push("Approve reuse of the matching speaker identity.");
+          } else {
+            const currentDiffers =
+              current.name !== values.name ||
+              current.biography !== (values.biography ?? "");
+            if (currentDiffers) {
+              outcome = "update";
+              feedback.push(
+                "Current name or biography differs; approve an update explicitly.",
+              );
+            } else {
+              outcome = "skip";
+              feedback.push(
+                current.titleSnapshot === values.titleSnapshot &&
+                  current.organizationSnapshot === values.organizationSnapshot
+                  ? "Speaker and event participation already match; nothing will change."
+                  : "Speaker is already in this event; preserved event-time details will not be rewritten.",
+              );
+            }
+          }
+        }
+      }
+      return {
+        rowNumber: row.rowNumber,
+        values,
+        outcome,
+        feedback,
+        matches,
+        selectedSpeakerId,
+      };
+    });
+    const totals: Record<SpeakerCsvPreviewOutcome, number> = {
+      create: 0,
+      reuse: 0,
+      update: 0,
+      skip: 0,
+      invalid: 0,
+    };
+    for (const row of rows) totals[row.outcome] += 1;
+    const digest = await digestPayload({
+      headers: input.headers,
+      mapping: input.mapping,
+      rows,
+      totals,
+    });
+    return { digest, headers: input.headers, mapping: input.mapping, rows, totals };
+  }
+
+  private getSpeakerImportByIdempotency(
+    idempotencyKey: string,
+  ): SpeakerCsvImportApplyResult | null {
+    const row = this.ctx.storage.sql
+      .exec<{ result_json: string }>(
+        `SELECT result_json FROM speaker_imports WHERE idempotency_key = ?`,
+        idempotencyKey,
+      )
+      .toArray()[0];
+    return row ? (JSON.parse(row.result_json) as SpeakerCsvImportApplyResult) : null;
+  }
+
+  listSpeakerImports(): SpeakerCsvImportApplyResult[] {
+    return this.ctx.storage.sql
+      .exec<{ result_json: string }>(
+        `SELECT result_json FROM speaker_imports ORDER BY applied_at DESC, id DESC`,
+      )
+      .toArray()
+      .map((row) => JSON.parse(row.result_json) as SpeakerCsvImportApplyResult);
+  }
+
+  async applySpeakerCsvImport(input: {
+    headers: string[];
+    mapping: SpeakerCsvColumnMapping;
+    rows: SpeakerCsvMappedRow[];
+    previewDigest: string;
+    resolutions: Record<string, SpeakerCsvResolution>;
+    idempotencyKey: string;
+    actorId: string;
+    actorName: string;
+  }): Promise<
+    | { ok: true; result: SpeakerCsvImportApplyResult; created: boolean }
+    | { ok: false; status: 400 | 409; error: string }
+  > {
+    const existing = this.getSpeakerImportByIdempotency(input.idempotencyKey);
+    if (existing) return { ok: true, result: existing, created: false };
+
+    const preview = await this.previewSpeakerCsvImport(input);
+    if (preview.digest !== input.previewDigest) {
+      return {
+        ok: false,
+        status: 409,
+        error: "The directory or CSV changed since preview. Preview the import again.",
+      };
+    }
+    for (const row of preview.rows) {
+      const resolution = input.resolutions[String(row.rowNumber)];
+      if (!resolution) {
+        return {
+          ok: false,
+          status: 400,
+          error: `Choose an action for CSV row ${row.rowNumber}.`,
+        };
+      }
+      const allowed =
+        resolution.action === "skip" ||
+        (row.outcome === "create" && resolution.action === "create") ||
+        (row.outcome === "reuse" && resolution.action === "reuse") ||
+        (row.outcome === "update" && resolution.action === "update") ||
+        (row.outcome === "invalid" &&
+          resolution.action === "reuse" &&
+          row.matches.some((match) => match.speakerId === resolution.speakerId)) ||
+        (row.outcome === "invalid" &&
+          resolution.action === "create" &&
+          row.matches.length > 0 &&
+          row.matches.every((match) => match.signal === "name"));
+      if (!allowed) {
+        return {
+          ok: false,
+          status: 400,
+          error: `Action ${resolution.action} is not valid for CSV row ${row.rowNumber}.`,
+        };
+      }
+      if (
+        (resolution.action === "reuse" || resolution.action === "update") &&
+        !(
+          resolution.speakerId === row.selectedSpeakerId ||
+          row.matches.some((match) => match.speakerId === resolution.speakerId)
+        )
+      ) {
+        return {
+          ok: false,
+          status: 409,
+          error: `The selected identity for CSV row ${row.rowNumber} no longer matches.`,
+        };
+      }
+    }
+
+    const id = `imp_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
+    const appliedAt = new Date().toISOString();
+    const result = this.ctx.storage.transactionSync(() => {
+      const appliedRows: SpeakerCsvImportApplyResult["rows"] = [];
+      const totals = {
+        created: 0,
+        reused: 0,
+        updated: 0,
+        skipped: 0,
+        invalid: preview.rows.filter(
+          (row) =>
+            row.outcome === "invalid" &&
+            input.resolutions[String(row.rowNumber)]?.action === "skip",
+        ).length,
+      };
+      for (const row of preview.rows) {
+        const resolution = input.resolutions[String(row.rowNumber)]!;
+        if (resolution.action === "skip") {
+          totals.skipped += 1;
+          appliedRows.push({
+            rowNumber: row.rowNumber,
+            outcome: "skipped",
+            speakerId: row.selectedSpeakerId,
+          });
+          continue;
+        }
+        if (resolution.action === "create") {
+          const created = this.createDirectorySpeaker({
+            ...row.values,
+            createNewIdentity: true,
+            actorId: input.actorId,
+            actorName: input.actorName,
+          });
+          if (!created.ok) throw new Error(created.error);
+          totals.created += 1;
+          appliedRows.push({
+            rowNumber: row.rowNumber,
+            outcome: "created",
+            speakerId: created.value.speaker.speakerId,
+          });
+          continue;
+        }
+        const speakerId = resolution.speakerId!;
+        if (resolution.action === "reuse") {
+          const reused = this.createDirectorySpeaker({
+            ...row.values,
+            reuseSpeakerId: speakerId,
+            actorId: input.actorId,
+            actorName: input.actorName,
+          });
+          if (!reused.ok) throw new Error(reused.error);
+          totals.reused += 1;
+          appliedRows.push({ rowNumber: row.rowNumber, outcome: "reused", speakerId });
+          continue;
+        }
+        const updated = this.updateDirectorySpeaker({
+          speakerId,
+          name: row.values.name,
+          email: row.values.email,
+          biography: row.values.biography,
+          actorId: input.actorId,
+          actorName: input.actorName,
+        });
+        if (!updated.ok) throw new Error(updated.error);
+        totals.updated += 1;
+        appliedRows.push({ rowNumber: row.rowNumber, outcome: "updated", speakerId });
+      }
+      const completed: SpeakerCsvImportApplyResult = {
+        id,
+        idempotencyKey: input.idempotencyKey,
+        previewDigest: preview.digest,
+        appliedAt,
+        actorId: input.actorId,
+        actorName: input.actorName,
+        totals,
+        rows: appliedRows,
+      };
+      this.ctx.storage.sql.exec(
+        `INSERT INTO speaker_imports
+          (id, idempotency_key, preview_digest, result_json, actor_id, actor_name, applied_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        id,
+        input.idempotencyKey,
+        preview.digest,
+        JSON.stringify(completed),
+        input.actorId,
+        input.actorName,
+        appliedAt,
+      );
+      return completed;
+    });
+    return { ok: true, result, created: true };
   }
 
   updateDirectorySpeaker(input: {

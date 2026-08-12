@@ -365,6 +365,70 @@ export interface SpeakerDirectoryMutation {
   sessionLinkage: "course_check_required";
 }
 
+export interface SpeakerCsvColumnMapping {
+  name: string;
+  email: string;
+  biography: string | null;
+  title: string;
+  organization: string;
+}
+
+export interface SpeakerCsvMappedRow {
+  rowNumber: number;
+  values: SpeakerDirectoryCreateInput;
+  parseFeedback: string[];
+}
+
+export type SpeakerCsvPreviewOutcome =
+  | "create"
+  | "reuse"
+  | "update"
+  | "skip"
+  | "invalid";
+
+export interface SpeakerCsvPreviewRow {
+  rowNumber: number;
+  values: SpeakerDirectoryCreateInput;
+  outcome: SpeakerCsvPreviewOutcome;
+  feedback: string[];
+  matches: SpeakerDirectoryIdentityMatch[];
+  selectedSpeakerId: string | null;
+}
+
+export interface SpeakerCsvImportPreview {
+  digest: string;
+  headers: string[];
+  mapping: SpeakerCsvColumnMapping;
+  rows: SpeakerCsvPreviewRow[];
+  totals: Record<SpeakerCsvPreviewOutcome, number>;
+}
+
+export type SpeakerCsvResolution = {
+  action: "create" | "reuse" | "update" | "skip";
+  speakerId?: string;
+};
+
+export interface SpeakerCsvImportApplyResult {
+  id: string;
+  idempotencyKey: string;
+  previewDigest: string;
+  appliedAt: string;
+  actorId: string;
+  actorName: string;
+  totals: {
+    created: number;
+    reused: number;
+    updated: number;
+    skipped: number;
+    invalid: number;
+  };
+  rows: Array<{
+    rowNumber: number;
+    outcome: "created" | "reused" | "updated" | "skipped";
+    speakerId: string | null;
+  }>;
+}
+
 export interface OnboardingBoard {
   eventId: string;
   speakers: OnboardingBoardSpeaker[];

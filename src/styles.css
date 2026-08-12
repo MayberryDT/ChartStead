@@ -4022,6 +4022,110 @@ details[open] > summary .course-check-chevron { transform: rotate(180deg); }
   font-size: 12px;
 }
 
+.speaker-csv-import {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  padding: 0 18px 14px;
+  border-bottom: 1px solid var(--outline);
+  background: var(--surface-subtle);
+}
+
+.speaker-csv-panel {
+  width: 100%;
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--outline);
+  background: var(--surface);
+}
+
+.speaker-csv-file,
+.speaker-csv-mapping label {
+  display: grid;
+  gap: 5px;
+  color: var(--on-surface-variant);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.speaker-csv-file input,
+.speaker-csv-mapping select,
+.speaker-csv-review select {
+  min-height: 40px;
+  border: 1px solid var(--outline-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--on-surface);
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.speaker-csv-file input {
+  padding: 8px;
+}
+
+.speaker-csv-mapping {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.speaker-csv-review {
+  display: grid;
+  gap: 12px;
+}
+
+.speaker-csv-totals {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.speaker-csv-outcome {
+  display: inline-flex;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.speaker-csv-outcome[data-outcome="invalid"] {
+  background: var(--error-container);
+  color: var(--on-error-container);
+}
+
+.speaker-csv-outcome[data-outcome="create"],
+.speaker-csv-outcome[data-outcome="reuse"] {
+  background: var(--success-container);
+  color: var(--on-success-container);
+}
+
+.speaker-csv-outcome[data-outcome="update"] {
+  background: var(--warning-container);
+  color: var(--on-warning-container);
+}
+
+.speaker-csv-receipt {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border-left: 3px solid var(--tertiary);
+  background: var(--success-container);
+  color: var(--on-success-container);
+  font-size: 12.5px;
+}
+
+.speaker-csv-receipt p {
+  margin: 0;
+}
+
 .muted-line {
   margin: 0;
   color: var(--on-surface-muted);
@@ -4037,11 +4141,16 @@ details[open] > summary .course-check-chevron { transform: rotate(180deg); }
   .speaker-directory-count {
     justify-self: start;
   }
+
+  .speaker-csv-mapping {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 620px) {
   .speaker-directory-tools,
-  .speaker-directory-form-grid {
+  .speaker-directory-form-grid,
+  .speaker-csv-mapping {
     grid-template-columns: 1fr;
   }
 

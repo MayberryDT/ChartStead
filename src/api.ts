@@ -32,6 +32,10 @@ import type {
   SessionPlacementResponse,
   SpeakerDirectoryCreateInput,
   SpeakerDirectoryMutation,
+  SpeakerCsvColumnMapping,
+  SpeakerCsvImportApplyResult,
+  SpeakerCsvImportPreview,
+  SpeakerCsvResolution,
   SpeakerPortalSession,
   SubmissionAnswers,
   SubmitterEditSession,
@@ -825,6 +829,57 @@ export async function updateDirectorySpeaker(
   if (!response.ok || !("speakerId" in body)) {
     throw new ApiError(
       "error" in body ? body.error : "Unable to update speaker",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function previewSpeakerCsvImport(
+  eventId: string,
+  input: { csvText: string; mapping: SpeakerCsvColumnMapping },
+): Promise<SpeakerCsvImportPreview> {
+  const response = await fetch(`/api/events/${eventId}/speaker-imports/preview`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<SpeakerCsvImportPreview | { error: string }>(response);
+  if (!response.ok || !("rows" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to preview speaker CSV",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function applySpeakerCsvImport(
+  eventId: string,
+  input: {
+    csvText: string;
+    mapping: SpeakerCsvColumnMapping;
+    previewDigest: string;
+    resolutions: Record<string, SpeakerCsvResolution>;
+    idempotencyKey: string;
+  },
+): Promise<SpeakerCsvImportApplyResult> {
+  const response = await fetch(`/api/events/${eventId}/speaker-imports/apply`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": input.idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<SpeakerCsvImportApplyResult | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("totals" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to apply speaker CSV",
       response.status,
       body,
     );

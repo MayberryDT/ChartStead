@@ -20,6 +20,7 @@ import {
   SpeakerDirectoryToolbar,
   type SpeakerDirectoryFilter,
 } from "./SpeakerDirectory";
+import { SpeakerCsvImport } from "./SpeakerCsvImport";
 
 function formatWhen(value: string | null | undefined): string {
   if (!value) return "—";
@@ -302,6 +303,7 @@ export function OnboardingWorkspace({ eventId }: { eventId: string }) {
           onChanged={refresh}
           onMessage={flash}
         />
+        <SpeakerCsvImport eventId={eventId} onChanged={refresh} />
         {message ? (
           <p className="form-message onboarding-flash" data-tone={messageTone ?? undefined}>
             {message}

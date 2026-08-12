@@ -14,13 +14,13 @@ Add a reviewable CSV import into the existing event speaker directory. Organizer
 
 ## Acceptance criteria
 
-- [ ] An organizer can upload a CSV and map common speaker columns including name, email, biography, title, and organization.
-- [ ] A preview shows the intended create, reuse, update, skip, and invalid outcome for every row before anything is applied.
-- [ ] Duplicate emails, duplicate rows, ambiguous identity matches, missing required values, and malformed files receive actionable row-level feedback.
-- [ ] Applying an approved preview creates or reuses speakers through the same identity rules as the manual directory and reports exact totals.
-- [ ] Imported speakers appear immediately in directory search, readiness, task assignment, and eligible session-linking flows.
-- [ ] Reapplying the same import is idempotent and cannot duplicate speakers or event participations.
-- [ ] Authorization and acceptance tests cover preview, mapping, partial invalid input, identity reuse, apply, audit history, and cross-event isolation.
+- [x] An organizer can upload a CSV and map common speaker columns including name, email, biography, title, and organization.
+- [x] A preview shows the intended create, reuse, update, skip, and invalid outcome for every row before anything is applied.
+- [x] Duplicate emails, duplicate rows, ambiguous identity matches, missing required values, and malformed files receive actionable row-level feedback.
+- [x] Applying an approved preview creates or reuses speakers through the same identity rules as the manual directory and reports exact totals.
+- [x] Imported speakers appear immediately in directory search, readiness, task assignment, and eligible session-linking flows.
+- [x] Reapplying the same import is idempotent and cannot duplicate speakers or event participations.
+- [x] Authorization and acceptance tests cover preview, mapping, partial invalid input, identity reuse, apply, audit history, and cross-event isolation.
 
 ## Blocked by
 
@@ -34,3 +34,5 @@ Add a reviewable CSV import into the existing event speaker directory. Organizer
 
 
 - 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.
+
+- 2026-08-12 — Implementation complete in the isolated ticket worktree. Added a side-effect-free mapped preview, explicit per-row review for create/reuse/update/skip/invalid outcomes, transactional idempotent apply through the ticket-24 directory commands, persistent import receipts, and the organizer CSV panel. Automated verification passed: focused CSV worker 5/5, directory/onboarding worker 16/16, focused UI 3/3, full UI 88/88, full worker 198/198, full Playwright 21/21, typecheck, and production build. Status intentionally remains in-progress for parent integration.

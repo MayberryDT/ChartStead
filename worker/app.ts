@@ -18,7 +18,13 @@ import type {
   ReviewerInvitationPreview,
   SessionPlacementPatch,
   SpeakerDirectoryCreateInput,
+  SpeakerCsvColumnMapping,
+  SpeakerCsvResolution,
 } from "../shared/events";
+import {
+  parseSpeakerCsv,
+  SpeakerCsvParseError,
+} from "../shared/speaker-csv";
 import {
   createAuth,
   resolveProductionAuthenticatedUser,
@@ -2389,6 +2395,158 @@ export function createApp(options: AppOptions = {}) {
     });
     if (!result.ok) return c.json({ error: result.error }, result.status);
     return c.json(result.speaker);
+  });
+
+  function speakerCsvMapping(value: unknown): SpeakerCsvColumnMapping | null {
+    if (!value || typeof value !== "object") return null;
+    const row = value as Record<string, unknown>;
+    if (
+      typeof row.name !== "string" ||
+      typeof row.email !== "string" ||
+      typeof row.title !== "string" ||
+      typeof row.organization !== "string"
+    ) {
+      return null;
+    }
+    return {
+      name: row.name,
+      email: row.email,
+      biography: typeof row.biography === "string" ? row.biography : null,
+      title: row.title,
+      organization: row.organization,
+    };
+  }
+
+  app.post("/api/events/:eventId/speaker-imports/preview", async (c) => {
+    const eventId = c.req.param("eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can import speakers." }, 403);
+    }
+    const body = (await c.req.json().catch(() => null)) as {
+      csvText?: unknown;
+      mapping?: unknown;
+    } | null;
+    const mapping = speakerCsvMapping(body?.mapping);
+    if (!body || typeof body.csvText !== "string" || !mapping) {
+      return c.json({ error: "CSV text and a complete column mapping are required." }, 400);
+    }
+    try {
+      const parsed = parseSpeakerCsv(body.csvText, mapping);
+      const preview = await c.env.EVENT_STORE.getByName(eventId).previewSpeakerCsvImport({
+        ...parsed,
+        mapping,
+      });
+      return c.json(preview);
+    } catch (error) {
+      if (error instanceof SpeakerCsvParseError) {
+        return c.json({ error: error.message }, 400);
+      }
+      throw error;
+    }
+  });
+
+  app.post("/api/events/:eventId/speaker-imports/apply", async (c) => {
+    const eventId = c.req.param("eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can import speakers." }, 403);
+    }
+    const body = (await c.req.json().catch(() => null)) as {
+      csvText?: unknown;
+      mapping?: unknown;
+      previewDigest?: unknown;
+      idempotencyKey?: unknown;
+      resolutions?: unknown;
+    } | null;
+    const mapping = speakerCsvMapping(body?.mapping);
+    const idempotencyKey =
+      (typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim()) ||
+      c.req.header("idempotency-key")?.trim() ||
+      "";
+    if (
+      !body ||
+      typeof body.csvText !== "string" ||
+      !mapping ||
+      typeof body.previewDigest !== "string" ||
+      !idempotencyKey ||
+      !body.resolutions ||
+      typeof body.resolutions !== "object"
+    ) {
+      return c.json(
+        { error: "CSV text, mapping, preview digest, resolutions, and idempotency key are required." },
+        400,
+      );
+    }
+    const resolutions: Record<string, SpeakerCsvResolution> = {};
+    for (const [rowNumber, value] of Object.entries(
+      body.resolutions as Record<string, unknown>,
+    )) {
+      if (!value || typeof value !== "object") continue;
+      const resolution = value as Record<string, unknown>;
+      if (
+        resolution.action !== "create" &&
+        resolution.action !== "reuse" &&
+        resolution.action !== "update" &&
+        resolution.action !== "skip"
+      ) {
+        continue;
+      }
+      resolutions[rowNumber] = {
+        action: resolution.action,
+        speakerId:
+          typeof resolution.speakerId === "string"
+            ? resolution.speakerId
+            : undefined,
+      };
+    }
+    try {
+      const parsed = parseSpeakerCsv(body.csvText, mapping);
+      const result = await c.env.EVENT_STORE.getByName(eventId).applySpeakerCsvImport({
+        ...parsed,
+        mapping,
+        previewDigest: body.previewDigest,
+        resolutions,
+        idempotencyKey,
+        actorId: principal.id,
+        actorName: principal.displayName,
+      });
+      if (!result.ok) return c.json({ error: result.error }, result.status);
+      return c.json(result.result, result.created ? 201 : 200);
+    } catch (error) {
+      if (error instanceof SpeakerCsvParseError) {
+        return c.json({ error: error.message }, 400);
+      }
+      throw error;
+    }
+  });
+
+  app.get("/api/events/:eventId/speaker-imports", async (c) => {
+    const eventId = c.req.param("eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can view speaker imports." }, 403);
+    }
+    const imports = await c.env.EVENT_STORE.getByName(eventId).listSpeakerImports();
+    return c.json({ imports });
   });
 
   app.post("/api/events/:eventId/onboarding/tasks", async (c) => {
