@@ -690,7 +690,11 @@ describe("Course Check review workspace", () => {
       track: "platform",
       sort: "oldest",
     });
-    expect(requests.filter((request) => request.startsWith("POST "))).toHaveLength(0);
+    expect(
+      requests.filter(
+        (request) => request.startsWith("POST ") && !request.endsWith("/ux-events"),
+      ),
+    ).toHaveLength(0);
   });
 
   it("expands warning evidence by default and surfaces risk in the summary", async () => {
@@ -790,7 +794,11 @@ describe("Course Check review workspace", () => {
     expect(router.state.location.pathname).toBe(
       "/e/pacific-open-data-summit-2026/course-checks/plan-1",
     );
-    expect(requests.filter((request) => request.startsWith("POST "))).toEqual([
+    expect(
+      requests.filter(
+        (request) => request.startsWith("POST ") && !request.endsWith("/ux-events"),
+      ),
+    ).toEqual([
       "POST /api/events/pacific-open-data-summit-2026/course-checks/communications",
     ]);
   });
@@ -820,7 +828,7 @@ describe("Course Check review workspace", () => {
     expect(router.state.location.search).toMatchObject({
       stage: "communication-plan-1",
     });
-    expect(requests).toEqual([
+    expect(requests.filter((request) => !request.endsWith("/ux-events"))).toEqual([
       "GET /api/events/pacific-open-data-summit-2026/course-checks/communication-plan-1",
     ]);
   });
@@ -946,7 +954,11 @@ describe("Course Check review workspace", () => {
     expect(screen.getByText(/No drafts were prepared\. No emails were sent\./)).toBeVisible();
     expect(screen.getByRole("button", { name: "Return to submissions" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Prepare communication drafts" })).toBeEnabled();
-    expect(requests.filter((request) => request.startsWith("POST "))).toEqual([
+    expect(
+      requests.filter(
+        (request) => request.startsWith("POST ") && !request.endsWith("/ux-events"),
+      ),
+    ).toEqual([
       "POST /api/events/pacific-open-data-summit-2026/course-checks/plan-1/apply",
     ]);
   });
@@ -1120,7 +1132,11 @@ describe("Course Check review workspace", () => {
     expect(router.state.location.pathname).toBe(
       "/e/pacific-open-data-summit-2026/course-checks/plan-1",
     );
-    expect(requests.filter((request) => request.startsWith("POST "))).toEqual([
+    expect(
+      requests.filter(
+        (request) => request.startsWith("POST ") && !request.endsWith("/ux-events"),
+      ),
+    ).toEqual([
       "POST /api/events/pacific-open-data-summit-2026/course-checks/plan-1/defer",
       "POST /api/events/pacific-open-data-summit-2026/course-checks/plan-1/apply",
     ]);

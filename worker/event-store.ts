@@ -64,6 +64,11 @@ import type {
   AirtableSyncState,
 } from "../shared/airtable";
 import { AIRTABLE_HEALTH_GUIDANCE } from "../shared/airtable";
+import type {
+  CourseCheckUxEvidenceExport,
+  CourseCheckUxEventInput,
+  CourseCheckUxEventRecord,
+} from "../shared/course-check-ux";
 import { applyPullWinsToLocalRecord } from "../shared/airtable-field-map";
 import {
   buildCourseCheckDemoProposals,
@@ -1363,6 +1368,29 @@ export class EventStore extends DurableObject<AppBindings> {
           at TEXT NOT NULL,
           summary TEXT NOT NULL
         )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS course_check_ux_events (
+          id TEXT PRIMARY KEY,
+          journey_id TEXT NOT NULL,
+          plan_id TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          action_type TEXT NOT NULL,
+          stage TEXT NOT NULL,
+          issue_class TEXT,
+          issue_action TEXT,
+          issue_count INTEGER NOT NULL,
+          affected_count INTEGER NOT NULL,
+          route_changes INTEGER NOT NULL,
+          duration_ms INTEGER,
+          outcome TEXT,
+          occurred_at TEXT NOT NULL
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS course_check_ux_journey_idx
+        ON course_check_ux_events (journey_id, occurred_at)
       `);
 
       this.ctx.storage.sql.exec(`
@@ -9392,6 +9420,129 @@ export class EventStore extends DurableObject<AppBindings> {
       });
     });
     return { ok: true, plan: correction!, created: true };
+  }
+
+  recordCourseCheckUxEvent(
+    event: CourseCheckUxEventInput,
+  ): { created: boolean } {
+    const existing = this.ctx.storage.sql
+      .exec<{ id: string }>(
+        `SELECT id FROM course_check_ux_events WHERE id = ?`,
+        event.id,
+      )
+      .toArray()[0];
+    if (existing) return { created: false };
+    this.ctx.storage.sql.exec(
+      `INSERT INTO course_check_ux_events
+        (id, journey_id, plan_id, event_type, action_type, stage,
+         issue_class, issue_action, issue_count, affected_count,
+         route_changes, duration_ms, outcome, occurred_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      event.id,
+      event.journeyId,
+      event.planId,
+      event.eventType,
+      event.actionType,
+      event.stage,
+      event.issueClass,
+      event.issueAction,
+      event.issueCount,
+      event.affectedCount,
+      event.routeChanges,
+      event.durationMs,
+      event.outcome,
+      new Date().toISOString(),
+    );
+    return { created: true };
+  }
+
+  getCourseCheckUxEvidence(): CourseCheckUxEvidenceExport {
+    type UxRow = {
+      id: string;
+      journey_id: string;
+      plan_id: string;
+      event_type: string;
+      action_type: CourseCheckActionType;
+      stage: CourseCheckUxEventInput["stage"];
+      issue_class: CourseCheckUxEventInput["issueClass"];
+      issue_action: CourseCheckUxEventInput["issueAction"];
+      issue_count: number;
+      affected_count: number;
+      route_changes: number;
+      duration_ms: number | null;
+      outcome: CourseCheckUxEventInput["outcome"];
+      occurred_at: string;
+    };
+    const rows = this.ctx.storage.sql
+      .exec<UxRow>(
+        `SELECT id, journey_id, plan_id, event_type, action_type, stage,
+                issue_class, issue_action, issue_count, affected_count,
+                route_changes, duration_ms, outcome, occurred_at
+         FROM course_check_ux_events
+         ORDER BY occurred_at, id`,
+      )
+      .toArray();
+    const records: CourseCheckUxEventRecord[] = rows.map((row) => ({
+      id: row.id,
+      journeyId: row.journey_id,
+      planId: row.plan_id,
+      eventType: row.event_type as CourseCheckUxEventInput["eventType"],
+      actionType: row.action_type,
+      stage: row.stage,
+      issueClass: row.issue_class,
+      issueAction: row.issue_action,
+      issueCount: row.issue_count,
+      affectedCount: row.affected_count,
+      routeChanges: row.route_changes,
+      durationMs: row.duration_ms,
+      outcome: row.outcome,
+      occurredAt: row.occurred_at,
+    }));
+    const byEventType: Record<string, number> = {};
+    const byIssueAction: Record<string, number> = {};
+    for (const record of records) {
+      byEventType[record.eventType] = (byEventType[record.eventType] ?? 0) + 1;
+      if (record.issueAction) {
+        byIssueAction[record.issueAction] =
+          (byIssueAction[record.issueAction] ?? 0) + 1;
+      }
+    }
+    return {
+      schemaVersion: 1,
+      evidenceClass: "seeded_or_product_behavior_not_human_usability",
+      generatedAt: new Date().toISOString(),
+      eventCount: records.length,
+      uniqueJourneyCount: new Set(records.map((record) => record.journeyId)).size,
+      byEventType,
+      byIssueAction,
+      durations: {
+        actionToCommitMs: records
+          .filter(
+            (record) =>
+              record.eventType === "stage_outcome" && record.durationMs !== null,
+          )
+          .map((record) => record.durationMs as number),
+      },
+      contextChanges: records.reduce(
+        (count, record) => count + record.routeChanges,
+        0,
+      ),
+      errors: records.filter(
+        (record) =>
+          record.outcome === "failed" || record.outcome === "unknown",
+      ).length,
+      abandonedJourneys: new Set(
+        records
+          .filter((record) => record.eventType === "journey_abandoned")
+          .map((record) => record.journeyId),
+      ).size,
+      resumedJourneys: new Set(
+        records
+          .filter((record) => record.eventType === "journey_resumed")
+          .map((record) => record.journeyId),
+      ).size,
+      records,
+    };
   }
 
   projectCourseCheckPlan(

@@ -5,6 +5,7 @@ import type {
   PublicationOperation,
 } from "../shared/course-check";
 import type { AirtablePullResult, AirtableSyncState } from "../shared/airtable";
+import type { CourseCheckUxEventInput } from "../shared/course-check-ux";
 import type {
   AgendaWorkspaceResponse,
   AssetUploadSession,
@@ -1150,6 +1151,29 @@ export async function fetchCourseCheckPlan(
     );
   }
   return body;
+}
+
+/** Best-effort, privacy-safe UX evidence. Callers deliberately ignore failures. */
+export async function emitCourseCheckUxEvent(
+  eventId: string,
+  event: CourseCheckUxEventInput,
+  keepalive = false,
+): Promise<void> {
+  const response = await fetch(
+    `/api/events/${encodeURIComponent(eventId)}/course-checks/ux-events`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": event.id,
+      },
+      body: JSON.stringify(event),
+      keepalive,
+    },
+  );
+  if (!response.ok) {
+    throw new ApiError("UX evidence was not accepted", response.status);
+  }
 }
 
 export async function deferCourseCheckItems(

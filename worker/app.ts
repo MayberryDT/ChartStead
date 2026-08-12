@@ -21,6 +21,8 @@ import type {
   SpeakerCsvColumnMapping,
   SpeakerCsvResolution,
 } from "../shared/events";
+import { parseCourseCheckUxEvent } from "../shared/course-check-ux";
+import { COURSE_CHECK_VALIDATION_SCENARIOS } from "../shared/course-check-validation";
 import {
   parseSpeakerCsv,
   SpeakerCsvParseError,
@@ -3274,6 +3276,78 @@ export function createApp(options: AppOptions = {}) {
         merged,
       )) as EventCourseCheckPolicy;
       return c.json({ policy });
+    },
+  );
+
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(
+    `${__ccBase}/ux-events`,
+    async (c) => {
+      const principal = await resolvePrincipal(c.req.raw, c.env);
+      const eventId = param(c, "eventId");
+      const denial = authorizeCourseCheck(principal, eventId, "read");
+      if (denial) return c.json(denial.body, denial.status);
+      const seed = findSeed(eventId);
+      if (!seed) return c.json({ error: "Event not found" }, 404);
+      await loadEvent(c.env, seed);
+      const parsed = parseCourseCheckUxEvent(
+        await c.req.json().catch(() => null),
+      );
+      if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+      const headerKey = c.req.header("idempotency-key");
+      if (headerKey && headerKey !== parsed.event.id) {
+        return c.json(
+          { error: "The idempotency key must match the event id." },
+          400,
+        );
+      }
+      const result = await c.env.EVENT_STORE.getByName(
+        eventId,
+      ).recordCourseCheckUxEvent(parsed.event);
+      return c.json(
+        { accepted: true, duplicate: !result.created },
+        result.created ? 202 : 200,
+      );
+    },
+  );
+
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.get(
+    `${__ccBase}/ux-evidence`,
+    async (c) => {
+      const principal = await resolvePrincipal(c.req.raw, c.env);
+      const eventId = param(c, "eventId");
+      if (!isEventAdmin(principal, eventId)) {
+        return c.json(
+          { error: "Administrator access is required to export UX evidence." },
+          403,
+        );
+      }
+      const seed = findSeed(eventId);
+      if (!seed) return c.json({ error: "Event not found" }, 404);
+      await loadEvent(c.env, seed);
+      const evidence = await c.env.EVENT_STORE.getByName(
+        eventId,
+      ).getCourseCheckUxEvidence();
+      return c.json(evidence);
+    },
+  );
+
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.get(
+    `${__ccBase}/ux-validation-scenarios`,
+    async (c) => {
+      const principal = await resolvePrincipal(c.req.raw, c.env);
+      const eventId = param(c, "eventId");
+      if (!isEventAdmin(principal, eventId)) {
+        return c.json(
+          { error: "Administrator access is required to use validation fixtures." },
+          403,
+        );
+      }
+      const seed = findSeed(eventId);
+      if (!seed) return c.json({ error: "Event not found" }, 404);
+      return c.json({
+        evidenceClass: "seeded_automated_behavior_not_human_usability",
+        scenarios: COURSE_CHECK_VALIDATION_SCENARIOS,
+      });
     },
   );
 

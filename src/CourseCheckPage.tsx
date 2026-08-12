@@ -49,6 +49,7 @@ import {
   useCourseCheckReturnContext,
   type CourseCheckReturnContext,
 } from "./course-check/useCourseCheckReturnContext";
+import { useCourseCheckUxInstrumentation } from "./course-check/useCourseCheckUxInstrumentation";
 
 function findingTone(severity: CourseCheckFinding["severity"]) {
   if (severity === "blocker") return "error";
@@ -1575,6 +1576,10 @@ export function CourseCheckPage() {
         : false;
     },
   });
+  const uxInstrumentation = useCourseCheckUxInstrumentation(
+    eventId,
+    planQuery.data ?? null,
+  );
 
   useEffect(() => {
     const next = planQuery.data;
@@ -1645,6 +1650,16 @@ export function CourseCheckPage() {
       queryClient.setQueryData(["course-check", eventId, activePlanId], next);
       void queryClient.invalidateQueries({ queryKey: ["proposals", eventId] });
       void queryClient.invalidateQueries({ queryKey: ["public-program", eventId] });
+      const affectedCount =
+        next.body.actionType === "decision"
+          ? next.body.aggregateProgress.applied
+          : next.body.actionType === "publication"
+            ? next.body.includedSessionIds.length
+            : 1;
+      uxInstrumentation.trackStageOutcome(
+        next.state === "Partially complete" ? "partially_succeeded" : "succeeded",
+        affectedCount,
+      );
       setMessage(
         next.body.actionType === "publication"
           ? next.state === "Complete"
@@ -1678,6 +1693,15 @@ export function CourseCheckPage() {
       queryClient.setQueryData(["course-check", eventId, activePlanId], next);
       setSelectedItemIds(new Set());
       setDeferReason("");
+      uxInstrumentation.track({
+        eventType: "issue_action",
+        issueAction: "exclude",
+        affectedCount:
+          next.body.actionType === "decision"
+            ? next.body.aggregateProgress.deferred
+            : 0,
+        outcome: "excluded",
+      });
       if (
         next.body.actionType === "decision" &&
         next.body.aggregateProgress.active > 0
@@ -1717,6 +1741,12 @@ export function CourseCheckPage() {
     },
     onSuccess: (next) => {
       queryClient.setQueryData(["course-check", eventId, activePlanId], next);
+      uxInstrumentation.track({
+        eventType: "message_correction",
+        stage: "draft",
+        affectedCount: 1,
+        outcome: "corrected",
+      });
       setMessage("Saved a new communication plan version. Draft approval cleared.");
     },
   });
@@ -1767,6 +1797,10 @@ export function CourseCheckPage() {
     onSuccess: (next) => {
       queryClient.setQueryData(["course-check", eventId, activePlanId], next);
       void queryClient.invalidateQueries({ queryKey: ["course-checks", eventId] });
+      uxInstrumentation.trackStageOutcome(
+        "succeeded",
+        next.body.actionType === "communication" ? next.body.drafts.length : 0,
+      );
       setMessage("Drafts frozen. Review the exact payloads, then send when ready.");
     },
   });
@@ -1788,6 +1822,10 @@ export function CourseCheckPage() {
       setMessage(
         "Delivery intent is durable. Each address now has an independent effect record.",
       );
+      uxInstrumentation.trackStageOutcome(
+        "succeeded",
+        next.body.actionType === "communication" ? next.body.effects.length : 0,
+      );
     },
   });
 
@@ -1801,6 +1839,13 @@ export function CourseCheckPage() {
       ),
     onSuccess: (next) => {
       queryClient.setQueryData(["course-check", eventId, activePlanId], next);
+      uxInstrumentation.track({
+        eventType: "issue_action",
+        stage: "delivery",
+        issueAction: "fix",
+        affectedCount: 1,
+        outcome: "repair",
+      });
       setMessage("The selected address is queued for a new bounded delivery attempt.");
     },
   });
@@ -1820,6 +1865,12 @@ export function CourseCheckPage() {
       }),
     onSuccess: (next) => {
       queryClient.setQueryData(["course-check", eventId, activePlanId], next);
+      uxInstrumentation.track({
+        eventType: "stale_recheck",
+        stage: "delivery",
+        affectedCount: 1,
+        outcome: "rechecked",
+      });
       setMessage("The unknown provider outcome was reconciled and recorded.");
     },
   });
@@ -1838,6 +1889,13 @@ export function CourseCheckPage() {
         idempotencyKey: `ui-correction-${input.effectId}-${createClientId()}`,
       }),
     onSuccess: (next) => {
+      uxInstrumentation.track({
+        eventType: "compensation_started",
+        stage: "compensation",
+        affectedCount: 1,
+        routeChanges: 1,
+        outcome: "compensating",
+      });
       window.location.assign(`/e/${eventId}/course-checks/${next.id}`);
     },
   });
@@ -1850,6 +1908,13 @@ export function CourseCheckPage() {
       }),
     onSuccess: (next) => {
       queryClient.setQueryData(["course-check", eventId, next.id], next);
+      uxInstrumentation.track({
+        eventType: "outbox_continuation",
+        stage: "draft",
+        affectedCount: 1,
+        routeChanges: 1,
+        outcome: "continued",
+      });
       void navigate({
         to: "/e/$eventId/course-checks/$planId",
         params: { eventId, planId },
@@ -1881,6 +1946,20 @@ export function CourseCheckPage() {
     },
     onSuccess: (next) => {
       queryClient.setQueryData(["course-check", eventId, activePlanId], next);
+      uxInstrumentation.track({
+        eventType: "stage_outcome",
+        stage: "airtable",
+        affectedCount: next.body.airtable.effects.length,
+        outcome: next.body.airtable.effects.some((effect) => effect.state === "unknown")
+          ? "unknown"
+          : next.body.airtable.effects.some(
+                (effect) =>
+                  effect.state === "permanent_failure" ||
+                  effect.state === "retryable_failure",
+              )
+            ? "failed"
+            : "succeeded",
+      });
       setMessage("Airtable stage updated. Internal ChartStead work remains committed.");
     },
   });
