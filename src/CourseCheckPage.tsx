@@ -11,6 +11,7 @@ import type {
   DecisionPlanBody,
   PublicationPlanBody,
 } from "../shared/course-check";
+import { formatCourseCheckActorLabel } from "../shared/course-check";
 import {
   ApiError,
   applyCourseCheckPlan,
@@ -254,7 +255,7 @@ function DecisionBatchBody({
           </div>
           <div>
             <dt>Created by</dt>
-            <dd>{plan.createdBy.displayName}</dd>
+            <dd>{formatCourseCheckActorLabel(plan.createdBy)}</dd>
           </div>
           <div>
             <dt>Progress</dt>
@@ -330,7 +331,7 @@ function DecisionBatchBody({
             {body.followUpQueue.map((item) => (
               <li key={item.id}>
                 {item.proposalId} ({item.outcome}) — {item.reason} ·{" "}
-                {item.deferredBy.displayName}
+                {formatCourseCheckActorLabel(item.deferredBy)}
               </li>
             ))}
           </ul>
@@ -344,7 +345,7 @@ function DecisionBatchBody({
             {plan.mutations.map((mutation) => (
               <li key={mutation.id}>
                 v{mutation.fromVersion}→v{mutation.toVersion} · {mutation.kind} ·{" "}
-                {mutation.actor.displayName}: {mutation.summary}
+                {formatCourseCheckActorLabel(mutation.actor)}: {mutation.summary}
               </li>
             ))}
           </ul>
@@ -992,7 +993,7 @@ function CommunicationBody({
             {plan.mutations.map((mutation) => (
               <li key={mutation.id}>
                 v{mutation.fromVersion}→v{mutation.toVersion} · {mutation.kind} ·{" "}
-                {mutation.actor.displayName}: {mutation.summary}
+                {formatCourseCheckActorLabel(mutation.actor)}: {mutation.summary}
               </li>
             ))}
           </ul>
@@ -1503,6 +1504,9 @@ export function CourseCheckPage() {
             <p className="form-message" data-tone="success" role="status">
               {currentPlan.state}
               {currentPlan.receipt?.appliedAt ? ` at ${currentPlan.receipt.appliedAt}` : ""}
+              {currentPlan.receipt
+                ? ` by ${formatCourseCheckActorLabel(currentPlan.receipt.actor)}`
+                : ""}
               . Receipt <span className="mono">{currentPlan.receipt?.id.slice(0, 8)}</span>
             </p>
             <button
@@ -1638,6 +1642,9 @@ export function CourseCheckPage() {
           <p className="form-message" data-tone="success" role="status">
             {currentPlan.state}
             {currentPlan.receipt?.appliedAt ? ` at ${currentPlan.receipt.appliedAt}` : ""}
+            {currentPlan.receipt
+              ? ` by ${formatCourseCheckActorLabel(currentPlan.receipt.actor)}`
+              : ""}
             . Receipt <span className="mono">{currentPlan.receipt?.id.slice(0, 8)}</span>
             {publicationBody && publicationBody.linkedPlanIds.length > 0
               ? ` · ${publicationBody.linkedPlanIds.length} linked communication plan(s)`
@@ -1673,6 +1680,9 @@ export function CourseCheckPage() {
           <p className="form-message" data-tone="success" role="status">
             {currentPlan.state}
             {currentPlan.receipt?.appliedAt ? ` at ${currentPlan.receipt.appliedAt}` : ""}
+            {currentPlan.receipt
+              ? ` by ${formatCourseCheckActorLabel(currentPlan.receipt.actor)}`
+              : ""}
             . Receipt <span className="mono">{currentPlan.receipt?.id.slice(0, 8)}</span>
           </p>
         ) : null}

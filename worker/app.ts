@@ -64,6 +64,19 @@ import {
   isEventAdmin,
   scopeEventForPrincipal,
 } from "./authz";
+import {
+  authorizeCourseCheck,
+  capabilityForStage,
+  parseInitiatingHumanHeader,
+  toCourseCheckActor,
+} from "./course-check/agent-authz";
+import {
+  createApiKey,
+  extractBearerToken,
+  parseApiKeyGrantBody,
+  resolvePrincipalFromApiKey,
+  updateApiKeyGrant,
+} from "./api-keys";
 import { createV1App, type V1AppOptions } from "./api/v1";
 import {
   defaultAirtableClientFactory,
@@ -327,21 +340,48 @@ function signingSecret(env: AppBindings, override?: string): string | null {
 
 export function createApp(options: AppOptions = {}) {
   const app = new Hono<{ Bindings: AppBindings }>();
-  const resolvePrincipal =
+  const baseResolvePrincipal =
     options.resolvePrincipal ?? resolveProductionPrincipal;
   const airtableFactory =
     options.airtableClientFactory ?? defaultAirtableClientFactory;
   const airtableCredentialFactory = options.airtableCredentialClientFactory;
 
-  app.route(
-    "/api/v1",
-    createV1App({
-      resolvePrincipal,
-      airtableClientFactory: airtableFactory,
-      airtableCredentialClientFactory: airtableCredentialFactory,
-      resolveApiKeyPrincipal: options.resolveApiKeyPrincipal,
-    }),
-  );
+  /** Session, test hook, or bearer agent/human API key — same principal model. */
+  const resolvePrincipal: PrincipalResolver = async (request, env) => {
+    const bearer = extractBearerToken(request);
+    if (bearer) {
+      if (options.resolveApiKeyPrincipal) {
+        return options.resolveApiKeyPrincipal(bearer, env);
+      }
+      if (env.AUTH_DB) {
+        return resolvePrincipalFromApiKey(env.AUTH_DB, bearer);
+      }
+      return null;
+    }
+    return baseResolvePrincipal(request, env);
+  };
+
+  // Course Check routes register on both the UI app and this v1 sub-app.
+  const v1App = createV1App({
+    resolvePrincipal,
+    airtableClientFactory: airtableFactory,
+    airtableCredentialClientFactory: airtableCredentialFactory,
+    resolveApiKeyPrincipal: options.resolveApiKeyPrincipal,
+  });
+  const __courseCheckTargets: Array<{
+    app: typeof app;
+    base: string;
+  }> = [
+    { app, base: "/api/events/:eventId/course-checks" },
+    { app: v1App, base: "/events/:eventId/course-checks" },
+  ];
+
+  function param(c: { req: { param(name: string): string | undefined } }, name: string): string {
+    const value = c.req.param(name);
+    if (!value) throw new Error(`Missing route param ${name}`);
+    return value;
+  }
+
 
   app.get("/api/health", (c) => c.json({ status: "ok" }));
 
@@ -2261,22 +2301,15 @@ export function createApp(options: AppOptions = {}) {
     },
   );
 
-  app.post("/api/events/:eventId/course-checks/decisions", async (c) => {
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(`${__ccBase}/decisions`, async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
-    const eventId = c.req.param("eventId");
+    const eventId = param(c, "eventId");
     if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
-    if (!isEventAdmin(principal, eventId)) {
-      return c.json(
-        {
-          error: "Administrator access is required to create a Decision Course Check.",
-          code: "missing_authority",
-          recoveryGuidance:
-            "Ask an event administrator to create or apply this Course Check.",
-        },
-        403,
-      );
+    {
+      const denial = authorizeCourseCheck(principal, eventId, "propose_decision");
+      if (denial) return c.json(denial.body, denial.status);
     }
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -2324,7 +2357,7 @@ export function createApp(options: AppOptions = {}) {
       const result = (await store.createDecisionCourseCheck({
         items,
         idempotencyKey,
-        actor: { id: principal.id, displayName: principal.displayName },
+        actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
       })) as {
         plan: import("../shared/course-check").CourseCheckPlan;
         created: boolean;
@@ -2347,22 +2380,23 @@ export function createApp(options: AppOptions = {}) {
     }
   });
 
-  app.get("/api/events/:eventId/course-checks", async (c) => {
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.get(`${__ccBase}`, async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
-    const eventId = c.req.param("eventId");
-    if (!canAccessEvent(principal, eventId)) {
-      return c.json({ error: "Unauthorized" }, 401);
+    const eventId = param(c, "eventId");
+    {
+      const denial = authorizeCourseCheck(principal, eventId, "read");
+      if (denial) return c.json(denial.body, denial.status);
     }
+    if (!principal) return c.json({ error: "Unauthorized" }, 401);
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
     await loadEvent(c.env, seed);
     const store = c.env.EVENT_STORE.getByName(eventId);
     const role = eventRole(principal, eventId);
-    // Reviewers may list plans but communication private evidence is redacted.
-    if (role !== "admin" && role !== "reviewer") {
-      return c.json({ error: "Administrator access required" }, 403);
-    }
-    const canViewCommunicationEvidence = role === "admin";
+    const canViewCommunicationEvidence =
+      role === "admin" ||
+      authorizeCourseCheck(principal, eventId, "propose_communication") === null ||
+      authorizeCourseCheck(principal, eventId, "send") === null;
     const listed = (await store.listCourseCheckPlans()) as import("../shared/course-check").CourseCheckPlan[];
     const plans = await Promise.all(
       listed.map((plan) =>
@@ -2372,22 +2406,15 @@ export function createApp(options: AppOptions = {}) {
     return c.json({ plans });
   });
 
-  app.post("/api/events/:eventId/course-checks/communications", async (c) => {
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(`${__ccBase}/communications`, async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
-    const eventId = c.req.param("eventId");
+    const eventId = param(c, "eventId");
     if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
-    if (!isEventAdmin(principal, eventId)) {
-      return c.json(
-        {
-          error: "Administrator access is required to create a Communication Course Check.",
-          code: "missing_authority",
-          recoveryGuidance:
-            "Ask an event administrator to create this Communication Course Check.",
-        },
-        403,
-      );
+    {
+      const denial = authorizeCourseCheck(principal, eventId, "propose_communication");
+      if (denial) return c.json(denial.body, denial.status);
     }
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -2434,7 +2461,7 @@ export function createApp(options: AppOptions = {}) {
         bodyText: typeof body?.bodyText === "string" ? body.bodyText : undefined,
         bodyHtml: typeof body?.bodyHtml === "string" ? body.bodyHtml : undefined,
         idempotencyKey,
-        actor: { id: principal.id, displayName: principal.displayName },
+        actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
       })) as { plan: import("../shared/course-check").CourseCheckPlan; created: boolean };
       return c.json(result.plan, result.created ? 201 : 200);
     } catch (error) {
@@ -2450,23 +2477,16 @@ export function createApp(options: AppOptions = {}) {
     }
   });
 
-  app.post("/api/events/:eventId/course-checks/:planId/revise", async (c) => {
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(`${__ccBase}/:planId/revise`, async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
-    const eventId = c.req.param("eventId");
-    const planId = c.req.param("planId");
+    const eventId = param(c, "eventId");
+    const planId = param(c, "planId");
     if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
-    if (!isEventAdmin(principal, eventId)) {
-      return c.json(
-        {
-          error: "Administrator access is required to revise a Communication Course Check.",
-          code: "missing_authority",
-          recoveryGuidance:
-            "Ask an event administrator to revise this Communication Course Check.",
-        },
-        403,
-      );
+    {
+      const denial = authorizeCourseCheck(principal, eventId, "revise");
+      if (denial) return c.json(denial.body, denial.status);
     }
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -2519,7 +2539,7 @@ export function createApp(options: AppOptions = {}) {
       bodyHtml: typeof body.bodyHtml === "string" ? body.bodyHtml : undefined,
       recipientSelection,
       idempotencyKey,
-      actor: { id: principal.id, displayName: principal.displayName },
+      actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
     })) as
       | { ok: true; plan: import("../shared/course-check").CourseCheckPlan; created: boolean }
       | {
@@ -2542,23 +2562,16 @@ export function createApp(options: AppOptions = {}) {
     return c.json(result.plan, result.created ? 201 : 200);
   });
 
-  app.post("/api/events/:eventId/course-checks/:planId/create-drafts", async (c) => {
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(`${__ccBase}/:planId/create-drafts`, async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
-    const eventId = c.req.param("eventId");
-    const planId = c.req.param("planId");
+    const eventId = param(c, "eventId");
+    const planId = param(c, "planId");
     if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
-    if (!isEventAdmin(principal, eventId)) {
-      return c.json(
-        {
-          error: "Administrator access is required to create communication drafts.",
-          code: "missing_authority",
-          recoveryGuidance:
-            "Ask an event administrator to create drafts for this Course Check.",
-        },
-        403,
-      );
+    {
+      const denial = authorizeCourseCheck(principal, eventId, "create_drafts");
+      if (denial) return c.json(denial.body, denial.status);
     }
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -2607,7 +2620,7 @@ export function createApp(options: AppOptions = {}) {
       digest: body.digest,
       stageId: typeof body.stageId === "string" ? body.stageId : "create-drafts",
       idempotencyKey,
-      actor: { id: principal.id, displayName: principal.displayName },
+      actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
       softWarningOverrides,
     })) as
       | { ok: true; plan: import("../shared/course-check").CourseCheckPlan; created: boolean }
@@ -2635,23 +2648,16 @@ export function createApp(options: AppOptions = {}) {
     return c.json(result.plan, result.created ? 201 : 200);
   });
 
-  app.post("/api/events/:eventId/course-checks/:planId/send", async (c) => {
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(`${__ccBase}/:planId/send`, async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
-    const eventId = c.req.param("eventId");
-    const planId = c.req.param("planId");
+    const eventId = param(c, "eventId");
+    const planId = param(c, "planId");
     if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
-    if (!isEventAdmin(principal, eventId)) {
-      return c.json(
-        {
-          error: "Administrator access is required to send communication.",
-          code: "missing_authority",
-          recoveryGuidance:
-            "Ask an event administrator to approve the Send messages stage.",
-        },
-        403,
-      );
+    {
+      const denial = authorizeCourseCheck(principal, eventId, "send");
+      if (denial) return c.json(denial.body, denial.status);
     }
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -2688,7 +2694,7 @@ export function createApp(options: AppOptions = {}) {
       digest: body.digest,
       stageId: typeof body.stageId === "string" ? body.stageId : "send-messages",
       idempotencyKey,
-      actor: { id: principal.id, displayName: principal.displayName },
+      actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
     })) as
       | {
           ok: true;
@@ -2727,22 +2733,17 @@ export function createApp(options: AppOptions = {}) {
     return c.json(result.plan, result.created ? 202 : 200);
   });
 
-  app.post(
-    "/api/events/:eventId/course-checks/:planId/effects/:effectId/retry",
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(
+      `${__ccBase}/:planId/effects/:effectId/retry`,
     async (c) => {
       const principal = await resolvePrincipal(c.req.raw, c.env);
-      const eventId = c.req.param("eventId");
+      const eventId = param(c, "eventId");
       if (!canAccessEvent(principal, eventId)) {
         return c.json({ error: "Unauthorized" }, 401);
       }
-      if (!isEventAdmin(principal, eventId)) {
-        return c.json(
-          {
-            error: "Administrator access is required to retry communication.",
-            code: "missing_authority",
-          },
-          403,
-        );
+      {
+        const denial = authorizeCourseCheck(principal, eventId, "retry");
+        if (denial) return c.json(denial.body, denial.status);
       }
       const seed = findSeed(eventId);
       if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -2760,10 +2761,10 @@ export function createApp(options: AppOptions = {}) {
       }
       const store = c.env.EVENT_STORE.getByName(eventId);
       const result = (await store.retryCommunicationEffect({
-        planId: c.req.param("planId"),
-        effectId: c.req.param("effectId"),
+        planId: param(c, "planId"),
+        effectId: param(c, "effectId"),
         idempotencyKey,
-        actor: { id: principal.id, displayName: principal.displayName },
+        actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
       })) as
         | {
             ok: true;
@@ -2794,29 +2795,24 @@ export function createApp(options: AppOptions = {}) {
           now: new Date(),
           limit: 50,
         });
-        const delivered = await store.getCourseCheckPlan(c.req.param("planId"));
+        const delivered = await store.getCourseCheckPlan(param(c, "planId"));
         if (delivered) return c.json(delivered);
       }
       return c.json(result.plan);
     },
   );
 
-  app.post(
-    "/api/events/:eventId/course-checks/:planId/effects/:effectId/reconcile",
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(
+      `${__ccBase}/:planId/effects/:effectId/reconcile`,
     async (c) => {
       const principal = await resolvePrincipal(c.req.raw, c.env);
-      const eventId = c.req.param("eventId");
+      const eventId = param(c, "eventId");
       if (!canAccessEvent(principal, eventId)) {
         return c.json({ error: "Unauthorized" }, 401);
       }
-      if (!isEventAdmin(principal, eventId)) {
-        return c.json(
-          {
-            error: "Administrator access is required to reconcile communication.",
-            code: "missing_authority",
-          },
-          403,
-        );
+      {
+        const denial = authorizeCourseCheck(principal, eventId, "reconcile");
+        if (denial) return c.json(denial.body, denial.status);
       }
       const seed = findSeed(eventId);
       if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -2844,14 +2840,14 @@ export function createApp(options: AppOptions = {}) {
         );
       }
       const result = (await c.env.EVENT_STORE.getByName(eventId).reconcileCommunicationEffect({
-        planId: c.req.param("planId"),
-        effectId: c.req.param("effectId"),
+        planId: param(c, "planId"),
+        effectId: param(c, "effectId"),
         outcome: body.outcome,
         providerReference:
           typeof body.providerReference === "string" ? body.providerReference : null,
         note: body.note,
         idempotencyKey,
-        actor: { id: principal.id, displayName: principal.displayName },
+        actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
       })) as
         | {
             ok: true;
@@ -2879,22 +2875,17 @@ export function createApp(options: AppOptions = {}) {
     },
   );
 
-  app.post(
-    "/api/events/:eventId/course-checks/:planId/effects/:effectId/correction",
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(
+      `${__ccBase}/:planId/effects/:effectId/correction`,
     async (c) => {
       const principal = await resolvePrincipal(c.req.raw, c.env);
-      const eventId = c.req.param("eventId");
+      const eventId = param(c, "eventId");
       if (!canAccessEvent(principal, eventId)) {
         return c.json({ error: "Unauthorized" }, 401);
       }
-      if (!isEventAdmin(principal, eventId)) {
-        return c.json(
-          {
-            error: "Administrator access is required to create a correction.",
-            code: "missing_authority",
-          },
-          403,
-        );
+      {
+        const denial = authorizeCourseCheck(principal, eventId, "compensate");
+        if (denial) return c.json(denial.body, denial.status);
       }
       const seed = findSeed(eventId);
       if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -2924,14 +2915,14 @@ export function createApp(options: AppOptions = {}) {
         );
       }
       const result = (await c.env.EVENT_STORE.getByName(eventId).createCommunicationCorrection({
-        planId: c.req.param("planId"),
-        effectId: c.req.param("effectId"),
+        planId: param(c, "planId"),
+        effectId: param(c, "effectId"),
         reason: body.reason,
         subject: body.subject,
         bodyText: body.bodyText,
         bodyHtml: typeof body.bodyHtml === "string" ? body.bodyHtml : undefined,
         idempotencyKey,
-        actor: { id: principal.id, displayName: principal.displayName },
+        actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
       })) as
         | {
             ok: true;
@@ -2959,23 +2950,16 @@ export function createApp(options: AppOptions = {}) {
     },
   );
 
-  app.post("/api/events/:eventId/course-checks/:planId/defer", async (c) => {
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(`${__ccBase}/:planId/defer`, async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
-    const eventId = c.req.param("eventId");
-    const planId = c.req.param("planId");
+    const eventId = param(c, "eventId");
+    const planId = param(c, "planId");
     if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
-    if (!isEventAdmin(principal, eventId)) {
-      return c.json(
-        {
-          error: "Administrator access is required to defer Course Check items.",
-          code: "missing_authority",
-          recoveryGuidance:
-            "Ask an event administrator to continue this Course Check.",
-        },
-        403,
-      );
+    {
+      const denial = authorizeCourseCheck(principal, eventId, "defer");
+      if (denial) return c.json(denial.body, denial.status);
     }
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -3016,7 +3000,7 @@ export function createApp(options: AppOptions = {}) {
       itemIds,
       reason: body.reason,
       idempotencyKey,
-      actor: { id: principal.id, displayName: principal.displayName },
+      actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
     })) as
       | { ok: true; plan: import("../shared/course-check").CourseCheckPlan; created: boolean }
       | {
@@ -3040,23 +3024,16 @@ export function createApp(options: AppOptions = {}) {
   });
 
 
-  app.post("/api/events/:eventId/course-checks/:planId/defer", async (c) => {
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(`${__ccBase}/:planId/defer`, async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
-    const eventId = c.req.param("eventId");
-    const planId = c.req.param("planId");
+    const eventId = param(c, "eventId");
+    const planId = param(c, "planId");
     if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
-    if (!isEventAdmin(principal, eventId)) {
-      return c.json(
-        {
-          error: "Administrator access is required to defer Course Check items.",
-          code: "missing_authority",
-          recoveryGuidance:
-            "Ask an event administrator to continue this Course Check.",
-        },
-        403,
-      );
+    {
+      const denial = authorizeCourseCheck(principal, eventId, "defer");
+      if (denial) return c.json(denial.body, denial.status);
     }
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -3097,7 +3074,7 @@ export function createApp(options: AppOptions = {}) {
       itemIds,
       reason: body.reason,
       idempotencyKey,
-      actor: { id: principal.id, displayName: principal.displayName },
+      actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
     })) as
       | { ok: true; plan: import("../shared/course-check").CourseCheckPlan; created: boolean }
       | {
@@ -3120,22 +3097,15 @@ export function createApp(options: AppOptions = {}) {
     return c.json(result.plan, result.created ? 201 : 200);
   });
 
-  app.post("/api/events/:eventId/course-checks/guaranteed-speakers", async (c) => {
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(`${__ccBase}/guaranteed-speakers`, async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
-    const eventId = c.req.param("eventId");
+    const eventId = param(c, "eventId");
     if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
-    if (!isEventAdmin(principal, eventId)) {
-      return c.json(
-        {
-          error: "Administrator access is required to create a Course Check.",
-          code: "missing_authority",
-          recoveryGuidance:
-            "Ask an event administrator to create or apply this Course Check.",
-        },
-        403,
-      );
+    {
+      const denial = authorizeCourseCheck(principal, eventId, "propose_decision");
+      if (denial) return c.json(denial.body, denial.status);
     }
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -3194,23 +3164,25 @@ export function createApp(options: AppOptions = {}) {
       trackId: body.trackId,
       speakers,
       idempotencyKey,
-      actor: { id: principal.id, displayName: principal.displayName },
+      actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
     })) as { plan: import("../shared/course-check").CourseCheckPlan; created: boolean };
     return c.json(result.plan, result.created ? 201 : 200);
   });
 
-  app.get("/api/events/:eventId/course-checks/:planId", async (c) => {
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.get(`${__ccBase}/:planId`, async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
-    const eventId = c.req.param("eventId");
-    const planId = c.req.param("planId");
-    if (!canAccessEvent(principal, eventId)) {
-      return c.json({ error: "Unauthorized" }, 401);
+    const eventId = param(c, "eventId");
+    const planId = param(c, "planId");
+    {
+      const denial = authorizeCourseCheck(principal, eventId, "read");
+      if (denial) return c.json(denial.body, denial.status);
     }
+    if (!principal) return c.json({ error: "Unauthorized" }, 401);
     const role = eventRole(principal, eventId);
-    if (role !== "admin" && role !== "reviewer") {
-      return c.json({ error: "Administrator access required" }, 403);
-    }
-    const canViewCommunicationEvidence = role === "admin";
+    const canViewCommunicationEvidence =
+      role === "admin" ||
+      authorizeCourseCheck(principal, eventId, "propose_communication") === null ||
+      authorizeCourseCheck(principal, eventId, "send") === null;
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
     await loadEvent(c.env, seed);
@@ -3222,24 +3194,14 @@ export function createApp(options: AppOptions = {}) {
     );
   });
 
-  app.post("/api/events/:eventId/course-checks/:planId/apply", async (c) => {
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(`${__ccBase}/:planId/apply`, async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
-    const eventId = c.req.param("eventId");
-    const planId = c.req.param("planId");
+    const eventId = param(c, "eventId");
+    const planId = param(c, "planId");
     if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
-    if (!isEventAdmin(principal, eventId)) {
-      return c.json(
-        {
-          error: "Administrator access is required to apply a Course Check.",
-          code: "missing_authority",
-          recoveryGuidance:
-            "Ask an event administrator to apply this Course Check.",
-        },
-        403,
-      );
-    }
+    // Stage capability re-checked below from body.stageId (revocation-safe).
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
     await loadEvent(c.env, seed);
@@ -3282,13 +3244,21 @@ export function createApp(options: AppOptions = {}) {
           })
           .filter((row): row is { findingId: string; reason: string | null } => Boolean(row))
       : undefined;
+    {
+      const denial = authorizeCourseCheck(
+        principal,
+        eventId,
+        capabilityForStage(body.stageId),
+      );
+      if (denial) return c.json(denial.body, denial.status);
+    }
     const result = (await c.env.EVENT_STORE.getByName(eventId).applyCourseCheck({
       planId,
       planVersion: body.planVersion as number,
       digest: body.digest,
       stageId: body.stageId,
       idempotencyKey,
-      actor: { id: principal.id, displayName: principal.displayName },
+      actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
       softWarningOverrides,
     })) as
       | { ok: true; plan: import("../shared/course-check").CourseCheckPlan; created: boolean }
@@ -3340,23 +3310,18 @@ export function createApp(options: AppOptions = {}) {
     return c.json(result.plan);
   });
 
-  app.post(
-    "/api/events/:eventId/course-checks/:planId/airtable/disposition",
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(
+      `${__ccBase}/:planId/airtable/disposition`,
     async (c) => {
       const principal = await resolvePrincipal(c.req.raw, c.env);
-      const eventId = c.req.param("eventId");
-      const planId = c.req.param("planId");
+      const eventId = param(c, "eventId");
+      const planId = param(c, "planId");
       if (!canAccessEvent(principal, eventId)) {
         return c.json({ error: "Unauthorized" }, 401);
       }
-      if (!isEventAdmin(principal, eventId)) {
-        return c.json(
-          {
-            error: "Administrator access is required to change Airtable delivery.",
-            code: "missing_authority",
-          },
-          403,
-        );
+      {
+        const denial = authorizeCourseCheck(principal, eventId, "integration_plan");
+        if (denial) return c.json(denial.body, denial.status);
       }
       const seed = findSeed(eventId);
       if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -3395,7 +3360,7 @@ export function createApp(options: AppOptions = {}) {
         digest: body.digest,
         disposition: body.disposition,
         idempotencyKey,
-        actor: { id: principal.id, displayName: principal.displayName },
+        actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
       }) as
         | {
             ok: true;
@@ -3423,23 +3388,18 @@ export function createApp(options: AppOptions = {}) {
     },
   );
 
-  app.post(
-    "/api/events/:eventId/course-checks/:planId/airtable/execute",
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(
+      `${__ccBase}/:planId/airtable/execute`,
     async (c) => {
       const principal = await resolvePrincipal(c.req.raw, c.env);
-      const eventId = c.req.param("eventId");
-      const planId = c.req.param("planId");
+      const eventId = param(c, "eventId");
+      const planId = param(c, "planId");
       if (!canAccessEvent(principal, eventId)) {
         return c.json({ error: "Unauthorized" }, 401);
       }
-      if (!isEventAdmin(principal, eventId)) {
-        return c.json(
-          {
-            error: "Administrator access is required to write to Airtable.",
-            code: "missing_authority",
-          },
-          403,
-        );
+      {
+        const denial = authorizeCourseCheck(principal, eventId, "integration_execute");
+        if (denial) return c.json(denial.body, denial.status);
       }
       const seed = findSeed(eventId);
       if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -3506,26 +3466,24 @@ export function createApp(options: AppOptions = {}) {
         store,
         client: connection.client,
         planId,
-        actor: { id: principal.id, displayName: principal.displayName },
+        actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
       });
       return c.json({ ...result, degraded: false });
     },
   );
 
-  app.post(
-    "/api/events/:eventId/course-checks/:planId/airtable/reconcile",
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(
+      `${__ccBase}/:planId/airtable/reconcile`,
     async (c) => {
       const principal = await resolvePrincipal(c.req.raw, c.env);
-      const eventId = c.req.param("eventId");
-      const planId = c.req.param("planId");
+      const eventId = param(c, "eventId");
+      const planId = param(c, "planId");
       if (!canAccessEvent(principal, eventId)) {
         return c.json({ error: "Unauthorized" }, 401);
       }
-      if (!isEventAdmin(principal, eventId)) {
-        return c.json(
-          { error: "Administrator access is required to reconcile Airtable writes." },
-          403,
-        );
+      {
+        const denial = authorizeCourseCheck(principal, eventId, "reconcile");
+        if (denial) return c.json(denial.body, denial.status);
       }
       const seed = findSeed(eventId);
       if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -3576,25 +3534,23 @@ export function createApp(options: AppOptions = {}) {
         store,
         client: connection.client,
         planId,
-        actor: { id: principal.id, displayName: principal.displayName },
+        actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
       });
       return c.json({ ...result, degraded: false });
     },
   );
 
-  app.post(
-    "/api/events/:eventId/course-checks/:planId/airtable/effects/:effectId/compensations",
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(
+      `${__ccBase}/:planId/airtable/effects/:effectId/compensations`,
     async (c) => {
       const principal = await resolvePrincipal(c.req.raw, c.env);
-      const eventId = c.req.param("eventId");
+      const eventId = param(c, "eventId");
       if (!canAccessEvent(principal, eventId)) {
         return c.json({ error: "Unauthorized" }, 401);
       }
-      if (!isEventAdmin(principal, eventId)) {
-        return c.json(
-          { error: "Administrator access is required to create a compensation." },
-          403,
-        );
+      {
+        const denial = authorizeCourseCheck(principal, eventId, "compensate");
+        if (denial) return c.json(denial.body, denial.status);
       }
       const seed = findSeed(eventId);
       if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -3628,7 +3584,7 @@ export function createApp(options: AppOptions = {}) {
           created: boolean;
         }>;
       };
-      const plan = await compensationStore.getCourseCheckPlan(c.req.param("planId"));
+      const plan = await compensationStore.getCourseCheckPlan(param(c, "planId"));
       if (!plan) return c.json({ error: "Course Check not found" }, 404);
       if (plan.version !== body.planVersion || plan.digest !== body.digest) {
         return c.json(
@@ -3639,10 +3595,10 @@ export function createApp(options: AppOptions = {}) {
       try {
         const result = await compensationStore.createAirtableCompensation({
           planId: plan.id,
-          effectId: c.req.param("effectId"),
+          effectId: param(c, "effectId"),
           reason: body.reason,
           idempotencyKey: body.idempotencyKey,
-          actor: { id: principal.id, displayName: principal.displayName },
+          actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
         });
         return c.json(result, result.created ? 201 : 200);
       } catch (error) {
@@ -3652,7 +3608,7 @@ export function createApp(options: AppOptions = {}) {
   );
 
   app.get("/api/events/:eventId/program", async (c) => {
-    const eventId = c.req.param("eventId");
+    const eventId = param(c, "eventId");
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
     await loadEvent(c.env, seed);
@@ -3667,8 +3623,8 @@ export function createApp(options: AppOptions = {}) {
   });
 
   app.get("/api/events/:eventId/program/sessions/:sessionId/calendar.ics", async (c) => {
-    const eventId = c.req.param("eventId");
-    const sessionId = c.req.param("sessionId");
+    const eventId = param(c, "eventId");
+    const sessionId = param(c, "sessionId");
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
     await loadEvent(c.env, seed);
@@ -3691,22 +3647,15 @@ export function createApp(options: AppOptions = {}) {
     });
   });
 
-  app.post("/api/events/:eventId/course-checks/publications", async (c) => {
+  for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(`${__ccBase}/publications`, async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
-    const eventId = c.req.param("eventId");
+    const eventId = param(c, "eventId");
     if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
-    if (!isEventAdmin(principal, eventId)) {
-      return c.json(
-        {
-          error: "Administrator access is required to create a Publication Course Check.",
-          code: "missing_authority",
-          recoveryGuidance:
-            "Ask an event administrator to create or apply this Course Check.",
-        },
-        403,
-      );
+    {
+      const denial = authorizeCourseCheck(principal, eventId, "propose_publication");
+      if (denial) return c.json(denial.body, denial.status);
     }
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
@@ -3751,7 +3700,7 @@ export function createApp(options: AppOptions = {}) {
             ? body.restoreRevisionId.trim()
             : undefined,
         idempotencyKey,
-        actor: { id: principal.id, displayName: principal.displayName },
+        actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
       })) as {
         plan: import("../shared/course-check").CourseCheckPlan;
         created: boolean;
@@ -3773,7 +3722,7 @@ export function createApp(options: AppOptions = {}) {
   /** Legacy test seam — still valid-subset publish without Course Check ceremony. */
   app.post("/api/events/:eventId/program/publish-test", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
-    const eventId = c.req.param("eventId");
+    const eventId = param(c, "eventId");
     if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
@@ -3791,7 +3740,7 @@ export function createApp(options: AppOptions = {}) {
 
   app.get("/api/events/:eventId/sessions", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
-    const eventId = c.req.param("eventId");
+    const eventId = param(c, "eventId");
     if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
@@ -3807,8 +3756,8 @@ export function createApp(options: AppOptions = {}) {
 
   app.patch("/api/events/:eventId/sessions/:sessionId", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
-    const eventId = c.req.param("eventId");
-    const sessionId = c.req.param("sessionId");
+    const eventId = param(c, "eventId");
+    const sessionId = param(c, "sessionId");
     if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
@@ -3855,7 +3804,7 @@ export function createApp(options: AppOptions = {}) {
 
   app.get("/api/events/:eventId/integrations/airtable", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
-    const eventId = c.req.param("eventId");
+    const eventId = param(c, "eventId");
     if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
@@ -3872,7 +3821,7 @@ export function createApp(options: AppOptions = {}) {
 
   app.put("/api/events/:eventId/integrations/airtable", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
-    const eventId = c.req.param("eventId");
+    const eventId = param(c, "eventId");
     if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
@@ -3923,7 +3872,7 @@ export function createApp(options: AppOptions = {}) {
 
   app.delete("/api/events/:eventId/integrations/airtable", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
-    const eventId = c.req.param("eventId");
+    const eventId = param(c, "eventId");
     if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
@@ -3940,7 +3889,7 @@ export function createApp(options: AppOptions = {}) {
 
   app.post("/api/events/:eventId/integrations/airtable/pull", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
-    const eventId = c.req.param("eventId");
+    const eventId = param(c, "eventId");
     if (!canAccessEvent(principal, eventId)) {
       return c.json({ error: "Unauthorized" }, 401);
     }
@@ -3964,6 +3913,9 @@ export function createApp(options: AppOptions = {}) {
     });
     return c.json({ pull: result, sync: await store.getAirtableSyncState() });
   });
+
+  // Mount v1 after Course Check dual routes so agent paths hit parent handlers first.
+  app.route("/api/v1", v1App);
 
   return app;
 }

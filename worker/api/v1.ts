@@ -17,8 +17,20 @@ import {
 import {
   createApiKey,
   extractBearerToken,
+  listApiKeysForEvent,
+  parseApiKeyGrantBody,
   resolvePrincipalFromApiKey,
+  updateApiKeyGrant,
 } from "../api-keys";
+import {
+  COURSE_CHECK_ACTION_TYPES,
+  COURSE_CHECK_API_VERSION,
+  COURSE_CHECK_SCOPES,
+  expandCourseCheckScopes,
+  isAgentOperatingMode,
+  isCourseCheckScopeGrant,
+  isKnownCourseCheckActionType,
+} from "../../shared/agent-api";
 import {
   assignedTrackIds,
   canAccessEvent,
@@ -89,8 +101,51 @@ export function createV1App(options: V1AppOptions = {}) {
   const airtableCredentialFactory = options.airtableCredentialClientFactory;
 
   app.get("/health", (c) =>
-    c.json({ status: "ok", api: "v1", stableIds: true }),
+    c.json({
+      status: "ok",
+      api: COURSE_CHECK_API_VERSION,
+      stableIds: true,
+      courseCheck: {
+        actionTypes: COURSE_CHECK_ACTION_TYPES,
+        scopes: COURSE_CHECK_SCOPES,
+        agentModes: [
+          "propose_only",
+          "delegated_execution",
+          "autonomous_policy",
+        ],
+      },
+    }),
   );
+
+  /** Reject unknown Course Check action types closed — no heuristic reinterpretation. */
+  app.post("/events/:eventId/course-checks/actions", async (c) => {
+    const principal = await resolveV1Principal(c.req.raw, c.env, options);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    const body = (await c.req.json().catch(() => null)) as {
+      actionType?: unknown;
+    } | null;
+    if (!isKnownCourseCheckActionType(body?.actionType)) {
+      return c.json(
+        {
+          error: "Unknown Course Check action type.",
+          code: "unknown_action_type",
+          recoveryGuidance:
+            "Use a closed v1 action type: decision, guaranteed_speaker, publication, or communication.",
+          knownActionTypes: COURSE_CHECK_ACTION_TYPES,
+        },
+        400,
+      );
+    }
+    return c.json({
+      ok: true,
+      actionType: body.actionType,
+      message:
+        "Action type recognized. Create the plan via the typed Course Check endpoint; apply never invokes a model.",
+    });
+  });
 
   app.get("/events", async (c) => {
     const principal = await resolveV1Principal(c.req.raw, c.env, options);
@@ -441,6 +496,24 @@ export function createV1App(options: V1AppOptions = {}) {
     return c.json({ pull: result, sync: await store.getAirtableSyncState() });
   });
 
+  app.get("/events/:eventId/api-keys", async (c) => {
+    const principal = await resolveV1Principal(c.req.raw, c.env, options);
+    const eventId = c.req.param("eventId");
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    if (!c.env.AUTH_DB) {
+      return c.json({ error: "API keys require AUTH_DB." }, 503);
+    }
+    const includeRevoked = c.req.query("includeRevoked") === "1";
+    const apiKeys = await listApiKeysForEvent({
+      db: c.env.AUTH_DB,
+      eventId,
+      includeRevoked,
+    });
+    return c.json({ apiKeys });
+  });
+
   app.post("/events/:eventId/api-keys", async (c) => {
     const principal = await resolveV1Principal(c.req.raw, c.env, options);
     const eventId = c.req.param("eventId");
@@ -450,7 +523,8 @@ export function createV1App(options: V1AppOptions = {}) {
     if (!c.env.AUTH_DB) {
       return c.json({ error: "API keys require AUTH_DB." }, 503);
     }
-    const body = (await c.req.json().catch(() => ({}))) as { name?: string };
+    const rawBody = await c.req.json().catch(() => ({}));
+    const grant = parseApiKeyGrantBody(rawBody);
     const scoped: OrganizerPrincipal = {
       ...principal,
       eventIds: principal.eventIds.includes(eventId)
@@ -463,8 +537,12 @@ export function createV1App(options: V1AppOptions = {}) {
     };
     const created = await createApiKey({
       db: c.env.AUTH_DB,
-      name: typeof body.name === "string" ? body.name : `Event ${eventId}`,
+      name: grant.name || `Event ${eventId}`,
       principal: scoped,
+      principalKind: grant.principalKind,
+      agentMode: grant.agentMode,
+      courseCheckScopes: grant.courseCheckScopes,
+      eventId,
     });
     return c.json(
       {
@@ -473,10 +551,63 @@ export function createV1App(options: V1AppOptions = {}) {
           name: created.name,
           token: created.token,
           createdAt: created.createdAt,
+          principalKind: created.principalKind,
+          agentMode: created.agentMode,
+          /** Expanded individual scopes (never bare `all`). */
+          courseCheckScopes: created.courseCheckScopes,
+          courseCheckScopesByEvent: created.courseCheckScopesByEvent,
         },
       },
       201,
     );
+  });
+
+  /** Update agent mode/scopes or revoke — takes effect before next stage execution. */
+  app.patch("/events/:eventId/api-keys/:keyId", async (c) => {
+    const principal = await resolveV1Principal(c.req.raw, c.env, options);
+    const eventId = c.req.param("eventId");
+    const keyId = c.req.param("keyId");
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    if (!c.env.AUTH_DB) {
+      return c.json({ error: "API keys require AUTH_DB." }, 503);
+    }
+    const body = (await c.req.json().catch(() => ({}))) as {
+      agentMode?: unknown;
+      courseCheckScopes?: unknown;
+      revoke?: unknown;
+    };
+    const scopes =
+      body.courseCheckScopes === "all"
+        ? (["all"] as const)
+        : Array.isArray(body.courseCheckScopes)
+          ? body.courseCheckScopes.filter(isCourseCheckScopeGrant)
+          : undefined;
+    const updated = await updateApiKeyGrant({
+      db: c.env.AUTH_DB,
+      keyId,
+      eventId,
+      agentMode: isAgentOperatingMode(body.agentMode) ? body.agentMode : undefined,
+      courseCheckScopes: scopes ? [...scopes] : undefined,
+      revoke: body.revoke === true,
+    });
+    if (!updated) return c.json({ error: "API key not found" }, 404);
+    return c.json({
+      apiKey: {
+        id: updated.id,
+        revoked: updated.revoked,
+        agentMode: updated.agentMode,
+        courseCheckScopes: updated.courseCheckScopes,
+        expandedFromAll:
+          Array.isArray(body.courseCheckScopes) &&
+          body.courseCheckScopes.includes("all")
+            ? expandCourseCheckScopes(["all"])
+            : body.courseCheckScopes === "all"
+              ? expandCourseCheckScopes(["all"])
+              : undefined,
+      },
+    });
   });
 
   return app;

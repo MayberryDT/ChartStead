@@ -4051,6 +4051,102 @@ details[open] > summary .course-check-chevron { transform: rotate(180deg); }
   max-width: 48rem;
 }
 
+.settings-form-wide {
+  max-width: 40rem;
+}
+
+.settings-scope-fieldset {
+  margin: 8px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.settings-scope-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 6px 12px;
+  margin-top: 8px;
+}
+
+.settings-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--on-surface);
+}
+
+.settings-check input {
+  margin-top: 2px;
+}
+
+.settings-token-reveal {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--outline);
+  background: var(--info-container);
+  color: var(--on-info-container);
+  max-width: 48rem;
+}
+
+.settings-token-value {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--on-surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.settings-key-table-wrap {
+  overflow-x: auto;
+  margin: 8px 0 12px;
+}
+
+.settings-key-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.settings-key-table th,
+.settings-key-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--outline);
+  vertical-align: top;
+}
+
+.settings-key-table th {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--on-surface-muted);
+  font-weight: 600;
+}
+
+.settings-key-table code {
+  font-size: 12px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .sync-pill {
   display: inline-flex;
   align-items: center;

@@ -45,6 +45,25 @@ export interface OrganizerPrincipal {
   eventIds: string[];
   rolesByEvent?: Record<string, "admin" | "reviewer">;
   trackIdsByEvent?: Record<string, string[]>;
+  /**
+   * Agents are distinct principals (not silent human impersonations).
+   * Omit or `human` for organizer sessions.
+   */
+  principalKind?: "human" | "agent";
+  /** Stable agent grant id when principalKind is agent. */
+  agentId?: string;
+  /**
+   * propose_only (default) | delegated_execution | autonomous_policy.
+   * Connecting an agent never implies autonomous consequential authority.
+   */
+  agentMode?: import("./agent-api").AgentOperatingMode;
+  /** Expanded per-event Course Check scopes (never stores bare `all`). */
+  courseCheckScopesByEvent?: Record<
+    string,
+    import("./agent-api").CourseCheckScope[]
+  >;
+  /** Optional human who requested this agent turn (request provenance). */
+  initiatingHuman?: { id: string; displayName: string } | null;
 }
 
 export interface EventListResponse {

@@ -9,6 +9,71 @@ import * as api from "../../src/api";
 describe("Settings Airtable sync", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(api, "listEventApiKeys").mockResolvedValue({ apiKeys: [] });
+  });
+
+  it("shows agent API key controls in Settings", async () => {
+    vi.spyOn(api, "fetchAirtableSync").mockResolvedValue({
+      sync: {
+        health: "unconfigured",
+        configured: false,
+        hasAccessToken: false,
+        lastPullAt: null,
+        lastSuccessAt: null,
+        lastError: null,
+        guidance: "Connect Airtable in Settings.",
+        pendingChangeCount: 0,
+        baseId: null,
+      },
+    });
+    vi.spyOn(api, "createEventApiKey").mockResolvedValue({
+      apiKey: {
+        id: "key-1",
+        name: "QA agent",
+        keyPrefix: "cs_live_abcd",
+        principalKind: "agent",
+        agentMode: "delegated_execution",
+        courseCheckScopes: ["decisions", "drafts"],
+        createdAt: "2026-08-12T00:00:00.000Z",
+        lastUsedAt: null,
+        revokedAt: null,
+        token: "cs_live_test_token_once",
+      },
+    });
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={client}>
+        <SettingsWorkspace eventId="pacific-open-data-summit-2026" />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("heading", { name: /Agent API keys/i })).toBeInTheDocument();
+    await user.clear(screen.getByLabelText(/^Name$/i));
+    await user.type(screen.getByLabelText(/^Name$/i), "QA agent");
+    await user.selectOptions(
+      screen.getByLabelText(/Operating mode/i),
+      "delegated_execution",
+    );
+    await user.click(screen.getByRole("checkbox", { name: /All stages/i }));
+    await user.click(screen.getByRole("button", { name: /Create agent key/i }));
+
+    await waitFor(() => {
+      expect(api.createEventApiKey).toHaveBeenCalledWith(
+        "pacific-open-data-summit-2026",
+        expect.objectContaining({
+          name: "QA agent",
+          principalKind: "agent",
+          agentMode: "delegated_execution",
+          courseCheckScopes: ["all"],
+        }),
+      );
+    });
+    expect(await screen.findByText(/Copy this token now/i)).toBeInTheDocument();
+    expect(screen.getByText("cs_live_test_token_once")).toBeInTheDocument();
   });
 
   it("shows stacked connect controls without search-field chrome", async () => {

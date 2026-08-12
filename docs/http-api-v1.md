@@ -2,7 +2,7 @@
 
 Authenticated HTTP foundation over the competition vertical slice. UI routes under `/api/events/...` remain supported; agents and integrations should prefer **`/api/v1`**.
 
-Full Course Check plan/approval/execute parity for agents is Course Check 08. Ticket 10 ships stable resource access with the same event-role authorization as the organizer UI.
+Course Check plan/approval/execute parity for scoped agents is documented in **[course-check-agent-api-v1.md](./course-check-agent-api-v1.md)**. Ticket 10 ships stable resource access with the same event-role authorization as the organizer UI; Course Check 08 adds agent principals, stage scopes, operating modes, and dual UI/v1 Course Check routes.
 
 ## Authentication
 
