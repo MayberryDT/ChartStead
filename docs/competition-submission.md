@@ -12,7 +12,7 @@ Paste-ready material for the open-source competition form and judges.
 | --- | --- |
 | Repository | https://forge.smol.ai/mayberrydt/ChartStead (or the public GitHub mirror if published) |
 | License | MIT (`LICENSE`) |
-| **Demo (no login)** | https://chartstead-demo.mayberrydt.workers.dev |
+| **Demo evaluator entry (no login)** | https://chartstead-demo.mayberrydt.workers.dev/demo |
 | Production | https://chartstead.mayberrydt.workers.dev |
 | Walkthrough | [competition-walkthrough.md](./competition-walkthrough.md) |
 | Course Check deep dive | [course-check-killer-walkthrough.md](./course-check-killer-walkthrough.md) |
@@ -28,7 +28,7 @@ Paste-ready material for the open-source competition form and judges.
 
 ## What works without external secrets
 
-- Full organizer demo path (isolated demo-admin principal)
+- Labeled organizer, track-reviewer, and signed-link speaker demo journeys
 - Public CFP submit, submissions queue, internal approve/maybe/deny
 - Course Check apply (internal outcomes), agenda with conflicts, public program
 - Airtable **unconfigured** degraded state
@@ -56,7 +56,7 @@ Ordinary edits save immediately. **Final decisions, speaker communication, publi
 
 **Solution:** ChartStead keeps operational truth in one place, separates deciding from telling, and makes irreversible/external steps reviewable before they leave the building.
 
-**Demo path for judges:** Open the demo URL → filter **Course Check Demo** on Submissions → run Apply decisions → place sessions on Agenda → open public Program. Full script in the walkthrough doc.
+**Demo path for judges:** Open the demo URL → choose organizer, track reviewer, or accepted speaker → for the full operational spine, enter Organizer, filter **Course Check Demo** on Submissions, run Apply decisions, place sessions on Agenda, and open public Program. Full script in the walkthrough doc.
 
 **Tech:** React + Vite, Hono on Cloudflare Workers, Durable Object SQLite, R2, Better Auth, Resend + React Email outbox, optional Airtable.
 

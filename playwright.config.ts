@@ -12,7 +12,8 @@ export default defineConfig({
     headless: true,
   },
   webServer: {
-    command: "npm run dev:demo -- --host 127.0.0.1 --port 4173",
+    command:
+      "CHARTSTEAD_E2E_PERSIST_PATH=$(mktemp -d) && export CHARTSTEAD_E2E_PERSIST_PATH && npx wrangler d1 migrations apply chartstead-auth-demo --local --env demo --persist-to \"$CHARTSTEAD_E2E_PERSIST_PATH\" && npm run dev:demo -- --host 127.0.0.1 --port 4173",
     url: "http://127.0.0.1:4173/api/health",
     reuseExistingServer: false,
     timeout: 120_000,

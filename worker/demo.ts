@@ -6,24 +6,24 @@ import {
 import { createResendCommunicationSender, createResendSender } from "./email";
 import { flushCommunicationEffects } from "./course-check/communication-delivery";
 import { flushEventOutbox } from "./outbox";
+import {
+  handleDemoPersonaRequest,
+  resolveDemoPrincipal,
+} from "./demo-personas";
 import { seedEvents } from "./seed-events";
 import type { AppBindings } from "./types";
 
 export { EventStore } from "./event-store";
 
 const app = createApp({
-  resolvePrincipal: async () => ({
-    id: "demo-admin",
-    displayName: "Demo Administrator",
-    role: "admin",
-    eventIds: seedEvents.map((event) => event.id),
-  }),
+  resolvePrincipal: resolveDemoPrincipal,
   // Demo/e2e only — production uses BETTER_AUTH_SECRET from the environment.
   signingSecret: "demo-local-signing-secret-not-for-production",
 });
 
 export default {
-  fetch: (request, env, ctx) => app.fetch(request, env, ctx),
+  fetch: async (request: Request, env: AppBindings, ctx: ExecutionContext) =>
+    (await handleDemoPersonaRequest(request, env)) ?? app.fetch(request, env, ctx),
   async scheduled(_controller, env) {
     const sender = createResendSender(env);
     const communicationSender = createResendCommunicationSender(env);

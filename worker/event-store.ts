@@ -10254,6 +10254,79 @@ export class EventStore extends DurableObject<AppBindings> {
     return this.cascadeSnapshot({ planId });
   }
 
+  /** Restore one named proposal's seeded review state and remove only its review audit. */
+  resetProposalReviewFixture(proposalId: string): boolean {
+    const proposal = this.ctx.storage.sql
+      .exec<{ found: number }>(
+        `SELECT 1 AS found FROM proposals WHERE id = ? LIMIT 1`,
+        proposalId,
+      )
+      .toArray()[0];
+    if (!proposal) return false;
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        `UPDATE proposals
+         SET status = 'unreviewed', committee_note = '', review_version = 0
+         WHERE id = ?`,
+        proposalId,
+      );
+      this.ctx.storage.sql.exec(
+        `DELETE FROM audit_events
+         WHERE proposal_id = ? AND type = 'proposal.review.changed'`,
+        proposalId,
+      );
+    });
+    return true;
+  }
+
+  /** Reset one explicitly identified speaker portal fixture without touching other event data. */
+  resetSpeakerPortalFixture(input: {
+    courseCheckPlanId: string;
+    speakerId: string;
+    name: string;
+    biography: string;
+  }): { reset: boolean; objectKeys: string[] } {
+    const belongsToPlan = this.ctx.storage.sql
+      .exec<{ found: number }>(
+        `SELECT 1 AS found FROM event_participations
+         WHERE course_check_plan_id = ? AND speaker_id = ? LIMIT 1`,
+        input.courseCheckPlanId,
+        input.speakerId,
+      )
+      .toArray()[0];
+    if (!belongsToPlan) return { reset: false, objectKeys: [] };
+
+    const assets = this.ctx.storage.sql
+      .exec<{ asset_id: string; object_key: string }>(
+        `SELECT asset_id, object_key FROM assets
+         WHERE owner_speaker_id = ?
+           AND purpose IN ('portal_headshot', 'portal_task')`,
+        input.speakerId,
+      )
+      .toArray();
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        `UPDATE speakers
+         SET name = ?, biography = ?, headshot_asset_id = NULL
+         WHERE id = ?`,
+        input.name,
+        input.biography,
+        input.speakerId,
+      );
+      this.ctx.storage.sql.exec(
+        `UPDATE onboarding_tasks
+         SET status = 'open', asset_id = NULL, completed_at = NULL
+         WHERE course_check_plan_id = ? AND speaker_id = ?`,
+        input.courseCheckPlanId,
+        input.speakerId,
+      );
+      for (const asset of assets) {
+        this.ctx.storage.sql.exec(`DELETE FROM assets WHERE asset_id = ?`, asset.asset_id);
+      }
+    });
+    return { reset: true, objectKeys: assets.map((asset) => asset.object_key) };
+  }
+
   private cascadeSnapshot(filter: {
     proposalId?: string;
     planId?: string;

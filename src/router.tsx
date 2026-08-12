@@ -16,6 +16,7 @@ import {
 import { SpeakerPortalPage } from "./SpeakerPortalPage";
 import { SubmitterEditPage } from "./SubmitterEditPage";
 import { ReviewerInvitationPage } from "./ReviewerInvitationPage";
+import { DemoPersonasPage } from "./DemoPersonasPage";
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
@@ -25,6 +26,12 @@ const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   component: App,
+});
+
+const demoPersonasRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/demo",
+  component: DemoPersonasPage,
 });
 
 const cfpRoute = createRoute({
@@ -146,6 +153,7 @@ function validateProposalQueueSearch(search: Record<string, unknown>): {
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  demoPersonasRoute,
   cfpRoute,
   proposalDetailRoute,
   submitterEditRoute,
