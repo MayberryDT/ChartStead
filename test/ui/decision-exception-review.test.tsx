@@ -221,15 +221,24 @@ describe("decision exception review", () => {
 
     await screen.findByRole("heading", { name: "Review 4 decisions" });
     const needsAction = screen.getByRole("heading", { name: "Needs action" });
+    expect(needsAction.querySelector("[aria-hidden='true']")).toHaveClass(
+      "course-check-classification-icon",
+    );
     const whatWillHappen = screen.getByRole("heading", { name: "What will happen" });
     expect(needsAction.compareDocumentPosition(whatWillHappen) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText("Building Reliable Agents — Jordan Lee")).toBeVisible();
     expect(screen.getByText("The acceptance decision will stay unchanged until the identity is resolved.")).toBeVisible();
     expect(screen.getByText("Blocks SUB-BLOCKED only; 2 other submissions can proceed.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Leave decision unchanged" })).toBeEnabled();
-    expect(screen.getByRole("heading", { name: "Check" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Could not check" })).toBeVisible();
-    expect(screen.getByText("Details")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Check" }).querySelector("[aria-hidden='true']"))
+      .toHaveClass("course-check-classification-icon");
+    expect(screen.getByRole("heading", { name: "Could not check" }).querySelector("[aria-hidden='true']"))
+      .toHaveClass("course-check-classification-icon");
+    const details = screen.getByText("Details");
+    expect(details).toBeVisible();
+    expect(details.querySelector("[aria-hidden='true']")).toHaveClass(
+      "course-check-classification-icon",
+    );
 
     const selected = screen.getByRole("region", { name: "Selected submissions" });
     expect(within(selected).getByRole("columnheader", { name: "Proposed decision" })).toBeVisible();
@@ -269,10 +278,35 @@ describe("decision exception review", () => {
     renderReview();
 
     const results = await screen.findByRole("region", { name: "Decision results" });
+    expect(within(results).getByRole("heading", { name: "Results" })).toHaveFocus();
     expect(within(results).getByText("2 processed")).toBeVisible();
     expect(within(results).getByText("1 failed")).toBeVisible();
     expect(within(results).getByText("1 warned")).toBeVisible();
     expect(within(results).getByText("2 skipped")).toBeVisible();
     expect(within(results).getByText("2 unchanged")).toBeVisible();
+  });
+
+  it("keeps a long shared activity history exact and responsive", async () => {
+    const withHistory = structuredClone(proposed) as CourseCheckPlan;
+    withHistory.activity = Array.from({ length: 120 }, (_, index) => ({
+      id: `activity-${index + 1}`,
+      at: new Date(Date.UTC(2026, 7, 12, 10, index)).toISOString(),
+      role: index % 2 === 0 ? "approver" as const : "executor" as const,
+      kind: "volume_acceptance",
+      summary: `Recorded exact activity ${index + 1} of 120`,
+      actor: { id: "admin", displayName: "Demo Administrator" },
+      planId: withHistory.id,
+      planVersion: index + 1,
+      outcome: index % 2 === 0 ? "approved" : "applied",
+    }));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(withHistory));
+
+    const startedAt = performance.now();
+    renderReview();
+    const activity = await screen.findByRole("region", { name: "Shared activity" });
+    expect(performance.now() - startedAt).toBeLessThan(2_000);
+    expect(within(activity).getAllByRole("listitem")).toHaveLength(120);
+    expect(within(activity).getByText(/Recorded exact activity 1 of 120/)).toBeVisible();
+    expect(within(activity).getByText(/Recorded exact activity 120 of 120/)).toBeVisible();
   });
 });

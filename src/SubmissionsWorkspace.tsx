@@ -122,6 +122,7 @@ export function SubmissionsWorkspace({
   queue,
   onQueueChange,
   cfpHref,
+  focusSelectedRecord = false,
 }: {
   event: EventRecord;
   principal: OrganizerPrincipal;
@@ -131,6 +132,7 @@ export function SubmissionsWorkspace({
   queue: ProposalQueueState;
   onQueueChange: (next: ProposalQueueState) => void;
   cfpHref: string;
+  focusSelectedRecord?: boolean;
 }) {
   const navigate = useNavigate();
   const [search, setSearch] = useState(queue.query);
@@ -490,6 +492,7 @@ export function SubmissionsWorkspace({
               proposal={selected}
               auditEvents={auditEvents}
               isAdmin={currentRole === "admin"}
+              focusRecord={focusSelectedRecord}
               onClose={onCloseProposal}
             />
           ) : (
@@ -869,17 +872,20 @@ function ProposalInspector({
   proposal,
   auditEvents,
   isAdmin,
+  focusRecord,
   onClose,
 }: {
   eventId: string;
   proposal: OrganizerProposal;
   auditEvents: ProposalAuditEvent[];
   isAdmin: boolean;
+  focusRecord: boolean;
   onClose?: () => void;
 }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const closeRef = useRef<HTMLButtonElement>(null);
+  const recordTitleRef = useRef<HTMLHeadingElement>(null);
   const [committeeNote, setCommitteeNote] = useState(proposal.committeeNote);
   const [message, setMessage] = useState<string | null>(null);
   const supportingFile = proposal.supportingFile ?? null;
@@ -895,10 +901,14 @@ function ProposalInspector({
   }, [proposal.id]);
 
   useEffect(() => {
+    if (focusRecord) {
+      const frame = window.requestAnimationFrame(() => recordTitleRef.current?.focus());
+      return () => window.cancelAnimationFrame(frame);
+    }
     if (!window.matchMedia?.("(max-width: 960px)").matches) return;
     const frame = window.requestAnimationFrame(() => closeRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
-  }, [proposal.id]);
+  }, [focusRecord, proposal.id]);
 
   const mutation = useMutation({
     mutationFn: (input: { status?: ProposalStatus; committeeNote?: string }) =>
@@ -965,7 +975,7 @@ function ProposalInspector({
           Back to queue
         </button>
         <div className="inspector-kicker">{proposal.id}</div>
-        <h2>{proposal.title}</h2>
+        <h2 ref={recordTitleRef} tabIndex={focusRecord ? -1 : undefined}>{proposal.title}</h2>
         <div className="inspector-who">
           <span className="avatar" aria-hidden="true">
             {initials(proposal.speakerName)}

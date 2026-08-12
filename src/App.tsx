@@ -623,6 +623,7 @@ function EventDesk({
             queue={initialQueue}
             onQueueChange={changeQueue}
             cfpHref={cfpHref}
+            focusSelectedRecord={Boolean(repairReturnTo)}
           />
         ) : activeNav === "Agenda" ? (
           <AgendaWorkspace event={event} initialSessionIds={initialAgendaSessionIds} />

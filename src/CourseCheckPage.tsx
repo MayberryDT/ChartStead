@@ -2302,6 +2302,10 @@ export function CourseCheckPage() {
         <GuaranteedBody plan={currentPlan} />
       )}
 
+      {isDecision && decisionReview ? (
+        <OperationHistoryPanel plan={currentPlan} />
+      ) : null}
+
       <AirtableStage
         plan={currentPlan}
         isPending={airtableMutation.isPending}

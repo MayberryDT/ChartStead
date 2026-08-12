@@ -340,6 +340,23 @@ test("draft result stays truthful through the exact Outbox handoff and reload", 
       } },
     })).ok()).toBe(true);
   }
+
+  await page.reload();
+  const sendButton = page.getByRole("button", { name: /Send \d+ messages?/ });
+  await expect(sendButton).toBeEnabled();
+  await sendButton.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Delivery effects" })).toBeVisible({
+    timeout: 30_000,
+  });
+  const deliveredResponse = await page.request.get(
+    `/api/events/pacific-open-data-summit-2026/course-checks/${communication.id}`,
+  );
+  const delivered = (await deliveredResponse.json()) as {
+    body: { drafts: unknown[]; effects: unknown[] };
+  };
+  expect(delivered.body.effects).toHaveLength(delivered.body.drafts.length);
+  expect(delivered.body.effects.length).toBeGreaterThan(0);
 });
 
 test("publication uses the same external-effect review in the API and organizer workspace", async ({
@@ -664,6 +681,7 @@ test("issue repair returns to the same decision review with context and focus", 
   await expect(page).toHaveURL(
     new RegExp(`/submissions/${proposal!.id}\\?field=sessionPlacement`),
   );
+  await expect(page.locator(".inspector-header h2")).toBeFocused();
   await page.getByRole("link", { name: "Return to decision review" }).click();
   await expect(page).toHaveURL(new RegExp(`/course-checks/${plan.id}$`));
   await expect(page.getByRole("link", { name: "Change session placement" }).first()).toBeFocused();

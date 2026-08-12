@@ -618,6 +618,12 @@ describe("Course Check review workspace", () => {
     expect(container.querySelector(".course-check-stage-task-copy")).not.toHaveTextContent(
       "digest-1",
     );
+    const announcementText = Array.from(
+      container.querySelectorAll<HTMLElement>("[role='status'], [aria-live]"),
+    )
+      .map((node) => node.textContent?.replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    expect(new Set(announcementText).size).toBe(announcementText.length);
   });
 
   it.each([
@@ -1099,7 +1105,11 @@ describe("Course Check review workspace", () => {
     expect(screen.queryByRole("button", { name: /fix|resolve|manage/i })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Keep session unplaced" }));
-    expect(screen.getByText("Acknowledged: The decision can proceed with placement still pending.")).toBeVisible();
+    const acknowledgement = screen.getByText(
+      "Acknowledged: The decision can proceed with placement still pending.",
+    );
+    expect(acknowledgement).toBeVisible();
+    expect(acknowledgement).toHaveFocus();
 
     await user.click(screen.getByRole("button", { name: "Skip this submission" }));
     expect(screen.getByRole("checkbox", { name: /SUB-PODS0001/ })).toBeChecked();

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type {
   DecisionReviewIssue,
@@ -35,6 +35,13 @@ const FILTERS: Array<{ key: DecisionReviewItemFilter | "all"; label: string }> =
   { key: "ready", label: "Ready" },
   { key: "skipped", label: "Skipped" },
 ];
+
+const CLASSIFICATION_ICON: Record<DecisionReviewIssueClass, string> = {
+  needs_action: "!",
+  could_not_check: "?",
+  check: "!",
+  details: "i",
+};
 
 function IssueCard({
   issue,
@@ -128,7 +135,15 @@ function ProposedReview({
             aria-labelledby={`decision-${classification}-title`}
             key={classification}
           >
-            <h2 id={`decision-${classification}-title`}>{title}</h2>
+            <h2 id={`decision-${classification}-title`}>
+              <span
+                className="course-check-classification-icon"
+                aria-hidden="true"
+              >
+                {CLASSIFICATION_ICON[classification]}
+              </span>{" "}
+              {title}
+            </h2>
             <div className="decision-exception-list">
               {matching.map((issue) => (
                 <IssueCard
@@ -167,7 +182,15 @@ function ProposedReview({
 
       {review.issues.some((issue) => issue.classification === "details") ? (
         <details className="panel decision-exception-details">
-          <summary>Details</summary>
+          <summary>
+            <span
+              className="course-check-classification-icon"
+              aria-hidden="true"
+            >
+              {CLASSIFICATION_ICON.details}
+            </span>{" "}
+            Details
+          </summary>
           <div className="decision-exception-list">
             {review.issues
               .filter((issue) => issue.classification === "details")
@@ -265,6 +288,12 @@ function ProposedReview({
 function AppliedResult({ review }: { review: DecisionReviewProjection }) {
   const result = review.result!;
   const counts = result.outcomeCounts;
+  const titleRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    titleRef.current?.focus();
+  }, []);
+
   return (
     <div className="course-check-sections course-check-review decision-exception-review">
       <section
@@ -272,7 +301,7 @@ function AppliedResult({ review }: { review: DecisionReviewProjection }) {
         role="region"
         aria-label="Decision results"
       >
-        <h2>Results</h2>
+        <h2 ref={titleRef} tabIndex={-1}>Results</h2>
         <p className="lede">{result.summary}</p>
         <div className="decision-result-counts" aria-label="Exact result counts">
           <strong>{counts.processed} processed</strong>

@@ -1,9 +1,56 @@
+import { useEffect, useRef } from "react";
+
 import type { CourseCheckIssueAction } from "../../shared/course-check-actions";
 import {
   repairHref,
   saveCourseCheckReturnContext,
   type CourseCheckReturnContext,
 } from "./useCourseCheckReturnContext";
+
+function AcknowledgeAction({
+  action,
+  acknowledged,
+  onAcknowledge,
+}: {
+  action: CourseCheckIssueAction;
+  acknowledged: boolean;
+  onAcknowledge: (action: CourseCheckIssueAction) => void;
+}) {
+  const resultRef = useRef<HTMLParagraphElement>(null);
+  const restoreFocus = useRef(false);
+
+  useEffect(() => {
+    if (acknowledged && restoreFocus.current) {
+      resultRef.current?.focus();
+      restoreFocus.current = false;
+    }
+  }, [acknowledged]);
+
+  return acknowledged ? (
+    <p
+      ref={resultRef}
+      className="course-check-action-result"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      tabIndex={-1}
+    >
+      Acknowledged: {action.resultingEffectSummary}
+    </p>
+  ) : (
+    <button
+      type="button"
+      className="btn btn-secondary btn-sm"
+      data-issue-action-id={action.id}
+      onClick={() => {
+        restoreFocus.current = true;
+        onAcknowledge(action);
+      }}
+    >
+      {action.label}
+    </button>
+  );
+}
 
 export function IssueActions({
   planId,
@@ -43,20 +90,13 @@ export function IssueActions({
         }
         if (action.target.command === "acknowledge_warning") {
           const acknowledged = acknowledgedActionIds.has(action.id);
-          return acknowledged ? (
-            <p key={action.id} className="course-check-action-result" role="status">
-              Acknowledged: {action.resultingEffectSummary}
-            </p>
-          ) : (
-            <button
+          return (
+            <AcknowledgeAction
               key={action.id}
-              type="button"
-              className="btn btn-secondary btn-sm"
-              data-issue-action-id={action.id}
-              onClick={() => onAcknowledge(action)}
-            >
-              {action.label}
-            </button>
+              action={action}
+              acknowledged={acknowledged}
+              onAcknowledge={onAcknowledge}
+            />
           );
         }
         if (action.target.command === "defer_items") {

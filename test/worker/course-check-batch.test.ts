@@ -391,8 +391,7 @@ describe("Course Check 02 batch decisions and shared workspace", () => {
   });
 
   it("splits oversized batches into linked exact plans with aggregate progress", async () => {
-    const open = await openProposalIds(2);
-    // Unit-level split is covered by splitSelectionsIfNeeded; here verify batch shape + optional real split.
+    const open = await openProposalIds(DEFAULT_DECISION_BATCH_LIMIT + 3);
     const { splitSelectionsIfNeeded } = await import(
       "../../worker/course-check/decision-planner"
     );
@@ -404,13 +403,38 @@ describe("Course Check 02 batch decisions and shared workspace", () => {
     expect(chunks[0]).toHaveLength(DEFAULT_DECISION_BATCH_LIMIT);
     expect(chunks[1]).toHaveLength(3);
 
+    const startedAt = performance.now();
     const created = await createBatch({
       items: open.map((id) => ({ proposalId: id, outcome: "declined" as const })),
       idempotencyKey: `split-shape-${Date.now()}`,
     });
+    expect(performance.now() - startedAt).toBeLessThan(10_000);
     const decision = asDecision(created.body);
-    expect(decision.aggregateProgress.total).toBe(2);
+    expect(decision.items).toHaveLength(DEFAULT_DECISION_BATCH_LIMIT);
+    expect(decision.aggregateProgress).toEqual({
+      total: DEFAULT_DECISION_BATCH_LIMIT,
+      active: DEFAULT_DECISION_BATCH_LIMIT,
+      deferred: 0,
+      applied: 0,
+    });
     expect(decision.batchGroupId).toBeTruthy();
+    expect(decision.linkedPlanIds).toHaveLength(1);
+    expect(decision.splitExplanation).toContain("part 1 of 2");
+
+    expect(created.body.linkedPlans).toHaveLength(1);
+    const linked = created.body.linkedPlans![0]!;
+    const linkedDecision = asDecision(linked);
+    expect(linkedDecision.items).toHaveLength(3);
+    expect(linkedDecision.aggregateProgress).toEqual({
+      total: 3,
+      active: 3,
+      deferred: 0,
+      applied: 0,
+    });
+    expect(linkedDecision.batchGroupId).toBe(decision.batchGroupId);
+    expect(linkedDecision.linkedPlanIds).toEqual([created.body.id]);
+    expect(linkedDecision.splitExplanation).toContain("part 2 of 2");
+    expect(decision.aggregateProgress.total + linkedDecision.aggregateProgress.total).toBe(28);
   });
 
   it("allows internal soft-warning overrides without a reason", async () => {

@@ -2537,6 +2537,8 @@ table.grid tbody tr[aria-selected="true"] td:first-child {
   gap: 18px;
 }
 
+.course-check-page > * { min-width: 0; }
+
 .course-check-header {
   display: flex;
   justify-content: space-between;
@@ -2594,8 +2596,11 @@ table.grid tbody tr[aria-selected="true"] td:first-child {
 
 .course-check-sections {
   display: grid;
+  min-width: 0;
   gap: 12px;
 }
+
+.course-check-sections > * { min-width: 0; }
 
 .course-check-sections > .panel {
   border-radius: 0;
@@ -2681,6 +2686,18 @@ table.grid tbody tr[aria-selected="true"] td:first-child {
   border-left: 3px solid var(--secondary);
   background: var(--surface-subtle);
   color: var(--on-surface-variant);
+}
+
+.course-check-classification-icon {
+  display: inline-grid;
+  width: 1.4em;
+  height: 1.4em;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 0.72em;
+  line-height: 1;
+  vertical-align: 0.08em;
 }
 
 .course-check-fast-path-page {
@@ -2930,6 +2947,11 @@ table.grid tbody tr[aria-selected="true"] td:first-child {
 
 .course-check-result { border-left: 4px solid var(--success); }
 
+.course-check-result h2:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
 .course-check-result-groups {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3040,6 +3062,11 @@ table.grid tbody tr[aria-selected="true"] td:first-child {
   margin: 0;
   color: var(--on-surface-variant);
   font-size: 13px;
+}
+
+.course-check-action-result:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
 }
 
 .connected-course-check-progress ol {
