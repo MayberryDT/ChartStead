@@ -1,6 +1,6 @@
 # 21 — Schedule and enforce CFP opening and closure
 
-**Status:** in-progress
+**Status:** done
 
 **Blocked by:** None — can start immediately.
 
@@ -30,3 +30,4 @@ None — can start immediately.
 
 - 2026-08-12 — Started for agent implementation after Tyler authorized the incoming Competition Build frontier; demos, reviews, and human QA are deferred while automated acceptance verification remains required.
 - 2026-08-12 — Implemented server-authoritative per-form scheduling in the event timezone, exact public deadlines, pre-open/post-close proposal and signed-edit enforcement, durable explicit close/reopen overrides, and draft/publish isolation. Focused lifecycle UI/worker/browser tests pass; full UI (105/105), worker (226/226), browser (30/30), typecheck, and build pass after rebasing through current main.
+- 2026-08-12 — Integrated on main after all automated acceptance gates passed; marked done with demos, review, and human QA deferred by Tyler.
