@@ -4,7 +4,7 @@
 
 **Blocked by:** Course Check 15 — Clean Decision Course Check fast path; Course Check 16 — Exception-first batches and partial processing; Course Check 18 — Connected decision-to-draft Course Check workspace; Course Check 21 — Unified publication and external-effect review.
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 ## Source
 
@@ -26,3 +26,5 @@
 - 2026-08-12 — This ticket makes every overnight-verifiable part of the research validation plan agent-executable. Real participant observation remains a morning human activity, not a blocker in this ticket graph.
 
 - 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.
+
+- 2026-08-12 — Started after Course Check 21 integrated; automated verification and a seeded evaluator pack are in scope, while demos, reviews, human QA, and claims of human usability evidence remain deferred per Tyler's instruction.
