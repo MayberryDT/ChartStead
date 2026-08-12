@@ -4,7 +4,7 @@
 
 **Blocked by:** 08 — Complete agent API control.
 
-**Status:** blocked
+**Status:** ready-for-agent
 
 - [ ] Research how comparable products connect agents (MCP OAuth / remote MCP, Claude connectors, ChatGPT custom GPT actions, Linear/GitHub/Notion bot installs, device-code or one-click “Connect Claude”, short-lived tokens + refresh) and record a short recommendation with tradeoffs.
 - [ ] Choose a primary connection path for ChartStead organizers (likely remote MCP and/or OAuth client credentials for agent hosts) without requiring staff to paste `cs_live_…` secrets into chat.
@@ -23,3 +23,5 @@
 Filed after Course Check 08 human QA: raw API keys work and are correct as a kernel/compatibility layer, but they are a poor primary UX for organizers who want to “give an agent access.” Spec already excluded MCP from the competition build; this ticket owns the friendlier connection model once 08 is done.
 
 - 2026-08-12 — Tyler: create ticket for MCP/other connection UX; keep 08 API keys as interim.
+
+- 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.

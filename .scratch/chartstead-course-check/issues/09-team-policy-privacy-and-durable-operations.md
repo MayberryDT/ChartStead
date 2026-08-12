@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Batch decisions and shared workspace; 04 — External sends and effect recovery; 06 — Program Publication Course Check; 08 — Complete agent API control.
 
-**Status:** blocked
+**Status:** ready-for-agent
 
 - [ ] Event policy can require two-person approval, separate roles, mandatory reasons, or stricter agent controls without weakening baseline protections.
 - [ ] Authorized administrators and agents see complete evidence; reviewers see only assigned-track decision evidence; speakers and public users see no internal plans.
@@ -23,4 +23,4 @@
 
 Blocked by Course Check 02 — Batch decisions and shared workspace, Course Check 04 — External sends and effect recovery, Course Check 06 — Program Publication Course Check, and Course Check 08 — Complete agent API control.
 
-- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 08 (ready-for-agent).
+- 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.
