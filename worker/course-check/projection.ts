@@ -123,6 +123,55 @@ function redactDecisionEmails(body: DecisionPlanBody): DecisionPlanBody {
   };
 }
 
+function redactPublicationBody(body: PublicationPlanBody): PublicationPlanBody {
+  const calendarIds = body.calendarConsequences.map((operation) => operation.uid);
+  const replaceCalendarIds = (value: unknown): unknown => {
+    if (typeof value === "string") {
+      return calendarIds.reduce(
+        (redacted, id) => redacted.replaceAll(id, REDACTED),
+        value,
+      );
+    }
+    if (Array.isArray(value)) return value.map(replaceCalendarIds);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [
+          key,
+          key === "uid" || key === "calendarUid"
+            ? REDACTED
+            : replaceCalendarIds(item),
+        ]),
+      );
+    }
+    return value;
+  };
+  const redacted = {
+    ...body,
+    calendarConsequences: body.calendarConsequences.map((operation) => ({
+      ...operation,
+      uid: REDACTED,
+      recipients: operation.recipients.map(() => ({
+        email: REDACTED,
+        name: REDACTED,
+      })),
+    })),
+    airtable: {
+      ...body.airtable,
+      redacted: true,
+      effects: body.airtable.effects.map((effect) => ({
+        ...effect,
+        fields: { redacted: true },
+        beforeFields: null,
+        providerRecordId: null,
+        lastError: effect.lastError
+          ? "Integration delivery requires administrator review."
+          : null,
+      })),
+    },
+  };
+  return replaceCalendarIds(redacted) as PublicationPlanBody;
+}
+
 function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
   return count === 1 ? singular : pluralForm;
 }
@@ -1736,6 +1785,16 @@ export function projectCourseCheckForViewer(
     };
   }
 
+  if (
+    projected.body.actionType === "publication" &&
+    !options.canViewCommunicationEvidence
+  ) {
+    projected = {
+      ...projected,
+      body: redactPublicationBody(projected.body),
+    };
+  }
+
   if (!options.canViewCommunicationEvidence && projected.body.airtable.effects.length > 0) {
     projected = {
       ...projected,
@@ -1768,6 +1827,8 @@ export function projectCourseCheckForViewer(
             ? projectDecisionBody(version.body, options)
             : version.body.actionType === "communication"
               ? redactCommunicationBody(version.body)
+              : version.body.actionType === "publication"
+                ? redactPublicationBody(version.body)
               : version.body,
       })),
     };

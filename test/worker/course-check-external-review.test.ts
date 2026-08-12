@@ -516,6 +516,36 @@ describe("unified external-effect review projection", () => {
     expect(projected?.externalReview?.effectGroups.find((group) => group.key === "calendar")?.providerDetails).toEqual([]);
   });
 
+  it("redacts publication calendar identities in the current body and every version", () => {
+    const source = publicationPlan();
+    source.versions = [{
+      planId: source.id,
+      version: 0,
+      digest: "prior-private-digest",
+      state: "Needs review",
+      body: structuredClone(source.body),
+      createdAt: source.createdAt,
+      createdBy: source.createdBy,
+      mutationKind: "revise",
+      summary: "Prior publication review",
+    }];
+    const reviewer = projectCourseCheckForViewer(source, {
+      ...adminProjection,
+      role: "reviewer",
+      canViewCommunicationEvidence: false,
+      canViewFullDecisionEvidence: false,
+      permittedStageIds: [],
+    });
+    const serialized = JSON.stringify(reviewer);
+
+    expect(serialized).not.toContain("private-stable-uid@example.test");
+    expect(serialized).not.toContain("speaker@example.test");
+    expect(serialized).not.toContain('"name":"Speaker"');
+    expect(JSON.stringify(projectCourseCheckForViewer(source, adminProjection))).toContain(
+      "private-stable-uid@example.test",
+    );
+  });
+
   it("reports partial delivery and safe recovery without calling unknown outcomes complete", () => {
     const projected = projectCourseCheckForViewer(communicationPlan(), adminProjection);
     const review = projected?.externalReview;

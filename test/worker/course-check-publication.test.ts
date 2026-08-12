@@ -27,6 +27,17 @@ const adminApp = createApp({
   signingSecret,
 });
 
+const reviewerApp = createApp({
+  resolvePrincipal: async () => ({
+    id: "cc06-reviewer",
+    displayName: "Publication Reviewer",
+    role: "reviewer",
+    eventIds: [eventId],
+    trackIdsByEvent: { [eventId]: ["platform"] },
+  }),
+  signingSecret,
+});
+
 const publicApp = createApp({
   resolvePrincipal: async () => null,
   signingSecret,
@@ -464,6 +475,72 @@ describe("Course Check 06 program publication", () => {
     expect(restored.revision.id).not.toBe(empty.revision.id);
     expect(restored.sessions.length).toBe(before.sessions.length);
     expect(restored.revisions.some((row) => row.id === priorId)).toBe(true);
+  });
+
+  it("redacts publication calendar identities from reviewer GET and list projections", async () => {
+    let agenda = await getAgenda();
+    let session: AgendaWorkspaceResponse["sessions"][number] | undefined = agenda.sessions[0];
+    if (!session) {
+      const proposal = (await listProposals()).find(
+        (item) => item.programOutcome == null && item.status !== "deny",
+      );
+      expect(proposal).toBeTruthy();
+      await acceptProposal(proposal!.id, `cc06-redact-accept-${crypto.randomUUID()}`);
+      agenda = await getAgenda();
+      session = agenda.sessions.find((row) => row.proposalId === proposal!.id);
+    }
+    expect(session).toBeTruthy();
+    await placeSession(session!.id, {
+      roomId: "harbor-hall",
+      startsAt: "2026-10-10T16:00:00.000Z",
+      endsAt: "2026-10-10T16:45:00.000Z",
+    });
+    const created = await createPublication({
+      operation: "publish",
+      key: `cc06-redact-${crypto.randomUUID()}`,
+    });
+    expect(created.status).toBe(201);
+    if (!("id" in created.plan) || created.plan.body.actionType !== "publication") return;
+    const createdPlan = created.plan;
+    const publicationBody = created.plan.body;
+    const privateCalendar = publicationBody.calendarConsequences[0];
+    expect(privateCalendar).toBeTruthy();
+
+    const getResponse = await reviewerApp.request(
+      `https://chartstead.test/api/events/${eventId}/course-checks/${createdPlan.id}`,
+      undefined,
+      env,
+    );
+    expect(getResponse.status).toBe(200);
+    const getPlan = await getResponse.json<CourseCheckPlan>();
+    const listResponse = await reviewerApp.request(
+      `https://chartstead.test/api/events/${eventId}/course-checks`,
+      undefined,
+      env,
+    );
+    expect(listResponse.status).toBe(200);
+    const listed = await listResponse.json<{ plans: CourseCheckPlan[] }>();
+    const listPlan = listed.plans.find((plan) => plan.id === createdPlan.id);
+    expect(listPlan).toBeTruthy();
+
+    for (const projected of [getPlan, listPlan!]) {
+      expect(projected.body.actionType).toBe("publication");
+      if (projected.body.actionType !== "publication") continue;
+      expect(projected.body.calendarConsequences[0]).toMatchObject({
+        uid: "[redacted]",
+        recipients: privateCalendar!.recipients.map(() => ({
+          email: "[redacted]",
+          name: "[redacted]",
+        })),
+      });
+      expect(JSON.stringify(projected)).not.toContain(privateCalendar!.uid);
+      for (const recipient of privateCalendar!.recipients) {
+        expect(JSON.stringify(projected)).not.toContain(recipient.email);
+        expect(projected.body.calendarConsequences[0]!.recipients).not.toContainEqual(
+          expect.objectContaining({ name: recipient.name }),
+        );
+      }
+    }
   });
 
   it("creates linked communication stubs without delivery on calendar consequences", async () => {
