@@ -7,7 +7,7 @@ import {
 
 export function IssueActions({
   planId,
-  actions,
+  actions = [],
   context,
   acknowledgedActionIds,
   onAcknowledge,

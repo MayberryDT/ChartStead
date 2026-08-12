@@ -1302,6 +1302,7 @@ export function CourseCheckPage() {
   );
   const [issueFilter, setIssueFilter] = useState("all");
   const [expandedIssueIds, setExpandedIssueIds] = useState<string[]>([]);
+  const [focusDeferReason, setFocusDeferReason] = useState(false);
   const [acknowledgedActionIds, setAcknowledgedActionIds] = useState<Set<string>>(
     new Set(),
   );
@@ -1376,6 +1377,16 @@ export function CourseCheckPage() {
     Boolean(planQuery.data),
     restoreReviewContext,
   );
+
+  useEffect(() => {
+    if (!focusDeferReason || selectedItemIds.size === 0) return;
+    const input = document.querySelector<HTMLInputElement>(
+      'input[placeholder="Why defer these items?"]',
+    );
+    if (!input) return;
+    input.focus();
+    setFocusDeferReason(false);
+  }, [focusDeferReason, selectedItemIds]);
 
   const applyMutation = useMutation({
     mutationFn: (current: CourseCheckPlan) => {
@@ -1830,9 +1841,7 @@ export function CourseCheckPage() {
             }}
             onExcludeIssueItems={(itemIds) => {
               setSelectedItemIds(new Set(itemIds));
-              document
-                .querySelector<HTMLInputElement>('input[placeholder="Why defer these items?"]')
-                ?.focus();
+              setFocusDeferReason(true);
             }}
           />
         ) : (
@@ -1948,7 +1957,7 @@ export function CourseCheckPage() {
                 {decisionReview.partialExecution.skippedCount} will stay unchanged
               </p>
             ) : null}
-            {!decisionReview ? (
+            {!decisionReview || selectedItemIds.size > 0 ? (
               <div className="course-check-defer">
                 <label>
                   Defer selected blocked items
