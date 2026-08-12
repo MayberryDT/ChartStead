@@ -1783,7 +1783,7 @@ export class EventStore extends DurableObject<AppBindings> {
       event.name,
       event.startsOn,
       event.endsOn,
-      event.timezone,
+      event.timezone?.trim() || "UTC",
       event.submissionCount,
       event.unreviewedCount,
       JSON.stringify(event.tracks),

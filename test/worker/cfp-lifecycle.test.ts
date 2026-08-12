@@ -21,7 +21,7 @@ const app = createApp({
   resolvePrincipal: async () => admin,
   signingSecret,
   lifecycleNow: () => new Date(nowMs),
-} as Parameters<typeof createApp>[0] & { lifecycleNow: () => Date });
+});
 
 function answers(title: string): SubmissionAnswers {
   return {
