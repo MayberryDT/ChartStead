@@ -2412,13 +2412,40 @@ export function createApp(options: AppOptions = {}) {
         created: boolean;
         linkedPlans?: import("../shared/course-check").CourseCheckPlan[];
       };
+      const projectionPolicy = (await store.getCourseCheckPolicy()) as EventCourseCheckPolicy;
+      const projectionOptions = courseCheckProjectionOptions(
+        principal!,
+        eventId,
+        projectionPolicy,
+      );
+      const projectedPlan = (await store.projectCourseCheckPlan(
+        result.plan,
+        projectionOptions,
+      )) as import("../shared/course-check").CourseCheckPlan | null;
+      if (!projectedPlan) {
+        return c.json({ error: "Course Check not found" }, 404);
+      }
       if (result.linkedPlans && result.linkedPlans.length > 0) {
+        const linkedPlans = (
+          await Promise.all(
+            result.linkedPlans.map(
+              async (plan) =>
+                (await store.projectCourseCheckPlan(
+                  plan,
+                  projectionOptions,
+                )) as import("../shared/course-check").CourseCheckPlan | null,
+            ),
+          )
+        ).filter(
+          (plan): plan is import("../shared/course-check").CourseCheckPlan =>
+            Boolean(plan),
+        );
         return c.json(
-          { ...result.plan, linkedPlans: result.linkedPlans },
+          { ...projectedPlan, linkedPlans },
           result.created ? 201 : 200,
         );
       }
-      return c.json(result.plan, result.created ? 201 : 200);
+      return c.json(projectedPlan, result.created ? 201 : 200);
     } catch (error) {
       return c.json(
         {
@@ -2432,6 +2459,7 @@ export function createApp(options: AppOptions = {}) {
   function courseCheckProjectionOptions(
     principal: OrganizerPrincipal,
     eventId: string,
+    policy?: EventCourseCheckPolicy | null,
   ) {
     const role = eventRole(principal, eventId);
     const canViewCommunicationEvidence =
@@ -2446,11 +2474,40 @@ export function createApp(options: AppOptions = {}) {
         : role === "reviewer"
           ? ("reviewer" as const)
           : ("none" as const);
+    const knownStageIds = [
+      "apply-decision",
+      "apply-guaranteed-speaker",
+      "create-drafts",
+      "send-messages",
+      "publish-program",
+      "unpublish-program",
+      "restore-program",
+      "write-airtable",
+    ];
+    const permittedStageIds = knownStageIds.filter(
+      (stageId) =>
+        authorizeCourseCheck(
+          principal,
+          eventId,
+          capabilityForStage(stageId),
+          policy,
+        ) === null,
+    );
     return {
       role: projectionRole,
       trackIds: assignedTrackIds(principal, eventId),
       canViewCommunicationEvidence,
       canViewFullDecisionEvidence: role === "admin" || isAgentPrincipal(principal),
+      permittedStageIds,
+      canDeferItems:
+        authorizeCourseCheck(principal, eventId, "defer", policy) === null,
+      canStartDraftPreparation:
+        authorizeCourseCheck(
+          principal,
+          eventId,
+          "propose_communication",
+          policy,
+        ) === null,
     };
   }
 
@@ -2515,7 +2572,8 @@ export function createApp(options: AppOptions = {}) {
     if (!seed) return c.json({ error: "Event not found" }, 404);
     await loadEvent(c.env, seed);
     const store = c.env.EVENT_STORE.getByName(eventId);
-    const options = courseCheckProjectionOptions(principal, eventId);
+    const policy = (await store.getCourseCheckPolicy()) as EventCourseCheckPolicy;
+    const options = courseCheckProjectionOptions(principal, eventId, policy);
     const listed = (await store.listCourseCheckPlans()) as import("../shared/course-check").CourseCheckPlan[];
     const plans = (
       await Promise.all(
@@ -3115,7 +3173,8 @@ export function createApp(options: AppOptions = {}) {
       );
     }
     const itemIds = body.itemIds.filter((id): id is string => typeof id === "string");
-    const result = (await c.env.EVENT_STORE.getByName(eventId).deferCourseCheckItems({
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const result = (await store.deferCourseCheckItems({
       planId,
       planVersion: body.planVersion as number,
       digest: body.digest,
@@ -3142,7 +3201,13 @@ export function createApp(options: AppOptions = {}) {
         result.status,
       );
     }
-    return c.json(result.plan, result.created ? 201 : 200);
+    const policy = (await store.getCourseCheckPolicy()) as EventCourseCheckPolicy;
+    const projected = await store.projectCourseCheckPlan(
+      result.plan,
+      courseCheckProjectionOptions(principal!, eventId, policy),
+    );
+    if (!projected) return c.json({ error: "Course Check not found" }, 404);
+    return c.json(projected, result.created ? 201 : 200);
   });
 
 
@@ -3306,9 +3371,10 @@ export function createApp(options: AppOptions = {}) {
     const store = c.env.EVENT_STORE.getByName(eventId);
     const plan = await store.getCourseCheckPlan(planId);
     if (!plan) return c.json({ error: "Course Check not found" }, 404);
+    const policy = (await store.getCourseCheckPolicy()) as EventCourseCheckPolicy;
     const projected = await store.projectCourseCheckPlan(
       plan,
-      courseCheckProjectionOptions(principal, eventId),
+      courseCheckProjectionOptions(principal, eventId, policy),
     );
     if (!projected) return c.json({ error: "Course Check not found" }, 404);
     return c.json(projected);
@@ -3495,7 +3561,12 @@ export function createApp(options: AppOptions = {}) {
       }
     }
 
-    return c.json(result.plan);
+    const projected = await store.projectCourseCheckPlan(
+      result.plan,
+      courseCheckProjectionOptions(principal!, eventId, policy),
+    );
+    if (!projected) return c.json({ error: "Course Check not found" }, 404);
+    return c.json(projected);
   });
 
   for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(

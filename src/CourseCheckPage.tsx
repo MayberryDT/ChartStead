@@ -8,6 +8,7 @@ import type {
   CourseCheckEvidenceSection,
   CourseCheckFinding,
   CourseCheckPlan,
+  DecisionReviewProjection,
   DecisionPlanBody,
   PublicationPlanBody,
 } from "../shared/course-check";
@@ -134,6 +135,11 @@ function AirtableStage({
 }) {
   const effects = plan.body.airtable.effects;
   if (effects.length === 0) return null;
+  const canCommitIntegration =
+    !plan.decisionReview ||
+    plan.decisionReview.permittedCommits.some(
+      (commit) => commit.stageId === "write-airtable",
+    );
 
   return (
     <section className="course-check-airtable" aria-labelledby="airtable-effects-title">
@@ -195,7 +201,9 @@ function AirtableStage({
         ))}
       </div>
 
-      {plan.receipt && plan.body.airtable.disposition === "active" ? (
+      {plan.receipt &&
+      plan.body.airtable.disposition === "active" &&
+      canCommitIntegration ? (
         <div className="course-check-airtable-actions">
           <button type="button" className="btn btn-primary" disabled={isPending} onClick={() => onAction("execute")}>
             Write to Airtable
@@ -351,6 +359,158 @@ function DecisionBatchBody({
           No message, calendar, public-program, or integration delivery is created by
           Apply decision.
         </p>
+      </section>
+    </div>
+  );
+}
+
+function DecisionReviewBody({
+  plan,
+  review,
+  selectedItemIds,
+  onToggleItem,
+}: {
+  plan: CourseCheckPlan;
+  review: DecisionReviewProjection;
+  selectedItemIds: Set<string>;
+  onToggleItem: (itemId: string) => void;
+}) {
+  const body = plan.body as DecisionPlanBody;
+  const result = review.result;
+  const itemState = (item: DecisionPlanBody["items"][number]) => {
+    if (item.status === "deferred") return "Unchanged";
+    if (item.status === "applied") {
+      return item.outcome === "accepted" ? "Accepted" : "Declined";
+    }
+    return item.outcome === "accepted" ? "Will accept" : "Will decline";
+  };
+
+  return (
+    <div className="course-check-sections course-check-review">
+      {result ? (
+        <section className="panel course-check-result" aria-labelledby="decision-result-title">
+          <h2 id="decision-result-title">Results</h2>
+          <p className="lede">{result.summary}</p>
+          <div className="course-check-result-groups">
+            <section>
+              <h3>Decisions</h3>
+              <p>
+                {result.decisions.accepted} accepted · {result.decisions.declined} declined
+              </p>
+            </section>
+            <section>
+              <h3>Generated records</h3>
+              <p>
+                {result.generatedRecords.totalCreated === 0
+                  ? "No related records were created."
+                  : `${result.generatedRecords.totalCreated} related ${
+                      result.generatedRecords.totalCreated === 1 ? "record was" : "records were"
+                    } created.`}
+              </p>
+              {result.generatedRecords.totalCreated > 0 ? (
+                <p className="muted">
+                  {result.generatedRecords.speakersCreated} speakers ·{" "}
+                  {result.generatedRecords.participationsCreated} participations ·{" "}
+                  {result.generatedRecords.sessionsCreated} sessions ·{" "}
+                  {result.generatedRecords.tasksCreated} tasks ·{" "}
+                  {result.generatedRecords.portalAccessCreated} portal access grants
+                </p>
+              ) : null}
+            </section>
+            <section>
+              <h3>Unchanged</h3>
+              <p>
+                {result.unchangedCount === 0
+                  ? "No submissions were left unchanged."
+                  : `${result.unchangedCount} ${
+                      result.unchangedCount === 1 ? "submission was" : "submissions were"
+                    } left unchanged.`}
+              </p>
+            </section>
+            <section>
+              <h3>Drafts</h3>
+              <p>{result.drafts.label}</p>
+            </section>
+            <section>
+              <h3>External communication</h3>
+              <p>{result.externalCommunication.label}</p>
+            </section>
+          </div>
+          <p className="muted">
+            Applied {result.appliedAt} by {result.appliedBy}.
+          </p>
+        </section>
+      ) : (
+        <>
+          <section className="panel" aria-labelledby="decision-review-summary-title">
+            <h2 id="decision-review-summary-title">Review summary</h2>
+            <dl className="course-check-review-counts">
+              {Object.entries(review.counts).map(([label, count]) => (
+                <div key={label}>
+                  <dt>{label === "needsAction" ? "Needs action" : label}</dt>
+                  <dd>{count}</dd>
+                </div>
+              ))}
+            </dl>
+            <p className="course-check-boundary" role="status">
+              {review.preCommitBoundary}
+            </p>
+          </section>
+
+          {review.issues.length > 0 ? (
+            <section className="panel" aria-labelledby="decision-review-issues-title">
+              <h2 id="decision-review-issues-title">Prioritized issues</h2>
+              <ul className="course-check-findings">
+                {review.issues.map((issue, index) => (
+                  <li key={`${issue.summary}-${index}`} data-severity={issue.severity}>
+                    <strong>{issue.severity}</strong>
+                    <p>{issue.summary}</p>
+                    {issue.nextStep ? (
+                      <p className="course-check-recovery">{issue.nextStep}</p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          <section className="panel" aria-labelledby="decision-review-effects-title">
+            <h2 id="decision-review-effects-title">What will happen</h2>
+            <ul className="course-check-review-effects">
+              {review.effectGroups.map((group) => (
+                <li key={group.key} data-state={group.state}>
+                  <div>
+                    <strong>{group.title}</strong>
+                    <span>{group.state === "pending" ? "Pending" : "Unchanged"}</span>
+                  </div>
+                  <p>{group.summary}</p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </>
+      )}
+
+      <section className="panel" aria-labelledby="decision-items-title">
+        <h2 id="decision-items-title">Selected decisions</h2>
+        <ul className="course-check-batch-items">
+          {body.items.map((item) => (
+            <li key={item.itemId} data-status={item.status}>
+              <label className="course-check-batch-item">
+                <input
+                  type="checkbox"
+                  aria-label={`${item.proposalId}: ${itemState(item)}`}
+                  checked={selectedItemIds.has(item.itemId)}
+                  disabled={item.status !== "active"}
+                  onChange={() => onToggleItem(item.itemId)}
+                />
+                <span>
+                  <strong>{item.proposalId}</strong> · {itemState(item)}
+                </span>
+              </label>
+            </li>
+          ))}
+        </ul>
       </section>
     </div>
   );
@@ -1169,12 +1329,6 @@ export function CourseCheckPage() {
             ? "Remaining batch applied. Deferred items stay in the follow-up queue."
             : "Decision applied. Internal records updated; no speaker email was sent.",
       );
-      if (
-        next.body.actionType === "decision" &&
-        (next.state === "Complete" || next.state === "Partially complete")
-      ) {
-        linkCommunicationMutation.mutate(next);
-      }
     },
   });
 
@@ -1426,6 +1580,7 @@ export function CourseCheckPage() {
   const publicationBody = isPublication
     ? (currentPlan.body as PublicationPlanBody)
     : null;
+  const decisionReview = isDecision ? currentPlan.decisionReview ?? null : null;
   const blocked = currentPlan.body.findings.some(
     (finding) => finding.severity === "blocker",
   );
@@ -1454,7 +1609,7 @@ export function CourseCheckPage() {
               : isPublication
                 ? "Program publication workspace"
                 : isDecision
-                  ? "Shared decision workspace"
+                  ? decisionReview?.title ?? "Shared decision workspace"
                   : "Course Check workspace"}
           </h1>
           <p className="lede">
@@ -1462,16 +1617,23 @@ export function CourseCheckPage() {
               ? "Review exact recipients, approve delivery, and recover every address from the delivery results."
               : isPublication
                 ? "Inspect the public program changes before you publish, unpublish, or restore. Communication stays separate."
-                : "Shared Course Check workspace. Another authorized administrator can open this exact batch and continue."}
+                : decisionReview?.courseCheckSummary ??
+                  "Shared Course Check workspace. Another authorized administrator can open this exact batch and continue."}
           </p>
         </div>
         <div className="course-check-header-tools">
-          <div className="course-check-header-status">
-            <span className="course-check-plan-state" data-state={currentPlan.state}>
-              {currentPlan.state}
-            </span>
-            <span className="mono" title={currentPlan.id}>#{currentPlan.id.slice(0, 8)}</span>
-          </div>
+          {decisionReview ? (
+            <p className="course-check-freshness" data-state={decisionReview.freshness.state}>
+              {decisionReview.freshness.label}
+            </p>
+          ) : (
+            <div className="course-check-header-status">
+              <span className="course-check-plan-state" data-state={currentPlan.state}>
+                {currentPlan.state}
+              </span>
+              <span className="mono" title={currentPlan.id}>#{currentPlan.id.slice(0, 8)}</span>
+            </div>
+          )}
           <Link
             className="btn btn-secondary btn-sm"
             to="/e/$eventId/submissions"
@@ -1492,18 +1654,34 @@ export function CourseCheckPage() {
       ) : null}
 
       {isDecision ? (
-        <DecisionBatchBody
-          plan={currentPlan}
-          selectedItemIds={selectedItemIds}
-          onToggleItem={(itemId) => {
-            setSelectedItemIds((current) => {
-              const next = new Set(current);
-              if (next.has(itemId)) next.delete(itemId);
-              else next.add(itemId);
-              return next;
-            });
-          }}
-        />
+        decisionReview ? (
+          <DecisionReviewBody
+            plan={currentPlan}
+            review={decisionReview}
+            selectedItemIds={selectedItemIds}
+            onToggleItem={(itemId) => {
+              setSelectedItemIds((current) => {
+                const next = new Set(current);
+                if (next.has(itemId)) next.delete(itemId);
+                else next.add(itemId);
+                return next;
+              });
+            }}
+          />
+        ) : (
+          <DecisionBatchBody
+            plan={currentPlan}
+            selectedItemIds={selectedItemIds}
+            onToggleItem={(itemId) => {
+              setSelectedItemIds((current) => {
+                const next = new Set(current);
+                if (next.has(itemId)) next.delete(itemId);
+                else next.add(itemId);
+                return next;
+              });
+            }}
+          />
+        )
       ) : isCommunication ? (
         <CommunicationBody
           plan={currentPlan}
@@ -1564,67 +1742,80 @@ export function CourseCheckPage() {
       <footer className="course-check-actions">
         {isDecision && decisionComplete ? (
           <>
-            <p className="form-message" data-tone="success" role="status">
-              {currentPlan.state}
-              {currentPlan.receipt?.appliedAt ? ` at ${currentPlan.receipt.appliedAt}` : ""}
-              {currentPlan.receipt
-                ? ` by ${formatCourseCheckActorLabel(currentPlan.receipt.actor)}`
-                : ""}
-              . Receipt <span className="mono">{currentPlan.receipt?.id.slice(0, 8)}</span>
-            </p>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={linkCommunicationMutation.isPending}
-              onClick={() => {
-                setMessage(null);
-                linkCommunicationMutation.mutate(currentPlan);
-              }}
-            >
-              Open communication Course Check
-            </button>
+            {!decisionReview ? (
+              <p className="form-message" data-tone="success" role="status">
+                {currentPlan.state}
+                {currentPlan.receipt?.appliedAt ? ` at ${currentPlan.receipt.appliedAt}` : ""}
+                {currentPlan.receipt
+                  ? ` by ${formatCourseCheckActorLabel(currentPlan.receipt.actor)}`
+                  : ""}
+              </p>
+            ) : null}
+            {!decisionReview || decisionReview.canStartDraftPreparation ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={linkCommunicationMutation.isPending}
+                onClick={() => {
+                  setMessage(null);
+                  linkCommunicationMutation.mutate(currentPlan);
+                }}
+              >
+                {decisionReview
+                  ? "Prepare communication drafts"
+                  : "Open communication Course Check"}
+              </button>
+            ) : null}
           </>
         ) : null}
 
-        {isDecision && !decisionComplete ? (
+        {isDecision &&
+        !decisionComplete &&
+        (!decisionReview ||
+          decisionReview.canDeferItems ||
+          decisionReview.primaryActionLabel) ? (
           <>
-            <div className="course-check-defer">
-              <label>
-                Defer selected blocked items
-                <input
-                  type="text"
-                  value={deferReason}
-                  onChange={(event) => setDeferReason(event.target.value)}
-                  placeholder="Why defer these items?"
-                />
-              </label>
+            {!decisionReview || decisionReview.canDeferItems ? (
+              <div className="course-check-defer">
+                <label>
+                  Defer selected blocked items
+                  <input
+                    type="text"
+                    value={deferReason}
+                    onChange={(event) => setDeferReason(event.target.value)}
+                    placeholder="Why defer these items?"
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={
+                    selectedItemIds.size === 0 ||
+                    !deferReason.trim() ||
+                    deferMutation.isPending
+                  }
+                  onClick={() => {
+                    setMessage(null);
+                    deferMutation.mutate(currentPlan);
+                  }}
+                >
+                  Defer to follow-up
+                </button>
+              </div>
+            ) : null}
+            {!decisionReview || decisionReview.primaryActionLabel ? (
               <button
                 type="button"
-                className="btn btn-secondary"
-                disabled={
-                  selectedItemIds.size === 0 ||
-                  !deferReason.trim() ||
-                  deferMutation.isPending
-                }
+                className="btn btn-primary"
+                disabled={blocked || applyMutation.isPending || !applyStage}
                 onClick={() => {
                   setMessage(null);
-                  deferMutation.mutate(currentPlan);
+                  applyMutation.mutate(currentPlan);
                 }}
               >
-                Defer to follow-up
+                {decisionReview?.primaryActionLabel ?? applyStage?.verb ?? "Apply decision"}
               </button>
-            </div>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={blocked || applyMutation.isPending || !applyStage}
-              onClick={() => {
-                setMessage(null);
-                applyMutation.mutate(currentPlan);
-              }}
-            >
-              {applyStage?.verb ?? "Apply decision"}
-            </button>
+            ) : null}
           </>
         ) : null}
 

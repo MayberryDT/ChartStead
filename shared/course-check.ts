@@ -623,6 +623,93 @@ export interface CourseCheckReceipt {
   actor: CourseCheckActor;
 }
 
+export type DecisionReviewEffectState = "pending" | "applied" | "unchanged";
+
+export interface DecisionReviewIssue {
+  severity: CourseCheckFindingSeverity;
+  summary: string;
+  nextStep: string | null;
+  affectedItemCount: number;
+}
+
+export interface DecisionReviewEffectGroup {
+  key:
+    | "decisions"
+    | "records"
+    | "unchanged"
+    | "drafts"
+    | "external_communication"
+    | "integration";
+  title: string;
+  state: DecisionReviewEffectState;
+  count: number;
+  summary: string;
+}
+
+export interface DecisionReviewPermittedCommit {
+  stageId: string;
+  label: string;
+  effectSummary: string;
+}
+
+export interface DecisionReviewGeneratedRecords {
+  speakersCreated: number;
+  speakersReused: number;
+  participationsCreated: number;
+  sessionsCreated: number;
+  tasksCreated: number;
+  portalAccessCreated: number;
+  totalCreated: number;
+}
+
+export interface DecisionReviewAppliedResult {
+  title: string;
+  summary: string;
+  decisions: { accepted: number; declined: number; total: number };
+  generatedRecords: DecisionReviewGeneratedRecords;
+  unchangedCount: number;
+  drafts: {
+    state: "not_prepared" | "planned" | "prepared";
+    count: number;
+    label: string;
+  };
+  externalCommunication: { emailsSent: number; label: string };
+  appliedAt: string;
+  appliedBy: string;
+}
+
+/**
+ * Organizer-facing adapter over the durable decision plan. The underlying plan
+ * remains the approval/idempotency authority; this projection contains only
+ * live business scope, consequences, permitted commits, and truthful results.
+ */
+export interface DecisionReviewProjection {
+  kind: "decision_review";
+  phase: "proposed" | "applied";
+  title: string;
+  courseCheckSummary: string;
+  counts: {
+    selected: number;
+    ready: number;
+    needsAction: number;
+    warning: number;
+    skipped: number;
+  };
+  issues: DecisionReviewIssue[];
+  effectGroups: DecisionReviewEffectGroup[];
+  permittedCommits: DecisionReviewPermittedCommit[];
+  canDeferItems: boolean;
+  canStartDraftPreparation: boolean;
+  freshness: {
+    state: "current" | "age_warning" | "out_of_date";
+    label: string;
+    checkedAt: string;
+  };
+  preCommitBoundary: string | null;
+  primaryActionLabel: string | null;
+  result: DecisionReviewAppliedResult | null;
+}
+
 export interface CourseCheckPlanVersion {
   planId: string;
   version: number;
@@ -648,6 +735,8 @@ export interface CourseCheckPlan {
   body: CourseCheckPlanBody;
   approval: CourseCheckApproval | null;
   receipt: CourseCheckReceipt | null;
+  /** Authenticated viewer-specific business projection for decision reviews. */
+  decisionReview?: DecisionReviewProjection;
   /** Immutable prior versions (newest first, excludes current). */
   versions?: CourseCheckPlanVersion[];
   mutations?: PlanMutationRecord[];

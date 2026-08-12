@@ -33,3 +33,100 @@ test("Course Check Demo track is walkthrough-ready from submissions", async ({
   await page.keyboard.press("Tab");
   await expect(page.locator("body")).toBeVisible();
 });
+
+test("decision review stays truthful before and after commit", async ({ page }) => {
+  const proposalsResponse = await page.request.get(
+    "/api/events/pacific-open-data-summit-2026/proposals",
+  );
+  expect(proposalsResponse.ok()).toBe(true);
+  const proposals = (await proposalsResponse.json()) as {
+    proposals: Array<{ id: string; programOutcome: string | null }>;
+  };
+  const proposal = proposals.proposals.find((row) => !row.programOutcome);
+  expect(proposal).toBeTruthy();
+
+  const key = `cc14-browser-${Date.now()}`;
+  const createResponse = await page.request.post(
+    "/api/events/pacific-open-data-summit-2026/course-checks/decisions",
+    {
+      headers: { "idempotency-key": key },
+      data: {
+        items: [{ proposalId: proposal!.id, outcome: "declined" }],
+        idempotencyKey: key,
+      },
+    },
+  );
+  expect(createResponse.status()).toBe(201);
+  const plan = (await createResponse.json()) as { id: string };
+
+  await page.goto(
+    `/e/pacific-open-data-summit-2026/course-checks/${plan.id}`,
+  );
+  await expect(
+    page.getByRole("heading", { name: "Review 1 decline decision" }),
+  ).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: /Will decline/ })).toBeVisible();
+  await expect(
+    page.getByText("Nothing has changed. No external communication has been sent."),
+  ).toBeVisible();
+  await expect(page.getByText(/plan reference|mutation history/i)).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Decline 1 submission" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Decline decision applied" }),
+  ).toBeVisible();
+  await expect(page.getByText("1 submission was declined.")).toBeVisible();
+  await expect(page.getByText("No drafts were prepared.")).toBeVisible();
+  await expect(page.getByText("No emails were sent.")).toBeVisible();
+  await expect(page).toHaveURL(
+    new RegExp(`/course-checks/${plan.id}$`),
+  );
+});
+
+test("batch decision review reports exact scope before and after commit", async ({
+  page,
+}) => {
+  const proposalsResponse = await page.request.get(
+    "/api/events/pacific-open-data-summit-2026/proposals",
+  );
+  const proposals = (await proposalsResponse.json()) as {
+    proposals: Array<{ id: string; programOutcome: string | null }>;
+  };
+  const selected = proposals.proposals.filter((row) => !row.programOutcome).slice(0, 2);
+  expect(selected).toHaveLength(2);
+
+  const key = `cc14-browser-batch-${Date.now()}`;
+  const createResponse = await page.request.post(
+    "/api/events/pacific-open-data-summit-2026/course-checks/decisions",
+    {
+      headers: { "idempotency-key": key },
+      data: {
+        items: selected.map((proposal) => ({
+          proposalId: proposal.id,
+          outcome: "declined",
+        })),
+        idempotencyKey: key,
+      },
+    },
+  );
+  expect(createResponse.status()).toBe(201);
+  const plan = (await createResponse.json()) as { id: string };
+
+  await page.goto(
+    `/e/pacific-open-data-summit-2026/course-checks/${plan.id}`,
+  );
+  await expect(
+    page.getByRole("heading", { name: "Review 2 decline decisions" }),
+  ).toBeVisible();
+  await expect(page.getByText("2 submissions will be declined.")).toBeVisible();
+  await page.getByRole("button", { name: "Decline 2 submissions" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Decline decisions applied" }),
+  ).toBeVisible();
+  await expect(page.getByText("2 submissions were declined.")).toBeVisible();
+  await expect(page.getByText("No drafts were prepared.")).toBeVisible();
+  await expect(page.getByText("No emails were sent.")).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/course-checks/${plan.id}$`));
+});

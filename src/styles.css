@@ -2200,6 +2200,101 @@ table.grid tbody tr[aria-selected="true"] td:first-child {
   font-size: 14px;
 }
 
+.course-check-freshness {
+  max-width: 32ch;
+  margin: 0;
+  color: var(--on-surface-variant);
+  font-size: 13px;
+  text-align: right;
+}
+
+.course-check-freshness[data-state="out_of_date"] { color: var(--error); }
+.course-check-freshness[data-state="age_warning"] { color: var(--warning); }
+
+.course-check-review-counts {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  background: var(--outline);
+  border: 1px solid var(--outline);
+}
+
+.course-check-review-counts > div {
+  padding: 12px;
+  background: var(--surface);
+}
+
+.course-check-review-counts dt {
+  color: var(--on-surface-muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: capitalize;
+}
+
+.course-check-review-counts dd {
+  margin: 3px 0 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.course-check-boundary {
+  margin: 14px 0 0;
+  padding: 11px 13px;
+  border-left: 3px solid var(--secondary);
+  background: var(--surface-subtle);
+  color: var(--on-surface-variant);
+}
+
+.course-check-review-effects {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.course-check-review-effects li {
+  padding: 13px;
+  border: 1px solid var(--outline);
+  background: var(--surface);
+}
+
+.course-check-review-effects li > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.course-check-review-effects li > div > span {
+  color: var(--on-surface-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.course-check-review-effects p { margin: 7px 0 0; color: var(--on-surface-variant); }
+
+.course-check-result { border-left: 4px solid var(--success); }
+
+.course-check-result-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.course-check-result-groups > section {
+  padding: 13px;
+  border: 1px solid var(--outline);
+  background: var(--surface-subtle);
+}
+
+.course-check-result-groups h3 { margin: 0 0 5px; font-size: 13px; }
+.course-check-result-groups p { margin: 0; }
+
 .course-check-message-content {
   display: grid;
   gap: 16px;
@@ -4439,12 +4534,17 @@ details[open] > summary .course-check-chevron { transform: rotate(180deg); }
   .course-check-disclosure-meta { justify-content: flex-start; }
   .course-check-effect-identity .mono { max-width: calc(100vw - 78px); }
   .course-check-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .course-check-review-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .course-check-review-effects,
+  .course-check-result-groups { grid-template-columns: 1fr; }
+  .course-check-freshness { max-width: none; text-align: left; }
   .course-check-meta > div,
   .course-check-meta > div:not(:first-child) { padding: 8px; border: 0; border-bottom: 1px solid var(--outline); }
 }
 
 @media (max-width: 520px) {
   .course-check-meta { grid-template-columns: 1fr; }
+  .course-check-review-counts { grid-template-columns: 1fr; }
   .course-check-airtable-effects dl > div { grid-template-columns: 1fr; gap: 3px; }
   .course-check-section-header { flex-direction: column; gap: 8px; }
   .course-check-actions,
