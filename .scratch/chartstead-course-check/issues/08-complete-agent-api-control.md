@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Batch decisions and shared workspace; 04 — External sends and effect recovery; 05 — Calendar delivery lifecycle; 06 — Program Publication Course Check; 07 — Airtable consequence effects; Competition 10 — Authenticated HTTP foundation.
 
-**Status:** in-review
+**Status:** done
 
 - [x] The `v1` contract exposes closed action types, stable event/entity/plan/stage/effect IDs, plan and state revisions, digest, findings, effects, approvals, receipts, and idempotency keys.
 - [x] API clients can create, inspect, revise, approve, execute, defer, retry, reconcile, and compensate every supported Course Check action.
@@ -26,5 +26,6 @@
 Blocked by Course Check 02, 04, 05, 06, and 07, plus Competition Ticket 10 — Airtable mapping and authenticated HTTP foundation.
 
 - 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.
-- 2026-08-11 — claimed by agent in worktree `course-check-08-agent-api`; implementing v1 agent API control.
-- 2026-08-11 — implementation complete for human QA (`in-review`). Worktree `course-check-08-agent-api`. Docs: `docs/course-check-agent-api-v1.md`. Contract tests: `test/worker/course-check-agent-api.test.ts` (10). Full Course Check worker suite 82 pass. Demo: http://100.105.117.93:5188/
+- 2026-08-11 — claimed; implemented v1 agent API, Settings agent keys UI, handoff brief; human Codex suite passed end-to-end (full scopes).
+- 2026-08-12 — Follow-up: Course Check 13 — Agent connection UX beyond raw API keys.
+- 2026-08-12 — **done**: merged to main after human QA (Codex agent decline+apply; actor provenance + on-behalf-of labels).
