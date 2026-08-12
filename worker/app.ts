@@ -16,6 +16,7 @@ import type {
   PublishedCfpForm,
   ReviewerAssignment,
   SessionPlacementPatch,
+  SpeakerDirectoryCreateInput,
 } from "../shared/events";
 import { createAuth, resolveProductionPrincipal } from "./auth";
 import {
@@ -2001,6 +2002,81 @@ export function createApp(options: AppOptions = {}) {
     const store = c.env.EVENT_STORE.getByName(eventId);
     const board = await store.getOnboardingBoard();
     return c.json({ ...board, eventId: event.id });
+  });
+
+  app.post("/api/events/:eventId/speakers", async (c) => {
+    const eventId = c.req.param("eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can manage speakers." }, 403);
+    }
+    const body = (await c.req.json().catch(() => null)) as Partial<SpeakerDirectoryCreateInput> | null;
+    if (!body || typeof body !== "object") {
+      return c.json({ error: "Speaker request must be valid JSON." }, 400);
+    }
+    const result = await c.env.EVENT_STORE.getByName(eventId).createDirectorySpeaker({
+      name: typeof body.name === "string" ? body.name : "",
+      email: typeof body.email === "string" ? body.email : "",
+      biography: typeof body.biography === "string" ? body.biography : "",
+      titleSnapshot: typeof body.titleSnapshot === "string" ? body.titleSnapshot : "",
+      organizationSnapshot:
+        typeof body.organizationSnapshot === "string" ? body.organizationSnapshot : "",
+      role: typeof body.role === "string" ? body.role : "invited",
+      reuseSpeakerId:
+        typeof body.reuseSpeakerId === "string" ? body.reuseSpeakerId : undefined,
+      createNewIdentity: body.createNewIdentity === true,
+      actorId: principal.id,
+      actorName: principal.displayName,
+    });
+    if (!result.ok) {
+      return c.json(
+        {
+          error: result.error,
+          ...(result.code ? { code: result.code } : {}),
+          ...(result.matches ? { matches: result.matches } : {}),
+        },
+        result.status,
+      );
+    }
+    return c.json(result.value, result.value.reused ? 200 : 201);
+  });
+
+  app.patch("/api/events/:eventId/speakers/:speakerId", async (c) => {
+    const eventId = c.req.param("eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can manage speakers." }, 403);
+    }
+    const body = (await c.req.json().catch(() => null)) as {
+      name?: unknown;
+      email?: unknown;
+      biography?: unknown;
+    } | null;
+    if (!body || typeof body !== "object") {
+      return c.json({ error: "Speaker update must be valid JSON." }, 400);
+    }
+    const result = await c.env.EVENT_STORE.getByName(eventId).updateDirectorySpeaker({
+      speakerId: c.req.param("speakerId"),
+      name: typeof body.name === "string" ? body.name : undefined,
+      email: typeof body.email === "string" ? body.email : undefined,
+      biography: typeof body.biography === "string" ? body.biography : undefined,
+      actorId: principal.id,
+      actorName: principal.displayName,
+    });
+    if (!result.ok) return c.json({ error: result.error }, result.status);
+    return c.json(result.speaker);
   });
 
   app.post("/api/events/:eventId/onboarding/tasks", async (c) => {

@@ -14,6 +14,12 @@ import {
   sendOnboardingReminder,
   updateOnboardingReminder,
 } from "./api";
+import {
+  filterDirectorySpeakers,
+  SpeakerCurrentProfile,
+  SpeakerDirectoryToolbar,
+  type SpeakerDirectoryFilter,
+} from "./SpeakerDirectory";
 
 function formatWhen(value: string | null | undefined): string {
   if (!value) return "—";
@@ -50,6 +56,7 @@ function humanFlag(flag: string | null | undefined): string | null {
 function humanHistoryType(type: string): string {
   const known: Record<string, string> = {
     profile_updated: "Profile updated",
+    directory_speaker_added: "Added to speaker directory",
     task_created: "Task created",
     task_completed: "Task completed",
     reminder_draft_created: "Reminder draft prepared",
@@ -124,17 +131,24 @@ export function OnboardingWorkspace({ eventId }: { eventId: string }) {
     "manual",
   );
   const [taskDueAt, setTaskDueAt] = useState("");
+  const [speakerSearch, setSpeakerSearch] = useState("");
+  const [speakerFilter, setSpeakerFilter] = useState<SpeakerDirectoryFilter>("all");
 
   const speakers = board.data?.speakers ?? [];
+  const filteredSpeakers = useMemo(
+    () => filterDirectorySpeakers(speakers, speakerSearch, speakerFilter),
+    [speakers, speakerSearch, speakerFilter],
+  );
   const selected = useMemo(
     () =>
-      speakers.find((row) => row.speakerId === selectedSpeakerId) ??
-      speakers[0] ??
+      filteredSpeakers.find((row) => row.speakerId === selectedSpeakerId) ??
+      filteredSpeakers[0] ??
       null,
-    [speakers, selectedSpeakerId],
+    [filteredSpeakers, selectedSpeakerId],
   );
 
-  const refresh = async () => {
+  const refresh = async (speakerId?: string) => {
+    if (speakerId) setSelectedSpeakerId(speakerId);
     await queryClient.invalidateQueries({ queryKey: ["onboarding-board", eventId] });
   };
 
@@ -274,18 +288,29 @@ export function OnboardingWorkspace({ eventId }: { eventId: string }) {
     <div className="workspace onboarding-workspace">
       <section className="operations-panel onboarding-board">
         <div className="panel-heading">
-          <h2>Speaker readiness</h2>
-          <span>
-            {speakers.length} speaker{speakers.length === 1 ? "" : "s"}
-          </span>
+          <h2>Speaker directory</h2>
+          <span>Identity, participation, and readiness</span>
         </div>
+        <SpeakerDirectoryToolbar
+          eventId={eventId}
+          search={speakerSearch}
+          filter={speakerFilter}
+          visibleCount={filteredSpeakers.length}
+          totalCount={speakers.length}
+          onSearchChange={setSpeakerSearch}
+          onFilterChange={setSpeakerFilter}
+          onChanged={refresh}
+          onMessage={flash}
+        />
         {message ? (
           <p className="form-message onboarding-flash" data-tone={messageTone ?? undefined}>
             {message}
           </p>
         ) : null}
         {speakers.length === 0 ? (
-          <p className="empty-state padded">No accepted speakers yet.</p>
+          <p className="empty-state padded">No event speakers yet.</p>
+        ) : filteredSpeakers.length === 0 ? (
+          <p className="empty-state padded">No speakers match this search and filter.</p>
         ) : (
           <div className="onboarding-table-wrap">
             <table className="onboarding-table">
@@ -300,7 +325,7 @@ export function OnboardingWorkspace({ eventId }: { eventId: string }) {
                 </tr>
               </thead>
               <tbody>
-                {speakers.map((row) => {
+                {filteredSpeakers.map((row) => {
                   const isSelected = selected?.speakerId === row.speakerId;
                   return (
                     <tr
@@ -387,6 +412,13 @@ export function OnboardingWorkspace({ eventId }: { eventId: string }) {
           <div className="onboarding-detail-body">
             <div className="onboarding-detail-grid">
               <div className="onboarding-detail-col">
+                <SpeakerCurrentProfile
+                  key={selected.speakerId}
+                  eventId={eventId}
+                  speaker={selected}
+                  onChanged={refresh}
+                  onMessage={flash}
+                />
                 <div className="onboarding-card">
                   <div className="onboarding-card-head">
                     <h3>Missing work</h3>

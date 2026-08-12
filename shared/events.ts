@@ -279,6 +279,10 @@ export interface OnboardingBoardSpeaker {
   speakerId: string;
   name: string;
   email: string;
+  biography: string;
+  participationId: string;
+  titleSnapshot: string;
+  organizationSnapshot: string;
   proposalId: string | null;
   proposalTitle: string | null;
   role: string;
@@ -297,6 +301,31 @@ export interface OnboardingBoardSpeaker {
   lastContactAt: string | null;
   lastContactStatus: string | null;
   history: OnboardingHistoryEntry[];
+}
+
+export interface SpeakerDirectoryIdentityMatch {
+  speakerId: string;
+  name: string;
+  email: string;
+  signal: "email" | "name";
+}
+
+export interface SpeakerDirectoryCreateInput {
+  name: string;
+  email: string;
+  biography?: string;
+  titleSnapshot: string;
+  organizationSnapshot: string;
+  role?: string;
+  reuseSpeakerId?: string;
+  createNewIdentity?: boolean;
+}
+
+export interface SpeakerDirectoryMutation {
+  speaker: OnboardingBoardSpeaker;
+  reused: boolean;
+  /** Session linkage remains an explicit guaranteed-speaker Course Check. */
+  sessionLinkage: "course_check_required";
 }
 
 export interface OnboardingBoard {

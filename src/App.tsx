@@ -406,7 +406,7 @@ function EventDesk({
       : activeNav === "Agenda"
         ? "Agenda"
         : activeNav === "Speakers"
-          ? "Speaker onboarding"
+          ? "Speakers"
           : activeNav === "Settings"
             ? "Settings"
             : event.name;
@@ -416,7 +416,7 @@ function EventDesk({
       : activeNav === "Agenda"
         ? `${formatDateRange(event.startsOn, event.endsOn)} · day and room placement`
         : activeNav === "Speakers"
-          ? "Readiness, missing work, and assisted reminder drafts"
+          ? "Directory, readiness, event participation, and assisted follow-up"
           : activeNav === "Settings"
             ? "Airtable sync status and API foundation"
             : formatDateRange(event.startsOn, event.endsOn);

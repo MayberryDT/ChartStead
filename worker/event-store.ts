@@ -81,6 +81,9 @@ import type {
   OnboardingCompletionRequirement,
   OnboardingHistoryEntry,
   OnboardingReminderDraft,
+  SpeakerDirectoryCreateInput,
+  SpeakerDirectoryIdentityMatch,
+  SpeakerDirectoryMutation,
   OrganizerCfpForm,
   OrganizerCfpFormSummary,
   OrganizerProposal,
@@ -3822,6 +3825,215 @@ export class EventStore extends DurableObject<AppBindings> {
     return mapPortalTask(created, null);
   }
 
+  private directoryIdentityMatches(input: {
+    name: string;
+    email: string;
+  }): SpeakerDirectoryIdentityMatch[] {
+    const normalizedEmail = input.email.trim().toLowerCase();
+    const normalizedName = input.name.trim().toLowerCase();
+    const rows = this.ctx.storage.sql
+      .exec<SpeakerRow>(
+        `SELECT id, name, email, biography, headshot_asset_id, created_at
+         FROM speakers
+         WHERE lower(email) = ? OR lower(trim(name)) = ?
+         ORDER BY name, email`,
+        normalizedEmail,
+        normalizedName,
+      )
+      .toArray();
+    return rows.map((row) => ({
+      speakerId: row.id,
+      name: row.name,
+      email: row.email,
+      signal: row.email.trim().toLowerCase() === normalizedEmail ? "email" : "name",
+    }));
+  }
+
+  createDirectorySpeaker(input: SpeakerDirectoryCreateInput & {
+    actorId: string;
+    actorName: string;
+  }):
+    | { ok: true; value: SpeakerDirectoryMutation }
+    | {
+        ok: false;
+        status: 400 | 404 | 409;
+        error: string;
+        code?: "identity_choice_required";
+        matches?: SpeakerDirectoryIdentityMatch[];
+      } {
+    const name = input.name.trim();
+    const email = input.email.trim().toLowerCase();
+    const biography = (input.biography ?? "").trim();
+    const titleSnapshot = input.titleSnapshot.trim();
+    const organizationSnapshot = input.organizationSnapshot.trim();
+    const role = (input.role ?? "invited").trim() || "invited";
+    if (!name || !email || !titleSnapshot || !organizationSnapshot) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Name, email, title at this event, and organization at this event are required.",
+      };
+    }
+    if (!email.includes("@")) {
+      return { ok: false, status: 400, error: "Enter a valid email address." };
+    }
+    if (name.length > 200 || email.length > 320 || titleSnapshot.length > 200 || organizationSnapshot.length > 200) {
+      return { ok: false, status: 400, error: "Use 200 characters or fewer for profile and participation fields." };
+    }
+    if (biography.length > 2_000) {
+      return { ok: false, status: 400, error: "Use 2000 characters or fewer for biography." };
+    }
+
+    const matches = this.directoryIdentityMatches({ name, email });
+    let speakerId = input.reuseSpeakerId?.trim() || "";
+    let reused = Boolean(speakerId);
+    if (speakerId) {
+      const chosen = matches.find((match) => match.speakerId === speakerId);
+      if (!chosen) {
+        return {
+          ok: false,
+          status: 409,
+          error: "The selected identity no longer matches. Check the directory and choose again.",
+          code: "identity_choice_required",
+          matches,
+        };
+      }
+    } else if (matches.length > 0 && !input.createNewIdentity) {
+      return {
+        ok: false,
+        status: 409,
+        error: "Choose how to use the matching speaker identity.",
+        code: "identity_choice_required",
+        matches,
+      };
+    } else {
+      const emailMatch = matches.find((match) => match.signal === "email");
+      if (emailMatch) {
+        return {
+          ok: false,
+          status: 409,
+          error: "Email identifies an existing speaker. Reuse that identity or use a different email.",
+          code: "identity_choice_required",
+          matches,
+        };
+      }
+      speakerId = `spk_dir_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
+      const now = new Date().toISOString();
+      this.ctx.storage.sql.exec(
+        `INSERT INTO speakers (id, name, email, biography, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        speakerId,
+        name,
+        email,
+        biography,
+        now,
+      );
+      reused = false;
+    }
+
+    const existingParticipation = this.ctx.storage.sql
+      .exec<{ id: string }>(
+        `SELECT id FROM event_participations WHERE speaker_id = ? ORDER BY created_at DESC LIMIT 1`,
+        speakerId,
+      )
+      .toArray()[0];
+    if (!existingParticipation) {
+      const participationId = `prt_dir_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
+      this.ctx.storage.sql.exec(
+        `INSERT INTO event_participations
+          (id, speaker_id, proposal_id, course_check_plan_id, title_snapshot,
+           organization_snapshot, role, created_at)
+         VALUES (?, ?, NULL, ?, ?, ?, ?, ?)`,
+        participationId,
+        speakerId,
+        `speaker-directory:${participationId}`,
+        titleSnapshot,
+        organizationSnapshot,
+        role,
+        new Date().toISOString(),
+      );
+      this.appendOnboardingHistory({
+        speakerId,
+        taskId: null,
+        type: "directory_speaker_added",
+        summary: reused
+          ? "Organizer linked an existing identity to the event speaker directory."
+          : "Organizer added the speaker to the event directory.",
+        actorId: input.actorId,
+        actorName: input.actorName,
+      });
+    }
+
+    const speaker = this.getOnboardingBoard().speakers.find(
+      (candidate) => candidate.speakerId === speakerId,
+    );
+    if (!speaker) {
+      return { ok: false, status: 404, error: "Speaker participation was not found." };
+    }
+    return {
+      ok: true,
+      value: { speaker, reused, sessionLinkage: "course_check_required" },
+    };
+  }
+
+  updateDirectorySpeaker(input: {
+    speakerId: string;
+    name?: string;
+    email?: string;
+    biography?: string;
+    actorId: string;
+    actorName: string;
+  }):
+    | { ok: true; speaker: OnboardingBoardSpeaker }
+    | { ok: false; status: 400 | 404 | 409; error: string } {
+    const speaker = this.getSpeakerRow(input.speakerId);
+    const participation = this.ctx.storage.sql
+      .exec<{ id: string }>(
+        `SELECT id FROM event_participations WHERE speaker_id = ? LIMIT 1`,
+        input.speakerId,
+      )
+      .toArray()[0];
+    if (!speaker || !participation) {
+      return { ok: false, status: 404, error: "Speaker not found in this event." };
+    }
+    const name = input.name === undefined ? speaker.name : input.name.trim();
+    const email = input.email === undefined ? speaker.email : input.email.trim().toLowerCase();
+    const biography = input.biography === undefined ? speaker.biography : input.biography.trim();
+    if (!name || !email || !email.includes("@")) {
+      return { ok: false, status: 400, error: "Name and a valid email are required." };
+    }
+    const emailOwner = this.ctx.storage.sql
+      .exec<{ id: string }>(`SELECT id FROM speakers WHERE lower(email) = ? AND id != ?`, email, input.speakerId)
+      .toArray()[0];
+    if (emailOwner) {
+      return { ok: false, status: 409, error: "That email belongs to another speaker identity." };
+    }
+    if (name.length > 200 || email.length > 320 || biography.length > 2_000) {
+      return { ok: false, status: 400, error: "One or more profile fields are too long." };
+    }
+    this.ctx.storage.sql.exec(
+      `UPDATE speakers SET name = ?, email = ?, biography = ? WHERE id = ?`,
+      name,
+      email,
+      biography,
+      input.speakerId,
+    );
+    this.appendOnboardingHistory({
+      speakerId: input.speakerId,
+      taskId: null,
+      type: "profile_updated",
+      summary: "Organizer corrected current speaker profile fields.",
+      actorId: input.actorId,
+      actorName: input.actorName,
+    });
+    const updated = this.getOnboardingBoard().speakers.find(
+      (candidate) => candidate.speakerId === input.speakerId,
+    );
+    return updated
+      ? { ok: true, speaker: updated }
+      : { ok: false, status: 404, error: "Speaker not found in this event." };
+  }
+
   getOnboardingBoard(nowMs = Date.now()): OnboardingBoard {
     const event = this.getEvent();
     if (!event) {
@@ -3833,9 +4045,11 @@ export class EventStore extends DurableObject<AppBindings> {
         id: string;
         speaker_id: string;
         proposal_id: string | null;
+        title_snapshot: string;
+        organization_snapshot: string;
         role: string;
       }>(
-        `SELECT id, speaker_id, proposal_id, role
+        `SELECT id, speaker_id, proposal_id, title_snapshot, organization_snapshot, role
          FROM event_participations
          ORDER BY created_at DESC`,
       )
@@ -3909,6 +4123,10 @@ export class EventStore extends DurableObject<AppBindings> {
         speakerId: speaker.id,
         name: speaker.name,
         email: speaker.email,
+        biography: speaker.biography,
+        participationId: participation.id,
+        titleSnapshot: participation.title_snapshot,
+        organizationSnapshot: participation.organization_snapshot,
         proposalId: participation.proposal_id,
         proposalTitle,
         role: participation.role,

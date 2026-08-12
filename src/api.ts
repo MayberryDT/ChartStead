@@ -27,6 +27,8 @@ import type {
   ReviewerAssignment,
   SessionPlacementPatch,
   SessionPlacementResponse,
+  SpeakerDirectoryCreateInput,
+  SpeakerDirectoryMutation,
   SpeakerPortalSession,
   SubmissionAnswers,
   SubmitterEditSession,
@@ -693,6 +695,49 @@ export async function fetchOnboardingBoard(eventId: string): Promise<OnboardingB
   if (!response.ok || !("speakers" in body)) {
     throw new ApiError(
       "error" in body ? body.error : "Unable to load onboarding board",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function createDirectorySpeaker(
+  eventId: string,
+  input: SpeakerDirectoryCreateInput,
+): Promise<SpeakerDirectoryMutation> {
+  const response = await fetch(`/api/events/${eventId}/speakers`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<SpeakerDirectoryMutation | { error: string }>(response);
+  if (!response.ok || !("speaker" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to add speaker",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function updateDirectorySpeaker(
+  eventId: string,
+  speakerId: string,
+  patch: { name?: string; email?: string; biography?: string },
+): Promise<OnboardingBoard["speakers"][number]> {
+  const response = await fetch(`/api/events/${eventId}/speakers/${speakerId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  const body = await readJson<OnboardingBoard["speakers"][number] | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("speakerId" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to update speaker",
       response.status,
       body,
     );
