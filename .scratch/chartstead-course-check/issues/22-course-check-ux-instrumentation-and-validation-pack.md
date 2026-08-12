@@ -25,4 +25,4 @@
 
 - 2026-08-12 — This ticket makes every overnight-verifiable part of the research validation plan agent-executable. Real participant observation remains a morning human activity, not a blocker in this ticket graph.
 
-- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 15 (blocked); Course Check 16 (blocked); Course Check 18 (blocked); Course Check 21 (blocked).
+- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 16 (in-progress); Course Check 18 (blocked); Course Check 21 (blocked).

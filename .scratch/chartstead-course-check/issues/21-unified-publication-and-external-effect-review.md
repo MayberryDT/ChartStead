@@ -27,4 +27,4 @@
 
 - 2026-08-12 — Can proceed after the shared projection and direct-action contracts; it is deliberately not blocked by visual-polish tickets 11 or 12.
 
-- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 17 (blocked).
+- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 17 (in-progress).
