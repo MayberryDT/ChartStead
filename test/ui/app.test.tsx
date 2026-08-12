@@ -810,6 +810,71 @@ describe("organizer application", () => {
     expect(screen.queryByLabelText("Talk title")).not.toBeInTheDocument();
   });
 
+  it("explains the scheduled opening from the server-authoritative public lifecycle", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "This call for proposals opens at 2030-06-01T19:00:00.000Z.",
+          status: "scheduled",
+          event: {
+            name: "Pacific Open Data Summit 2026",
+            timezone: "America/Los_Angeles",
+          },
+          lifecycle: {
+            state: "scheduled",
+            reason: "scheduled_open",
+            opensAt: "2030-06-01T19:00:00.000Z",
+            closesAt: "2030-06-10T19:00:00.000Z",
+            deadlineAt: "2030-06-01T19:00:00.000Z",
+            timezone: "America/Los_Angeles",
+            evaluatedAt: "2030-06-01T18:00:00.000Z",
+          },
+        }),
+        { status: 425, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    renderAt("/e/pacific-open-data-summit-2026/cfp");
+
+    expect(await screen.findByRole("heading", { name: "Submissions open soon" }))
+      .toBeVisible();
+    expect(screen.getByText(/Jun 1, 2030.*12:00 PM.*PDT/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Submit proposal" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("shows the exact event-local closing deadline when submissions are closed", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "This call for proposals closed at 2030-06-10T19:00:00.000Z.",
+          status: "closed",
+          event: {
+            name: "Pacific Open Data Summit 2026",
+            timezone: "America/Los_Angeles",
+          },
+          lifecycle: {
+            state: "closed",
+            reason: "scheduled_close",
+            opensAt: "2030-06-01T19:00:00.000Z",
+            closesAt: "2030-06-10T19:00:00.000Z",
+            deadlineAt: "2030-06-10T19:00:00.000Z",
+            timezone: "America/Los_Angeles",
+            evaluatedAt: "2030-06-10T19:00:00.000Z",
+          },
+        }),
+        { status: 410, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    renderAt("/e/pacific-open-data-summit-2026/cfp");
+
+    expect(await screen.findByRole("heading", { name: "Submissions are closed" }))
+      .toBeVisible();
+    expect(screen.getByText(/closed Jun 10, 2030.*12:00 PM.*PDT/))
+      .toBeVisible();
+  });
+
   it("recreates the published form when the CFP route changes events", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const eventId = String(input).includes("ai-engineer-worlds-fair-2026")
@@ -1951,12 +2016,13 @@ describe("guided CFP builder", () => {
 
   function mockBuilderFetch(options?: {
     themeAccent?: string;
+    initialForm?: OrganizerCfpForm;
     onDraftPut?: (
       body: { name?: string; draft: unknown },
       callIndex: number,
     ) => Promise<Response> | Response;
   }) {
-    let form = mockOrganizerForm();
+    let form = options?.initialForm ?? mockOrganizerForm();
     const themeAccent = options?.themeAccent ?? "#2f5d98";
     let draftPutCount = 0;
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
@@ -1971,6 +2037,7 @@ describe("guided CFP builder", () => {
                 name: "Pacific Open Data Summit 2026",
                 startsOn: "2026-10-07",
                 endsOn: "2026-10-08",
+                timezone: "America/Los_Angeles",
                 themeAccent,
               },
             }),
@@ -2043,6 +2110,46 @@ describe("guided CFP builder", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Form not found");
     expect(screen.queryByText("Loading form builder…")).not.toBeInTheDocument();
+  });
+
+  it("configures event-local opening and closing times while showing exact instants", async () => {
+    const user = userEvent.setup();
+    const savedDrafts: OrganizerCfpForm["draft"][] = [];
+    mockBuilderFetch({
+      onDraftPut: (body) => {
+        savedDrafts.push(body.draft as OrganizerCfpForm["draft"]);
+        return Response.json({
+          form: mockOrganizerForm({
+            draft: body.draft as OrganizerCfpForm["draft"],
+            draftUpdatedAt: "2030-05-01T00:00:00.000Z",
+          }),
+        });
+      },
+    });
+
+    renderAt("/e/pacific-open-data-summit-2026/forms/main-cfp");
+    await screen.findByText("Saved");
+
+    fireEvent.change(screen.getByLabelText("Opening time (America/Los_Angeles)"), {
+      target: { value: "2030-06-01T12:00" },
+    });
+    fireEvent.change(screen.getByLabelText("Closing time (America/Los_Angeles)"), {
+      target: { value: "2030-06-10T12:00" },
+    });
+
+    expect(screen.getByText("Opening instant: 2030-06-01T19:00:00.000Z"))
+      .toBeVisible();
+    expect(screen.getByText("Closing instant: 2030-06-10T19:00:00.000Z"))
+      .toBeVisible();
+    expect(screen.getByText(/Schedule changes stay private until you publish/))
+      .toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await screen.findByText("Draft saved. Published form is unchanged until you publish.");
+    expect(savedDrafts.at(-1)).toMatchObject({
+      opensAt: "2030-06-01T19:00:00.000Z",
+      closesAt: "2030-06-10T19:00:00.000Z",
+    });
   });
 
   it("keeps event track choices read-only in the guided builder", async () => {

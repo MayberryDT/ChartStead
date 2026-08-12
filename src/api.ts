@@ -11,6 +11,7 @@ import type {
   AssetUploadSession,
   CfpDefinitionV1,
   CfpFormResponse,
+  CfpPublicLifecycle,
   EventListResponse,
   EventRecord,
   OnboardingBoard,
@@ -188,11 +189,13 @@ export async function createOrganizerForm(
 
 export interface OrganizerFormResponse {
   form: OrganizerCfpForm;
+  lifecycle?: CfpPublicLifecycle | null;
   event: {
     id: string;
     name: string;
     startsOn: string;
     endsOn: string;
+    timezone: string;
     themeAccent?: string;
   };
 }

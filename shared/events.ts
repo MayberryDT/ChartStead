@@ -470,6 +470,24 @@ export interface CfpFormResponse {
     themeAccent?: string;
   };
   form: PublishedCfpForm;
+  lifecycle: CfpPublicLifecycle;
+}
+
+export type CfpPublicLifecycleState = "scheduled" | "open" | "closed";
+
+export interface CfpPublicLifecycle {
+  state: CfpPublicLifecycleState;
+  reason:
+    | "scheduled_open"
+    | "scheduled_close"
+    | "manual_close"
+    | "manual_reopen"
+    | "open";
+  opensAt: string | null;
+  closesAt: string | null;
+  deadlineAt: string | null;
+  timezone: string;
+  evaluatedAt: string;
 }
 
 export interface ProposalValidationError {
@@ -486,6 +504,7 @@ export interface SubmitterEditSession {
   proposalId: string;
   expiresAt: string;
   form: PublishedCfpForm;
+  lifecycle: CfpPublicLifecycle;
   answers: SubmissionAnswers;
   proposal: PublicProposal & {
     speakerEmail: string;

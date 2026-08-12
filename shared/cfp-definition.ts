@@ -739,6 +739,19 @@ export function canonicalizeCfpDefinition(
 
 export function validateCfpDefinition(definition: CfpDefinitionV1): string[] {
   const errors: string[] = [];
+  const instant = (value: string | null, label: string): number | null => {
+    if (value === null) return null;
+    if (!/(?:Z|[+-]\d{2}:\d{2})$/.test(value) || !Number.isFinite(Date.parse(value))) {
+      errors.push(`${label} must be an ISO 8601 instant with a timezone.`);
+      return null;
+    }
+    return Date.parse(value);
+  };
+  const opensAtMs = instant(definition.opensAt, "Opening time");
+  const closesAtMs = instant(definition.closesAt, "Closing time");
+  if (opensAtMs !== null && closesAtMs !== null && closesAtMs <= opensAtMs) {
+    errors.push("Closing time must be after opening time.");
+  }
   if (definition.schemaVersion !== 1) {
     errors.push("Unsupported form schema version.");
   }

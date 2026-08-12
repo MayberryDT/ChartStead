@@ -23,6 +23,10 @@ import {
   type RestrictedQuestion,
   type SurveyChoice,
 } from "../shared/cfp-definition";
+import {
+  instantToLocalDateTime,
+  localDateTimeToInstant,
+} from "../shared/cfp-timezone";
 import type { OrganizerCfpForm, PublishedCfpForm } from "../shared/events";
 import {
   closeOrganizerForm,
@@ -268,6 +272,8 @@ export function CfpBuilderPage() {
   });
   const form = formQuery.data?.form;
   const themeAccent = formQuery.data?.event.themeAccent;
+  const timezone = formQuery.data?.event.timezone ?? "UTC";
+  const liveLifecycle = formQuery.data?.lifecycle ?? null;
   const [step, setStep] = useState<BuilderStep>("basics");
   const [name, setName] = useState("");
   const [draft, setDraft] = useState<CfpDefinitionV1 | null>(null);
@@ -573,6 +579,7 @@ export function CfpBuilderPage() {
             <BasicsStep
               name={name}
               draft={draft}
+              timezone={timezone}
               onNameChange={updateName}
               onChange={updateDraft}
             />
@@ -590,6 +597,7 @@ export function CfpBuilderPage() {
           {step === "preview" ? (
             <PreviewStep
               form={form}
+              lifecycleState={liveLifecycle?.state ?? form.lifecycleStatus}
               eventId={eventId}
               onClose={() => close.mutate()}
               onReopen={() => reopen.mutate()}
@@ -624,15 +632,28 @@ export function CfpBuilderPage() {
 function BasicsStep({
   name,
   draft,
+  timezone,
   onNameChange,
   onChange,
 }: {
   name: string;
   draft: CfpDefinitionV1;
+  timezone: string;
   onNameChange: (value: string) => void;
   onChange: (updater: (current: CfpDefinitionV1) => CfpDefinitionV1) => void;
 }) {
   const welcome = getWelcomeContent(draft);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+
+  const updateSchedule = (field: "opensAt" | "closesAt", local: string) => {
+    try {
+      const instant = local ? localDateTimeToInstant(local, timezone) : null;
+      setScheduleError(null);
+      onChange((current) => ({ ...current, [field]: instant }));
+    } catch (error) {
+      setScheduleError(error instanceof Error ? error.message : "Choose a valid time.");
+    }
+  };
   return (
     <div className="builder-stack">
       <label>
@@ -662,6 +683,36 @@ function BasicsStep({
           }
         />
       </label>
+      <fieldset className="builder-schedule">
+        <legend>Submission schedule</legend>
+        <p>
+          Enter local times in {timezone}. Schedule changes stay private until you
+          publish.
+        </p>
+        <label>
+          Opening time ({timezone})
+          <input
+            type="datetime-local"
+            value={draft.opensAt ? instantToLocalDateTime(draft.opensAt, timezone) : ""}
+            onChange={(event) => updateSchedule("opensAt", event.target.value)}
+          />
+        </label>
+        <p className="muted-line">
+          Opening instant: {draft.opensAt ?? "No scheduled opening"}
+        </p>
+        <label>
+          Closing time ({timezone})
+          <input
+            type="datetime-local"
+            value={draft.closesAt ? instantToLocalDateTime(draft.closesAt, timezone) : ""}
+            onChange={(event) => updateSchedule("closesAt", event.target.value)}
+          />
+        </label>
+        <p className="muted-line">
+          Closing instant: {draft.closesAt ?? "No scheduled closing"}
+        </p>
+        {scheduleError ? <p className="form-message error" role="alert">{scheduleError}</p> : null}
+      </fieldset>
     </div>
   );
 }
@@ -1122,6 +1173,7 @@ function SpeakersStep({
 
 function PreviewStep({
   form,
+  lifecycleState,
   eventId,
   onClose,
   onReopen,
@@ -1129,6 +1181,7 @@ function PreviewStep({
   reopening,
 }: {
   form: OrganizerCfpForm;
+  lifecycleState: "draft" | "scheduled" | "open" | "closed" | "published";
   eventId: string;
   onClose: () => void;
   onReopen: () => void;
@@ -1149,7 +1202,7 @@ function PreviewStep({
       ) : (
         <p>Publish to get a public link.</p>
       )}
-      {form.lifecycleStatus === "published" ? (
+      {form.publishedVersion && lifecycleState !== "closed" ? (
         <button
           type="button"
           className="btn btn-secondary"
@@ -1159,7 +1212,7 @@ function PreviewStep({
           Close submissions
         </button>
       ) : null}
-      {form.lifecycleStatus === "closed" ? (
+      {form.publishedVersion && lifecycleState === "closed" ? (
         <button
           type="button"
           className="btn btn-secondary"

@@ -5,6 +5,7 @@ import {
   type CfpDefinitionV1,
   type UploadedAssetAnswer,
 } from "../shared/cfp-definition";
+import { resolveCfpLifecycle } from "../shared/cfp-lifecycle";
 import type {
   CalendarOperation,
   CommunicationDeliverySummary,
@@ -80,6 +81,7 @@ import type {
   AgendaWorkspaceResponse,
   CalendarIntentRecord,
   CoSpeakerInput,
+  CfpPublicLifecycle,
   EventRecord,
   OnboardingBoard,
   OnboardingBoardSpeaker,
@@ -564,6 +566,7 @@ interface CfpFormRow {
   id: string;
   name: string;
   lifecycle_status: string;
+  lifecycle_override: string;
   draft_json: string;
   draft_updated_at: string;
   published_version: number | null;
@@ -1126,6 +1129,7 @@ export class EventStore extends DurableObject<AppBindings> {
           id TEXT PRIMARY KEY,
           name TEXT NOT NULL,
           lifecycle_status TEXT NOT NULL,
+          lifecycle_override TEXT NOT NULL DEFAULT '',
           draft_json TEXT NOT NULL,
           draft_updated_at TEXT NOT NULL,
           published_version INTEGER,
@@ -1483,6 +1487,11 @@ export class EventStore extends DurableObject<AppBindings> {
         "TEXT NOT NULL DEFAULT '#2f5d98'",
       );
       this.ensureColumn("cfp_form_versions", "name", "TEXT NOT NULL DEFAULT ''");
+      this.ensureColumn(
+        "cfp_forms",
+        "lifecycle_override",
+        "TEXT NOT NULL DEFAULT ''",
+      );
       this.ensureColumn("proposals", "form_id", "TEXT NOT NULL DEFAULT 'main-cfp'");
       this.ensureColumn(
         "proposals",
@@ -2205,7 +2214,7 @@ export class EventStore extends DurableObject<AppBindings> {
   listForms(): OrganizerCfpFormSummary[] {
     return this.ctx.storage.sql
       .exec<CfpFormRow>(
-        `SELECT id, name, lifecycle_status, draft_json, draft_updated_at,
+        `SELECT id, name, lifecycle_status, lifecycle_override, draft_json, draft_updated_at,
                 published_version, published_at
          FROM cfp_forms
          ORDER BY name COLLATE NOCASE ASC, id ASC`,
@@ -2224,7 +2233,7 @@ export class EventStore extends DurableObject<AppBindings> {
   getForm(formId: string): OrganizerCfpForm | null {
     const row = this.ctx.storage.sql
       .exec<CfpFormRow>(
-        `SELECT id, name, lifecycle_status, draft_json, draft_updated_at,
+        `SELECT id, name, lifecycle_status, lifecycle_override, draft_json, draft_updated_at,
                 published_version, published_at
          FROM cfp_forms
          WHERE id = ?
@@ -2359,6 +2368,7 @@ export class EventStore extends DurableObject<AppBindings> {
            SET name = ?,
                draft_json = ?,
                lifecycle_status = 'published',
+               lifecycle_override = '',
                published_version = ?,
                published_at = ?,
                draft_updated_at = ?
@@ -2382,6 +2392,7 @@ export class EventStore extends DurableObject<AppBindings> {
            SET name = ?,
                draft_json = ?,
                lifecycle_status = 'published',
+               lifecycle_override = '',
                published_version = ?,
                published_at = ?,
                draft_updated_at = ?
@@ -2418,7 +2429,7 @@ export class EventStore extends DurableObject<AppBindings> {
     }
     this.ctx.storage.sql.exec(
       `UPDATE cfp_forms
-       SET lifecycle_status = 'closed', draft_updated_at = ?
+       SET lifecycle_status = 'closed', lifecycle_override = 'closed', draft_updated_at = ?
        WHERE id = ?`,
       new Date().toISOString(),
       formId,
@@ -2436,7 +2447,7 @@ export class EventStore extends DurableObject<AppBindings> {
     }
     this.ctx.storage.sql.exec(
       `UPDATE cfp_forms
-       SET lifecycle_status = 'published', draft_updated_at = ?
+       SET lifecycle_status = 'published', lifecycle_override = 'open', draft_updated_at = ?
        WHERE id = ?`,
       new Date().toISOString(),
       formId,
@@ -2452,15 +2463,12 @@ export class EventStore extends DurableObject<AppBindings> {
       if (!form || form.lifecycleStatus === "draft" || form.publishedVersion == null) {
         return null;
       }
-      if (form.lifecycleStatus === "closed") {
-        return null;
-      }
       return this.getFormVersion(formId, form.publishedVersion);
     }
 
     const row = this.ctx.storage.sql
       .exec<CfpFormRow>(
-        `SELECT id, name, lifecycle_status, draft_json, draft_updated_at,
+        `SELECT id, name, lifecycle_status, lifecycle_override, draft_json, draft_updated_at,
                 published_version, published_at
          FROM cfp_forms
          WHERE lifecycle_status = 'published' AND published_version IS NOT NULL
@@ -2521,9 +2529,31 @@ export class EventStore extends DurableObject<AppBindings> {
     };
   }
 
-  isFormOpenForSubmission(formId: string): boolean {
+  getFormLifecycle(
+    formId: string,
+    timezone: string,
+    nowIso: string,
+  ): CfpPublicLifecycle | null {
     const form = this.getForm(formId);
-    if (form) return form.lifecycleStatus === "published";
+    if (form?.publishedDefinition) {
+      const row = this.ctx.storage.sql
+        .exec<{ lifecycle_override: string }>(
+          `SELECT lifecycle_override FROM cfp_forms WHERE id = ? LIMIT 1`,
+          formId,
+        )
+        .toArray()[0];
+      const override =
+        row?.lifecycle_override === "open" || row?.lifecycle_override === "closed"
+          ? row.lifecycle_override
+          : null;
+      return resolveCfpLifecycle({
+        definition: form.publishedDefinition,
+        lifecycleStatus: form.lifecycleStatus,
+        lifecycleOverride: override,
+        timezone,
+        now: new Date(nowIso),
+      });
+    }
     // Legacy stores that only seeded version rows stay open.
     const legacy = this.ctx.storage.sql
       .exec<{ id: string }>(
@@ -2533,7 +2563,14 @@ export class EventStore extends DurableObject<AppBindings> {
         formId,
       )
       .toArray()[0];
-    return Boolean(legacy);
+    return legacy
+      ? resolveCfpLifecycle({
+          definition: { opensAt: null, closesAt: null },
+          lifecycleStatus: "published",
+          timezone,
+          now: new Date(nowIso),
+        })
+      : null;
   }
 
   private consumeRateQuota(

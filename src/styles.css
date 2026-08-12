@@ -2260,6 +2260,40 @@ table.grid tbody tr[aria-selected="true"] td:first-child {
   gap: 14px;
 }
 
+.builder-schedule {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  margin: 4px 0 0;
+  padding: 14px;
+  border: 1px solid var(--outline);
+  border-radius: var(--r-control);
+  background: var(--surface-subtle);
+}
+
+.builder-schedule legend {
+  padding: 0 6px;
+  font-weight: 700;
+}
+
+.builder-schedule > p:first-of-type,
+.builder-schedule .form-message {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.builder-schedule .muted-line {
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.cfp-deadline {
+  padding: 9px 12px;
+  border-left: 3px solid var(--cfp-accent, var(--primary));
+  background: var(--surface-subtle);
+  font-weight: 600;
+}
+
 .builder-stack label,
 .submitter-edit-form label {
   display: grid;
@@ -2473,6 +2507,12 @@ table.grid tbody tr[aria-selected="true"] td:first-child {
 
 @media (max-width: 960px) {
   .builder-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  .builder-schedule {
     grid-template-columns: 1fr;
   }
 }

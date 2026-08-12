@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 
 import markOnLightUrl from "../design/assets/brand/chartstead-mark-on-light.png";
+import { formatCfpInstant } from "../shared/cfp-timezone";
 import { ApiError, fetchCfp, submitProposal } from "./api";
 import { CfpRuntime } from "./CfpRuntime";
 
@@ -30,27 +31,41 @@ export function CfpPage() {
       typeof cfp.error.body === "object"
         ? (cfp.error.body as {
             status?: string;
-            event?: { name?: string };
+            event?: { name?: string; timezone?: string };
+            lifecycle?: {
+              state?: string;
+              deadlineAt?: string | null;
+              timezone?: string;
+            };
           })
         : null;
     const closed =
       body?.status === "closed" ||
       (cfp.error instanceof ApiError && cfp.error.status === 410);
     const eventName = body?.event?.name ?? "This event";
+    const scheduled = body?.status === "scheduled";
+    const timezone = body?.lifecycle?.timezone ?? body?.event?.timezone ?? "UTC";
+    const deadline = body?.lifecycle?.deadlineAt
+      ? formatCfpInstant(body.lifecycle.deadlineAt, timezone)
+      : null;
     return (
       <main className="cfp-shell">
         <section className="error-panel" role="alert">
           <h1>
-            {closed
+            {scheduled
+              ? "Submissions open soon"
+              : closed
               ? "Submissions are closed"
               : "Call for proposals unavailable"}
           </h1>
           <p>
-            {closed
-              ? `${eventName} is not accepting new proposals right now. If you already submitted, use the link in your confirmation email to review or edit your proposal.`
+            {scheduled
+              ? `${eventName} opens submissions${deadline ? ` on ${deadline}` : " soon"}.`
+              : closed
+              ? `${eventName}${deadline ? ` closed ${deadline}` : " is not accepting new proposals right now"}. If you already submitted, use the link in your confirmation email to review or edit your proposal.`
               : cfp.error.message}
           </p>
-          {closed ? (
+          {closed || scheduled ? (
             <Link to="/">Return to ChartStead</Link>
           ) : (
             <button
@@ -76,6 +91,14 @@ export function CfpPage() {
           Submit a talk without creating an account. You will receive a branded
           confirmation email with a secure link to edit your proposal.
         </p>
+        {cfp.data.lifecycle?.deadlineAt ? (
+          <p className="cfp-deadline">
+            Submissions close {formatCfpInstant(
+              cfp.data.lifecycle.deadlineAt,
+              cfp.data.lifecycle.timezone,
+            )}.
+          </p>
+        ) : null}
 
         <CfpRuntime
           key={`${eventId}:${cfp.data.form.id}:${cfp.data.form.definitionVersion}`}

@@ -5,7 +5,9 @@ import {
   createDefaultCfpDefinition,
   type CfpDefinitionV1,
 } from "../shared/cfp-definition";
+import { cfpLifecycleError } from "../shared/cfp-lifecycle";
 import type {
+  CfpPublicLifecycle,
   EventRecord,
   OnboardingCompletionRequirement,
   OrganizerCfpForm,
@@ -342,6 +344,7 @@ interface AppOptions {
   airtableClientFactory?: AirtableClientFactory;
   airtableCredentialClientFactory?: AirtableCredentialClientFactory;
   resolveApiKeyPrincipal?: V1AppOptions["resolveApiKeyPrincipal"];
+  lifecycleNow?: () => Date;
 }
 
 async function loadEvent(
@@ -370,6 +373,22 @@ function findSeed(eventId: string): EventRecord | undefined {
   return findKnownEvent(eventId);
 }
 
+function eventTimezone(event: EventRecord): string {
+  return event.timezone?.trim() || "UTC";
+}
+
+function lifecycleUnavailable(
+  lifecycle: CfpPublicLifecycle,
+  context: Record<string, unknown> = {},
+) {
+  return {
+    error: cfpLifecycleError(lifecycle) ?? "This call for proposals is unavailable.",
+    status: lifecycle.state,
+    lifecycle,
+    ...context,
+  };
+}
+
 function publicBaseUrl(request: Request, env: AppBindings): string {
   return env.BETTER_AUTH_URL || new URL(request.url).origin;
 }
@@ -390,6 +409,7 @@ export function createApp(options: AppOptions = {}) {
   const airtableFactory =
     options.airtableClientFactory ?? defaultAirtableClientFactory;
   const airtableCredentialFactory = options.airtableCredentialClientFactory;
+  const lifecycleNow = options.lifecycleNow ?? (() => new Date());
 
   /** Session, test hook, or bearer agent/human API key — same principal model. */
   const resolvePrincipal: PrincipalResolver = async (request, env) => {
@@ -830,60 +850,43 @@ export function createApp(options: AppOptions = {}) {
       name: event.name,
       startsOn: event.startsOn,
       endsOn: event.endsOn,
+      timezone: eventTimezone(event),
       themeAccent: event.themeAccent,
     };
-
-    if (formId) {
-      const meta = (await store.getForm(formId)) as OrganizerCfpForm | null;
-      if (meta?.lifecycleStatus === "closed" && meta.publishedVersion != null) {
-        return c.json(
-          {
-            error: "This call for proposals is closed to new submissions.",
-            status: "closed",
-            event: publicEvent,
-            formId: meta.id,
-            formName: meta.name,
-            publishedVersion: meta.publishedVersion,
-          },
-          410,
-        );
-      }
-    } else {
-      const closedDefault = (await store.listForms()) as OrganizerCfpFormSummary[];
-      const closedMain =
-        closedDefault.find(
-          (form) =>
-            form.lifecycleStatus === "closed" &&
-            form.publishedVersion != null &&
-            form.id === "main-cfp",
-        ) ??
-        closedDefault.find(
-          (form) =>
-            form.lifecycleStatus === "closed" && form.publishedVersion != null,
-        );
-      const openForm = (await store.getPublishedForm()) as PublishedCfpForm | null;
-      if (!openForm && closedMain) {
-        return c.json(
-          {
-            error: "This call for proposals is closed to new submissions.",
-            status: "closed",
-            event: publicEvent,
-            formId: closedMain.id,
-            formName: closedMain.name,
-            publishedVersion: closedMain.publishedVersion,
-          },
-          410,
-        );
-      }
+    let selectedFormId = formId;
+    if (!selectedFormId) {
+      const forms = (await store.listForms()) as OrganizerCfpFormSummary[];
+      selectedFormId =
+        forms.find((form) => form.id === "main-cfp" && form.publishedVersion != null)?.id ??
+        forms.find((form) => form.publishedVersion != null)?.id;
     }
-
-    const form = (await store.getPublishedForm(formId)) as PublishedCfpForm | null;
+    const form = selectedFormId
+      ? ((await store.getPublishedForm(selectedFormId)) as PublishedCfpForm | null)
+      : null;
     if (!form) {
       return c.json({ error: "Published CFP not found" }, 404);
+    }
+    const lifecycle = await store.getFormLifecycle(
+      form.id,
+      eventTimezone(event),
+      lifecycleNow().toISOString(),
+    );
+    if (!lifecycle) return c.json({ error: "Published CFP not found" }, 404);
+    if (lifecycle.state !== "open") {
+      return c.json(
+        lifecycleUnavailable(lifecycle, {
+          event: publicEvent,
+          formId: form.id,
+          formName: form.name,
+          publishedVersion: form.definitionVersion,
+        }),
+        lifecycle.state === "scheduled" ? 425 : 410,
+      );
     }
     return c.json({
       event: publicEvent,
       form,
+      lifecycle,
     });
   });
 
@@ -950,14 +953,24 @@ export function createApp(options: AppOptions = {}) {
     const form = await store.getForm(formId);
     if (!form) return c.json({ error: "Form not found" }, 404);
     const event = await store.getEvent();
+    const organizerEvent = event ?? seed;
+    const lifecycle = form.publishedVersion
+      ? await store.getFormLifecycle(
+          form.id,
+          eventTimezone(organizerEvent),
+          lifecycleNow().toISOString(),
+        )
+      : null;
     return c.json({
       form,
+      lifecycle,
       event: event
         ? {
             id: event.id,
             name: event.name,
             startsOn: event.startsOn,
             endsOn: event.endsOn,
+            timezone: eventTimezone(event),
             themeAccent: event.themeAccent,
           }
         : {
@@ -965,6 +978,7 @@ export function createApp(options: AppOptions = {}) {
             name: seed.name,
             startsOn: seed.startsOn,
             endsOn: seed.endsOn,
+            timezone: eventTimezone(seed),
             themeAccent: seed.themeAccent,
           },
     });
@@ -1555,8 +1569,18 @@ export function createApp(options: AppOptions = {}) {
     }
 
     const store = c.env.EVENT_STORE.getByName(eventId);
-    if (!(await store.isFormOpenForSubmission(formId))) {
-      return c.json({ error: "This call for proposals is closed." }, 409);
+    const lifecycle = await store.getFormLifecycle(
+      formId,
+      eventTimezone(await store.getEvent() ?? seed),
+      lifecycleNow().toISOString(),
+    );
+    if (!lifecycle || lifecycle.state !== "open") {
+      return c.json({
+        error:
+          lifecycle?.state === "scheduled"
+            ? cfpLifecycleError(lifecycle)!
+            : "This call for proposals is closed.",
+      }, 409);
     }
 
     const form = (await store.getFormVersion(
@@ -1799,11 +1823,6 @@ export function createApp(options: AppOptions = {}) {
     const event = await loadEvent(c.env, seed);
     const store = c.env.EVENT_STORE.getByName(event.id);
 
-    const formMeta = (await store.getForm(String(formId))) as OrganizerCfpForm | null;
-    if (formMeta && formMeta.lifecycleStatus === "closed") {
-      return c.json({ error: "This call for proposals is closed." }, 409);
-    }
-
     const form = (await store.getFormVersion(
       formId,
       formDefinitionVersion,
@@ -1815,8 +1834,18 @@ export function createApp(options: AppOptions = {}) {
       );
     }
 
-    if (!(await store.isFormOpenForSubmission(formId))) {
-      return c.json({ error: "This call for proposals is closed." }, 409);
+    const lifecycle = await store.getFormLifecycle(
+      formId,
+      eventTimezone(event),
+      lifecycleNow().toISOString(),
+    );
+    if (!lifecycle || lifecycle.state !== "open") {
+      return c.json(
+        lifecycle
+          ? lifecycleUnavailable(lifecycle)
+          : { error: "This call for proposals is unavailable." },
+        409,
+      );
     }
 
     const validated = validateAndNormalizeSubmission(
@@ -2942,11 +2971,27 @@ export function createApp(options: AppOptions = {}) {
       return c.json(INVALID_EDIT_LINK_ERROR, 401);
     }
 
+    const event = await store.getEvent();
+    const lifecycle = await store.getFormLifecycle(
+      proposal.formId,
+      eventTimezone(event ?? seed),
+      lifecycleNow().toISOString(),
+    );
+    if (!lifecycle || lifecycle.state !== "open") {
+      return c.json(
+        lifecycle
+          ? lifecycleUnavailable(lifecycle)
+          : { error: "This call for proposals is unavailable." },
+        lifecycle?.state === "closed" ? 410 : 409,
+      );
+    }
+
     return c.json({
       eventId,
       proposalId: proposal.id,
       expiresAt: authorized.tokenRow.expiresAt,
       form,
+      lifecycle,
       answers: proposal.answers,
       proposal: toSubmitterProposal(proposal),
     });
@@ -2980,6 +3025,20 @@ export function createApp(options: AppOptions = {}) {
 
     const existing = await store.getProposal(proposalId);
     if (!existing) return c.json(INVALID_EDIT_LINK_ERROR, 401);
+
+    const lifecycle = await store.getFormLifecycle(
+      existing.formId,
+      eventTimezone(event),
+      lifecycleNow().toISOString(),
+    );
+    if (!lifecycle || lifecycle.state !== "open") {
+      return c.json(
+        lifecycle
+          ? lifecycleUnavailable(lifecycle)
+          : { error: "This call for proposals is unavailable." },
+        409,
+      );
+    }
 
     const declaredLength = Number(c.req.header("content-length") ?? "0");
     if (declaredLength > MAX_PROPOSAL_BODY_BYTES) {
