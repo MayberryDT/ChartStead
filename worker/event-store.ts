@@ -6,6 +6,7 @@ import {
   type UploadedAssetAnswer,
 } from "../shared/cfp-definition";
 import type {
+  CalendarOperation,
   CommunicationDeliverySummary,
   CommunicationEffect,
   CommunicationEffectStatus,
@@ -4010,6 +4011,92 @@ export class EventStore extends DurableObject<AppBindings> {
       }));
   }
 
+  /** Latest pending calendar intent per session, enriched for Communication Course Check. */
+  private buildCalendarOperations(input: {
+    sessionIds: string[];
+    recipientHints?: Map<string, Array<{ email: string; name: string }>>;
+  }): CalendarOperation[] {
+    const wanted = new Set(input.sessionIds.filter(Boolean));
+    if (wanted.size === 0) return [];
+    const rooms = this.roomNameMap();
+    const sessions = this.loadSessionRows().filter((row) => wanted.has(row.id));
+    const intents = this.listCalendarIntentRecords().filter((intent) =>
+      wanted.has(intent.sessionId),
+    );
+    const latestBySession = new Map<string, CalendarIntentRecord>();
+    for (const intent of intents) {
+      const existing = latestBySession.get(intent.sessionId);
+      if (!existing || intent.createdAt >= existing.createdAt) {
+        latestBySession.set(intent.sessionId, intent);
+      }
+    }
+
+    const ops: CalendarOperation[] = [];
+    for (const session of sessions) {
+      const intent = latestBySession.get(session.id);
+      if (!intent) continue;
+      const roomId = intent.roomId ?? session.room_id;
+      const startsAt = intent.startsAt ?? session.starts_at;
+      const endsAt = intent.endsAt ?? session.ends_at;
+      const roomName = roomId ? rooms.get(roomId) ?? null : null;
+      const previousIntent = intents
+        .filter(
+          (row) =>
+            row.sessionId === session.id &&
+            row.id !== intent.id &&
+            row.createdAt < intent.createdAt,
+        )
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+      const recipients =
+        input.recipientHints?.get(session.id) ??
+        this.sessionSpeakerRecipients(session.id);
+      ops.push({
+        sessionId: session.id,
+        kind: intent.kind,
+        uid: intent.uid || session.calendar_uid || `cal_${session.id}`,
+        sequence: intent.sequence,
+        title: session.title,
+        startsAt,
+        endsAt,
+        roomId,
+        roomName,
+        locationPending: !roomId,
+        timePending: !(startsAt && endsAt),
+        recipients,
+        previous: previousIntent
+          ? {
+              startsAt: previousIntent.startsAt,
+              endsAt: previousIntent.endsAt,
+              roomId: previousIntent.roomId,
+              roomName: previousIntent.roomId
+                ? rooms.get(previousIntent.roomId) ?? null
+                : null,
+            }
+          : null,
+        reversibility: "compensating_update_or_cancel",
+      });
+    }
+    return ops;
+  }
+
+  private sessionSpeakerRecipients(
+    sessionId: string,
+  ): Array<{ email: string; name: string }> {
+    const session = this.getAgendaWorkspace().sessions.find(
+      (row) => row.id === sessionId,
+    );
+    if (!session) return [];
+    const seen = new Set<string>();
+    const recipients: Array<{ email: string; name: string }> = [];
+    for (const speaker of session.speakers) {
+      const email = speaker.email.trim().toLowerCase();
+      if (!email || seen.has(email)) continue;
+      seen.add(email);
+      recipients.push({ email: speaker.email, name: speaker.name });
+    }
+    return recipients;
+  }
+
   private agendaCounts(sessions: OrganizerSession[]) {
     let unplaced = 0;
     let partial = 0;
@@ -4133,7 +4220,14 @@ export class EventStore extends DurableObject<AppBindings> {
     let calendarInviteRecorded = Number(current.calendar_invite_recorded) === 1;
     const createdIntents: CalendarIntentRecord[] = [];
 
-    const fullyScheduled = Boolean(nextRoomId && nextStartsAt && nextEndsAt);
+    // Timed invites may proceed before room assignment (location pending).
+    const hasTimedSchedule = Boolean(nextStartsAt && nextEndsAt);
+    const wasTimed = Boolean(current.starts_at && current.ends_at);
+    const clearedSchedule =
+      calendarInviteRecorded &&
+      wasTimed &&
+      !hasTimedSchedule &&
+      (nextStartsAt === null || nextEndsAt === null);
 
     this.ctx.storage.transactionSync(() => {
       this.ctx.storage.sql.exec(
@@ -4147,80 +4241,97 @@ export class EventStore extends DurableObject<AppBindings> {
         sessionId,
       );
 
-      if (scheduleChanged && fullyScheduled) {
-        if (!calendarInviteRecorded) {
-          calendarSequence = 0;
-          const intent: CalendarIntentRecord = {
-            id: `cint_${sessionId}_create_${now}`,
-            sessionId,
-            kind: "create",
-            uid: calendarUid,
-            sequence: calendarSequence,
-            roomId: nextRoomId,
-            startsAt: nextStartsAt,
-            endsAt: nextEndsAt,
-            status: "pending",
-            createdAt: now,
-          };
-          this.ctx.storage.sql.exec(
-            `INSERT INTO calendar_intents
-              (id, session_id, kind, uid, sequence, room_id, starts_at, ends_at, status, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-            intent.id,
-            intent.sessionId,
-            intent.kind,
-            intent.uid,
-            intent.sequence,
-            intent.roomId,
-            intent.startsAt,
-            intent.endsAt,
-            intent.createdAt,
-          );
-          this.ctx.storage.sql.exec(
-            `UPDATE sessions
-             SET calendar_sequence = ?, calendar_invite_recorded = 1
-             WHERE id = ?`,
-            calendarSequence,
-            sessionId,
-          );
-          calendarInviteRecorded = true;
-          createdIntents.push(intent);
-        } else {
-          calendarSequence += 1;
-          const intent: CalendarIntentRecord = {
-            id: `cint_${sessionId}_update_${calendarSequence}_${now}`,
-            sessionId,
-            kind: "update",
-            uid: calendarUid,
-            sequence: calendarSequence,
-            roomId: nextRoomId,
-            startsAt: nextStartsAt,
-            endsAt: nextEndsAt,
-            status: "pending",
-            createdAt: now,
-          };
-          this.ctx.storage.sql.exec(
-            `INSERT INTO calendar_intents
-              (id, session_id, kind, uid, sequence, room_id, starts_at, ends_at, status, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-            intent.id,
-            intent.sessionId,
-            intent.kind,
-            intent.uid,
-            intent.sequence,
-            intent.roomId,
-            intent.startsAt,
-            intent.endsAt,
-            intent.createdAt,
-          );
-          this.ctx.storage.sql.exec(
-            `UPDATE sessions SET calendar_sequence = ? WHERE id = ?`,
-            calendarSequence,
-            sessionId,
-          );
-          createdIntents.push(intent);
-        }
+      if (!scheduleChanged) {
+        return;
       }
+
+      const insertIntent = (intent: CalendarIntentRecord) => {
+        this.ctx.storage.sql.exec(
+          `INSERT INTO calendar_intents
+            (id, session_id, kind, uid, sequence, room_id, starts_at, ends_at, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+          intent.id,
+          intent.sessionId,
+          intent.kind,
+          intent.uid,
+          intent.sequence,
+          intent.roomId,
+          intent.startsAt,
+          intent.endsAt,
+          intent.createdAt,
+        );
+        createdIntents.push(intent);
+      };
+
+      if (clearedSchedule) {
+        calendarSequence += 1;
+        insertIntent({
+          id: `cint_${sessionId}_cancel_${calendarSequence}_${now}`,
+          sessionId,
+          kind: "cancel",
+          uid: calendarUid,
+          sequence: calendarSequence,
+          roomId: nextRoomId,
+          startsAt: current.starts_at,
+          endsAt: current.ends_at,
+          status: "pending",
+          createdAt: now,
+        });
+        this.ctx.storage.sql.exec(
+          `UPDATE sessions SET calendar_sequence = ? WHERE id = ?`,
+          calendarSequence,
+          sessionId,
+        );
+        return;
+      }
+
+      if (!hasTimedSchedule) {
+        return;
+      }
+
+      if (!calendarInviteRecorded) {
+        calendarSequence = 0;
+        insertIntent({
+          id: `cint_${sessionId}_create_${now}`,
+          sessionId,
+          kind: "create",
+          uid: calendarUid,
+          sequence: calendarSequence,
+          roomId: nextRoomId,
+          startsAt: nextStartsAt,
+          endsAt: nextEndsAt,
+          status: "pending",
+          createdAt: now,
+        });
+        this.ctx.storage.sql.exec(
+          `UPDATE sessions
+           SET calendar_sequence = ?, calendar_invite_recorded = 1
+           WHERE id = ?`,
+          calendarSequence,
+          sessionId,
+        );
+        calendarInviteRecorded = true;
+        return;
+      }
+
+      calendarSequence += 1;
+      insertIntent({
+        id: `cint_${sessionId}_update_${calendarSequence}_${now}`,
+        sessionId,
+        kind: "update",
+        uid: calendarUid,
+        sequence: calendarSequence,
+        roomId: nextRoomId,
+        startsAt: nextStartsAt,
+        endsAt: nextEndsAt,
+        status: "pending",
+        createdAt: now,
+      });
+      this.ctx.storage.sql.exec(
+        `UPDATE sessions SET calendar_sequence = ? WHERE id = ?`,
+        calendarSequence,
+        sessionId,
+      );
     });
 
     const agenda = this.getAgendaWorkspace();
@@ -6381,6 +6492,28 @@ export class EventStore extends DurableObject<AppBindings> {
           },
         };
 
+    const sessionIds = [
+      ...new Set(
+        resolved.groups
+          .map((group) => group.sessionId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const recipientHints = new Map<string, Array<{ email: string; name: string }>>();
+    for (const group of resolved.groups) {
+      if (!group.sessionId) continue;
+      const existing = recipientHints.get(group.sessionId) ?? [];
+      for (const speaker of group.speakers) {
+        if (!speaker.email.trim()) continue;
+        existing.push({ email: speaker.email, name: speaker.name });
+      }
+      recipientHints.set(group.sessionId, existing);
+    }
+    const calendarOps = this.buildCalendarOperations({
+      sessionIds,
+      recipientHints,
+    });
+    const eventMeta = this.getEvent();
     const body = planCommunicationCascade({
       planId,
       source,
@@ -6392,6 +6525,10 @@ export class EventStore extends DurableObject<AppBindings> {
       linkedPlanIds: resolved.linkedDecision ? [resolved.linkedDecision.planId] : [],
       parentPlanId: resolved.linkedDecision?.planId ?? null,
       ageWarningHours: settings.ageWarningHours,
+      calendarOps,
+      eventName: eventMeta?.name,
+      organizerEmail: "program@chartstead.events",
+      organizerName: eventMeta?.name ? `${eventMeta.name} Program` : undefined,
     });
 
     // Capture proposal revisions for stale detection.
@@ -6770,10 +6907,16 @@ export class EventStore extends DurableObject<AppBindings> {
     try {
       this.ctx.storage.transactionSync(() => {
         const communicationBody = plan.body as CommunicationPlanBody;
+        const eventMeta = this.getEvent();
         const frozen = freezeCommunicationDrafts({
           body: communicationBody,
           planVersion: plan.version,
           at: now,
+          eventName: eventMeta?.name,
+          organizerEmail: "program@chartstead.events",
+          organizerName: eventMeta?.name
+            ? `${eventMeta.name} Program`
+            : undefined,
         });
         let nextBody = frozen.body;
         if (overrides.length > 0) {
@@ -7056,12 +7199,30 @@ export class EventStore extends DurableObject<AppBindings> {
     if (!row) return null;
     const draft = JSON.parse(row.frozen_payload_json) as FrozenCommunicationDraft;
     if ((await digestPayload(draft)) !== row.payload_identity) return null;
+    const attachments =
+      draft.calendarIntent?.ics && draft.calendarIntent.operation !== "none"
+        ? [
+            {
+              filename:
+                draft.attachmentRefs[0] ??
+                (draft.calendarIntent.operation === "cancel"
+                  ? "invite-cancel.ics"
+                  : draft.calendarIntent.operation === "update"
+                    ? "invite-update.ics"
+                    : "invite.ics"),
+              content: draft.calendarIntent.ics,
+              contentType: "text/calendar; method=" +
+                (draft.calendarIntent.method ?? "REQUEST"),
+            },
+          ]
+        : undefined;
     return {
       idempotencyKey: row.id,
       to: draft.toEmail,
       subject: draft.subject,
       html: draft.bodyHtml,
       text: draft.bodyText,
+      attachments,
     };
   }
 
@@ -7816,6 +7977,49 @@ export class EventStore extends DurableObject<AppBindings> {
       bodyText,
       bodyHtml: input.bodyHtml,
     });
+    const originalCalendar = originalDraft.calendarIntent;
+    let compensationCalendarOps: CalendarOperation[] = [];
+    if (
+      originalCalendar &&
+      originalCalendar.operation !== "none" &&
+      originalCalendar.uid &&
+      originalDraft.sessionId
+    ) {
+      const session = this.getAgendaWorkspace().sessions.find(
+        (row) => row.id === originalDraft.sessionId,
+      );
+      const nextSequence = (originalCalendar.sequence ?? 0) + 1;
+      const kind =
+        session && session.startsAt && session.endsAt ? "update" : "cancel";
+      compensationCalendarOps = [
+        {
+          sessionId: originalDraft.sessionId,
+          kind,
+          uid: originalCalendar.uid,
+          sequence: nextSequence,
+          title: originalCalendar.title ?? session?.title ?? "Session",
+          startsAt: session?.startsAt ?? originalCalendar.startsAt,
+          endsAt: session?.endsAt ?? originalCalendar.endsAt,
+          roomId: session?.roomId ?? null,
+          roomName: session?.roomName ?? originalCalendar.location,
+          locationPending: !session?.roomId,
+          timePending: !(session?.startsAt && session?.endsAt),
+          recipients: [
+            {
+              email: effect.toEmail,
+              name: originalRecipient?.name ?? originalDraft.recipientName,
+            },
+          ],
+          previous: {
+            startsAt: originalCalendar.startsAt,
+            endsAt: originalCalendar.endsAt,
+            roomId: null,
+            roomName: originalCalendar.location,
+          },
+          reversibility: "compensating_update_or_cancel",
+        },
+      ];
+    }
     const body = planCommunicationCascade({
       planId,
       source: {
@@ -7860,12 +8064,13 @@ export class EventStore extends DurableObject<AppBindings> {
       linkedPlanIds: [original.id],
       parentPlanId: original.id,
       ageWarningHours: settings.ageWarningHours,
+      calendarOps: compensationCalendarOps,
+      compensation: {
+        originalPlanId: original.id,
+        originalEffectId: effect.effectId,
+        reason,
+      },
     });
-    body.compensation = {
-      originalPlanId: original.id,
-      originalEffectId: effect.effectId,
-      reason,
-    };
     for (const proposalId of body.relevantRevisions.proposalIds) {
       const proposal = this.getProposal(proposalId);
       if (proposal) {
@@ -8043,6 +8248,12 @@ export class EventStore extends DurableObject<AppBindings> {
     }
 
     const planId = crypto.randomUUID();
+    const calendarSessionIds = [
+      ...new Set(agenda.calendarIntents.map((intent) => intent.sessionId)),
+    ];
+    const calendarOps = this.buildCalendarOperations({
+      sessionIds: calendarSessionIds,
+    });
     let body = planPublication({
       planId,
       operation,
@@ -8056,12 +8267,7 @@ export class EventStore extends DurableObject<AppBindings> {
       currentPublicSpeakers,
       restoreSnapshot,
       conflicts: agenda.conflicts,
-      calendarIntents: agenda.calendarIntents.map((intent) => ({
-        sessionId: intent.sessionId,
-        kind: intent.kind,
-        uid: intent.uid,
-        sequence: intent.sequence,
-      })),
+      calendarIntents: calendarOps,
       ageWarningHours: settings.ageWarningHours,
     });
     body = this.decorateAirtableEffects(body);

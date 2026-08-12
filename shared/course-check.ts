@@ -69,6 +69,7 @@ export interface CourseCheckDelta {
     | "communication_plan"
     | "message_draft"
     | "recipient"
+    | "calendar_invite"
     | "airtable_record";
   action:
     | "create"
@@ -78,12 +79,37 @@ export interface CourseCheckDelta {
     | "remove"
     | "include"
     | "exclude"
-    | "freeze";
+    | "freeze"
+    | "cancel";
   summary: string;
   before?: Record<string, unknown> | null;
   after?: Record<string, unknown> | null;
   proposalId?: string;
   sessionId?: string;
+}
+
+/** One planned calendar delivery operation with stable UID lifecycle. */
+export interface CalendarOperation {
+  sessionId: string;
+  kind: "create" | "update" | "cancel";
+  uid: string;
+  sequence: number;
+  title: string;
+  startsAt: string | null;
+  endsAt: string | null;
+  roomId: string | null;
+  roomName: string | null;
+  locationPending: boolean;
+  timePending: boolean;
+  recipients: Array<{ email: string; name: string }>;
+  previous: {
+    startsAt: string | null;
+    endsAt: string | null;
+    roomId: string | null;
+    roomName: string | null;
+  } | null;
+  /** Calendar invites are not recalled; corrections are compensating updates/cancels. */
+  reversibility: "compensating_update_or_cancel";
 }
 
 export interface CourseCheckStage {
@@ -328,12 +354,7 @@ export interface PublicationPlanBody {
   includedSessionIds: string[];
   excludedSessions: PublicationExclusion[];
   conflicts: PublicationConflictEvidence[];
-  calendarConsequences: Array<{
-    sessionId: string;
-    kind: "create" | "update" | "cancel";
-    uid: string;
-    sequence: number;
-  }>;
+  calendarConsequences: CalendarOperation[];
   deltas: CourseCheckDelta[];
   findings: CourseCheckFinding[];
   stages: CourseCheckStage[];
@@ -448,6 +469,23 @@ export interface CommunicationRecipientGroup {
   recipients: CommunicationRecipient[];
 }
 
+export interface FrozenCalendarIntent {
+  uid: string;
+  sequence: number;
+  operation: "none" | "create" | "update" | "cancel";
+  sessionId: string | null;
+  title: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  location: string | null;
+  locationPending: boolean;
+  timePending: boolean;
+  method: "REQUEST" | "CANCEL" | null;
+  /** Frozen ICS body attached at draft freeze; never regenerated on retry. */
+  ics: string | null;
+  reversibility: "compensating_update_or_cancel" | null;
+}
+
 export interface FrozenCommunicationDraft {
   draftId: string;
   groupId: string;
@@ -459,11 +497,7 @@ export interface FrozenCommunicationDraft {
   bodyText: string;
   bodyHtml: string;
   attachmentRefs: string[];
-  calendarIntent: {
-    uid: string | null;
-    sequence: number | null;
-    operation: "none" | "create" | "update" | "cancel";
-  } | null;
+  calendarIntent: FrozenCalendarIntent | null;
   status: CommunicationDraftStatus;
   frozenAt: string | null;
   frozenPlanVersion: number | null;
@@ -497,12 +531,7 @@ export interface CommunicationPlanBody {
   drafts: FrozenCommunicationDraft[];
   effects: CommunicationEffect[];
   deliverySummary: CommunicationDeliverySummary;
-  calendarOps: Array<{
-    sessionId: string;
-    kind: "create" | "update" | "cancel";
-    uid: string;
-    sequence: number;
-  }>;
+  calendarOps: CalendarOperation[];
   deltas: CourseCheckDelta[];
   findings: CourseCheckFinding[];
   stages: CourseCheckStage[];

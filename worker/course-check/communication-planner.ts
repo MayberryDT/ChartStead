@@ -1,4 +1,5 @@
 import type {
+  CalendarOperation,
   CommunicationPlanBody,
   CommunicationRecipient,
   CommunicationRecipientGroup,
@@ -6,11 +7,19 @@ import type {
   CourseCheckDelta,
   CourseCheckFinding,
   CourseCheckStage,
+  FrozenCalendarIntent,
   FrozenCommunicationDraft,
   PriorCommunicationEvidence,
   ProgramOutcome,
 } from "../../shared/course-check";
 import { DEFAULT_AGE_WARNING_HOURS } from "../../shared/course-check";
+import {
+  buildCalendarInviteIcs,
+  calendarInviteAttachmentFilename,
+  methodForOperation,
+  resolveCalendarLocation,
+  statusForOperation,
+} from "../../shared/calendar-invite";
 import { emptyCourseCheckAirtableEvidence } from "./airtable-effects";
 import { buildEvidenceSections } from "./evidence";
 
@@ -44,6 +53,11 @@ export interface PlanCommunicationInput {
   ageWarningHours?: number;
   drafts?: FrozenCommunicationDraft[];
   draftStageComplete?: boolean;
+  calendarOps?: CalendarOperation[];
+  organizerEmail?: string;
+  organizerName?: string;
+  eventName?: string;
+  compensation?: CommunicationPlanBody["compensation"];
 }
 
 function normalizeEmail(email: string): string {
@@ -371,22 +385,73 @@ export function planCommunicationCascade(
     });
   }
 
+  const calendarOps = input.calendarOps ?? [];
+  for (const op of calendarOps) {
+    const location = resolveCalendarLocation({
+      roomName: op.roomName,
+      locationPending: op.locationPending,
+    });
+    deltas.push({
+      entityType: "calendar_invite",
+      action: op.kind === "cancel" ? "cancel" : op.kind,
+      summary: `Calendar ${op.kind} for “${op.title}” (uid ${op.uid}, sequence ${op.sequence})${
+        op.locationPending ? " · location pending" : location ? ` · ${location}` : ""
+      }${op.timePending ? " · time TBD" : ""}.`,
+      sessionId: op.sessionId,
+      before: op.previous,
+      after: {
+        sessionId: op.sessionId,
+        kind: op.kind,
+        uid: op.uid,
+        sequence: op.sequence,
+        startsAt: op.startsAt,
+        endsAt: op.endsAt,
+        roomId: op.roomId,
+        roomName: op.roomName,
+        locationPending: op.locationPending,
+        timePending: op.timePending,
+        recipients: op.recipients,
+        reversibility: op.reversibility,
+      },
+    });
+    if (op.locationPending) {
+      findings.push({
+        id: `finding_cal_pending_loc_${op.sessionId}`,
+        severity: "info",
+        code: "calendar_location_pending",
+        message: `Calendar ${op.kind} for “${op.title}” will show location as pending until a room is assigned.`,
+        entityRef: op.sessionId,
+      });
+    }
+  }
+  if (calendarOps.length > 0) {
+    findings.push({
+      id: `finding_cal_separate_${input.planId.slice(0, 8)}`,
+      severity: "info",
+      code: "calendar_delivery_separate",
+      message:
+        "Calendar delivery is separately approved from decision application and public-program release. Create drafts freezes ICS; Send messages delivers.",
+    });
+  }
+
   const evidenceSections = buildEvidenceSections({ findings, deltas });
   const decisionState =
     input.source.kind === "linked_decision" && input.source.decisionPlanId
       ? "complete"
       : "not_started";
 
+  const purpose: CommunicationPlanBody["purpose"] =
+    input.source.kind === "publication" || calendarOps.length > 0
+      ? "calendar_update"
+      : input.templateKind === "custom"
+        ? "custom"
+        : "decision";
+
   const airtable = emptyCourseCheckAirtableEvidence();
   return {
     actionType: "communication",
     source: input.source,
-    purpose:
-      input.source.kind === "publication"
-        ? "calendar_update"
-        : input.templateKind === "custom"
-          ? "custom"
-          : "decision",
+    purpose,
     templateKind: input.templateKind,
     subject: input.subject,
     bodyText: input.bodyText,
@@ -404,7 +469,7 @@ export function planCommunicationCascade(
       failed: 0,
       unknown: 0,
     },
-    calendarOps: [],
+    calendarOps,
     deltas,
     findings,
     stages,
@@ -419,7 +484,7 @@ export function planCommunicationCascade(
     },
     linkedPlanIds: input.linkedPlanIds ?? [],
     parentPlanId: input.parentPlanId ?? null,
-    compensation: null,
+    compensation: input.compensation ?? null,
     batchGroupId: null,
     splitExplanation: null,
     relevantRevisions: {
@@ -471,10 +536,24 @@ export function communicationBodyDigestPayload(body: CommunicationPlanBody): unk
       bodyText: draft.bodyText,
       bodyHtml: draft.bodyHtml,
       attachmentRefs: draft.attachmentRefs,
-      calendarIntent: draft.calendarIntent,
+      calendarIntent: draft.calendarIntent
+        ? {
+            uid: draft.calendarIntent.uid,
+            sequence: draft.calendarIntent.sequence,
+            operation: draft.calendarIntent.operation,
+            sessionId: draft.calendarIntent.sessionId,
+            startsAt: draft.calendarIntent.startsAt,
+            endsAt: draft.calendarIntent.endsAt,
+            location: draft.calendarIntent.location,
+            locationPending: draft.calendarIntent.locationPending,
+            method: draft.calendarIntent.method,
+            ics: draft.calendarIntent.ics,
+          }
+        : null,
       status: draft.status,
       frozenPlanVersion: draft.frozenPlanVersion,
     })),
+    calendarOps: body.calendarOps,
     stages: body.stages.map((stage) => ({
       id: stage.id,
       status: stage.status,
@@ -499,16 +578,31 @@ export function hasCommunicationBlockers(findings: CourseCheckFinding[]): boolea
   return findings.some((finding) => finding.severity === "blocker");
 }
 
+function calendarOpForGroup(
+  body: CommunicationPlanBody,
+  sessionId: string | null,
+): CalendarOperation | null {
+  if (!sessionId) return null;
+  return body.calendarOps.find((op) => op.sessionId === sessionId) ?? null;
+}
+
 export function freezeCommunicationDrafts(input: {
   body: CommunicationPlanBody;
   planVersion: number;
   at: string;
+  organizerEmail?: string;
+  organizerName?: string;
+  eventName?: string;
 }): {
   body: CommunicationPlanBody;
   drafts: FrozenCommunicationDraft[];
 } {
   const drafts: FrozenCommunicationDraft[] = [];
   const frozenAddresses = new Set<string>();
+  const organizerEmail = input.organizerEmail ?? "program@chartstead.events";
+  const organizerName = input.organizerName ?? "ChartStead Program";
+  const eventName = input.eventName ?? "Conference program";
+
   for (const group of input.body.recipientGroups) {
     for (const recipient of group.recipients) {
       if (!recipient.selected || recipient.deliverability !== "ok") continue;
@@ -516,6 +610,69 @@ export function freezeCommunicationDrafts(input: {
       if (frozenAddresses.has(addressIdentity)) continue;
       frozenAddresses.add(addressIdentity);
       const draftId = `draft_${recipient.recipientId}`;
+      const op = calendarOpForGroup(input.body, group.sessionId);
+      let calendarIntent: FrozenCalendarIntent | null = null;
+      const attachmentRefs: string[] = [];
+
+      if (op && op.kind !== undefined) {
+        const location = resolveCalendarLocation({
+          roomName: op.roomName,
+          locationPending: op.locationPending,
+        });
+        const method = methodForOperation(op.kind);
+        const ics = buildCalendarInviteIcs({
+          uid: op.uid,
+          sequence: op.sequence,
+          method,
+          operation: op.kind,
+          title: op.title,
+          description: input.body.bodyText,
+          location,
+          locationPending: op.locationPending,
+          startsAt: op.startsAt,
+          endsAt: op.endsAt,
+          organizerEmail,
+          organizerName,
+          attendee: { email: recipient.address, name: recipient.name },
+          eventName,
+          dtStamp: input.at,
+          status: statusForOperation(op.kind),
+        });
+        const filename = calendarInviteAttachmentFilename(op.kind);
+        attachmentRefs.push(filename);
+        calendarIntent = {
+          uid: op.uid,
+          sequence: op.sequence,
+          operation: op.kind,
+          sessionId: op.sessionId,
+          title: op.title,
+          startsAt: op.startsAt,
+          endsAt: op.endsAt,
+          location,
+          locationPending: op.locationPending,
+          timePending: op.timePending,
+          method,
+          ics,
+          reversibility: op.reversibility,
+        };
+      } else if (group.sessionId) {
+        calendarIntent = {
+          uid: `cal_${group.sessionId}`,
+          sequence: 0,
+          operation: "none",
+          sessionId: group.sessionId,
+          title: null,
+          startsAt: null,
+          endsAt: null,
+          location: null,
+          locationPending: false,
+          timePending: false,
+          method: null,
+          ics: null,
+          reversibility: null,
+        };
+      }
+
       drafts.push({
         draftId,
         groupId: group.groupId,
@@ -526,14 +683,8 @@ export function freezeCommunicationDrafts(input: {
         subject: input.body.subject,
         bodyText: input.body.bodyText,
         bodyHtml: input.body.bodyHtml,
-        attachmentRefs: [],
-        calendarIntent: group.sessionId
-          ? {
-              uid: `cal_${group.sessionId}`,
-              sequence: 0,
-              operation: "none",
-            }
-          : null,
+        attachmentRefs,
+        calendarIntent,
         status: "frozen",
         frozenAt: input.at,
         frozenPlanVersion: input.planVersion,
@@ -614,6 +765,12 @@ export function redactCommunicationBody(body: CommunicationPlanBody): Communicat
       subject: "[redacted]",
       bodyText: "[redacted]",
       bodyHtml: "[redacted]",
+      calendarIntent: draft.calendarIntent
+        ? {
+            ...draft.calendarIntent,
+            ics: draft.calendarIntent.ics ? "[redacted]" : null,
+          }
+        : null,
     })),
     effects: body.effects.map((effect) => ({
       ...effect,

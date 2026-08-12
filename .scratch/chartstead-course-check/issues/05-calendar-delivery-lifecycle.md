@@ -4,7 +4,7 @@
 
 **Blocked by:** 04 — External sends and effect recovery; Competition 08 — Fluid agenda builder.
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] Private schedule placement and movement remain immediate ordinary writes, including TBD and conflicting states.
 - [ ] A Communication Course Check can plan calendar create, update, or cancel delivery for affected session participants.

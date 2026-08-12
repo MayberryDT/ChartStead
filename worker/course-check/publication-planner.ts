@@ -1,4 +1,5 @@
 import type {
+  CalendarOperation,
   CommunicationPlanBody,
   CourseCheckDelta,
   CourseCheckFinding,
@@ -45,12 +46,7 @@ export interface PublicationPlannerInput {
     speakers: PublicProgramSpeaker[];
   } | null;
   conflicts: ScheduleConflict[];
-  calendarIntents: Array<{
-    sessionId: string;
-    kind: "create" | "update" | "cancel";
-    uid: string;
-    sequence: number;
-  }>;
+  calendarIntents: CalendarOperation[];
   ageWarningHours?: number;
 }
 
@@ -306,6 +302,23 @@ export function planPublication(input: PublicationPlannerInput): PublicationPlan
       before: null,
       after: { calendarOps: calendarConsequences.length },
     });
+    for (const op of calendarConsequences) {
+      deltas.push({
+        entityType: "calendar_invite",
+        action: op.kind === "cancel" ? "cancel" : op.kind,
+        summary: `Calendar ${op.kind} for “${op.title}” (uid ${op.uid}, seq ${op.sequence})${
+          op.locationPending ? " · location pending" : ""
+        }.`,
+        sessionId: op.sessionId,
+        after: {
+          uid: op.uid,
+          sequence: op.sequence,
+          kind: op.kind,
+          locationPending: op.locationPending,
+          reversibility: op.reversibility,
+        },
+      });
+    }
   } else {
     findings.push({
       id: "no-implicit-communication",
@@ -415,7 +428,7 @@ export function publicationBodyDigestPayload(body: PublicationPlanBody): unknown
 export function planCommunicationStub(input: {
   planId: string;
   parentPlanId: string;
-  calendarOps: PublicationPlanBody["calendarConsequences"];
+  calendarOps: CalendarOperation[];
   ageWarningHours?: number;
 }): CommunicationPlanBody {
   const findings: CourseCheckFinding[] = [
@@ -426,16 +439,74 @@ export function planCommunicationStub(input: {
       message:
         "This linked Communication Course Check holds calendar consequences from publication. Create drafts and send remain separate; nothing was delivered.",
     },
+    {
+      id: "calendar-delivery-separate",
+      severity: "info",
+      code: "calendar_delivery_separate",
+      message:
+        "Calendar delivery is separately approved from decision application and public-program release.",
+    },
   ];
+  const recipientGroups =
+    input.calendarOps.length === 0
+      ? []
+      : input.calendarOps.map((op, index) => ({
+          groupId: `grp_cal_${input.planId.slice(0, 8)}_${index}`,
+          proposalId: null,
+          sessionId: op.sessionId,
+          label: op.title,
+          outcome: null,
+          recipients: op.recipients.map((recipient, recipientIndex) => ({
+            recipientId: `rcp_cal_${input.planId.slice(0, 8)}_${index}_${recipientIndex}`,
+            address: recipient.email,
+            name: recipient.name,
+            role: "speaker" as const,
+            speakerId: null,
+            inclusion: "include" as const,
+            inclusionReason: `${recipient.name} is a session participant and should receive the calendar ${op.kind}.`,
+            deliverability: "ok" as const,
+            selected: true,
+            priorCommunications: [],
+          })),
+        }));
   const deltas: CourseCheckDelta[] = input.calendarOps.map((op) => ({
-    entityType: "communication_plan",
-    action: "create",
-    summary: `Calendar ${op.kind} intent for session ${op.sessionId} (uid ${op.uid}, seq ${op.sequence}).`,
-    before: null,
-    after: { ...op },
+    entityType: "calendar_invite",
+    action: op.kind === "cancel" ? "cancel" : op.kind,
+    summary: `Calendar ${op.kind} for “${op.title}” (uid ${op.uid}, seq ${op.sequence})${
+      op.locationPending ? " · location pending" : ""
+    }.`,
+    before: op.previous,
+    after: {
+      sessionId: op.sessionId,
+      kind: op.kind,
+      uid: op.uid,
+      sequence: op.sequence,
+      startsAt: op.startsAt,
+      endsAt: op.endsAt,
+      roomId: op.roomId,
+      roomName: op.roomName,
+      locationPending: op.locationPending,
+      timePending: op.timePending,
+      recipients: op.recipients,
+      reversibility: op.reversibility,
+    },
     sessionId: op.sessionId,
   }));
+  const selectedCount = recipientGroups.reduce(
+    (sum, group) => sum + group.recipients.filter((row) => row.selected).length,
+    0,
+  );
+  if (selectedCount === 0 && input.calendarOps.length > 0) {
+    findings.push({
+      id: "cal-no-recipients",
+      severity: "blocker",
+      code: "no_deliverable_recipients",
+      message: "Calendar operations have no deliverable participant addresses.",
+      recoveryGuidance: "Add speaker emails before creating calendar drafts.",
+    });
+  }
   const airtable = emptyCourseCheckAirtableEvidence();
+  const hasBlockers = findings.some((finding) => finding.severity === "blocker");
   return {
     actionType: "communication",
     source: {
@@ -449,9 +520,9 @@ export function planCommunicationStub(input: {
     templateKind: "custom",
     subject: "Program calendar update",
     bodyText:
-      "Calendar delivery for published program changes will be prepared here. Nothing has been sent.",
+      "Your session schedule has been updated. The attached calendar invite reflects the current plan. Nothing has been sent until Send messages is approved.",
     bodyHtml:
-      "<p>Calendar delivery for published program changes will be prepared here. Nothing has been sent.</p>",
+      "<p>Your session schedule has been updated. The attached calendar invite reflects the current plan. Nothing has been sent until Send messages is approved.</p>",
     parentPlanId: input.parentPlanId,
     calendarOps: input.calendarOps,
     drafts: [],
@@ -466,14 +537,14 @@ export function planCommunicationStub(input: {
       unknown: 0,
     },
     recipients: [],
-    recipientGroups: [],
+    recipientGroups,
     deltas,
     findings,
     stages: [
       {
         id: "create-drafts",
         label: "Create drafts",
-        status: "ready",
+        status: hasBlockers ? "blocked" : "ready",
         verb: "Create drafts",
         external: false,
       },
@@ -501,8 +572,16 @@ export function planCommunicationStub(input: {
     relevantRevisions: {
       proposalIds: [],
       proposalRevisions: {},
-      speakerEmails: [],
-      contentFingerprint: `publication-calendar:${input.calendarOps.length}`,
+      speakerEmails: [
+        ...new Set(
+          input.calendarOps.flatMap((op) =>
+            op.recipients.map((recipient) => recipient.email.toLowerCase()),
+          ),
+        ),
+      ],
+      contentFingerprint: `publication-calendar:${input.calendarOps
+        .map((op) => `${op.sessionId}:${op.kind}:${op.uid}:${op.sequence}`)
+        .join("|")}`,
     },
     ageWarningHours: input.ageWarningHours ?? DEFAULT_AGE_WARNING_HOURS,
     ageWarning: null,

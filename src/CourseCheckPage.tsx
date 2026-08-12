@@ -792,8 +792,8 @@ function CommunicationBody({
           </div>
         </dl>
         <p className="muted">
-          Creating drafts never sends email. Send messages separately approves the exact
-          frozen payloads and creates one durable effect per address.
+          Creating drafts never sends email or calendar invites. Send messages separately
+          approves the exact frozen payloads and creates one durable effect per address.
         </p>
         {body.compensation ? (
           <p className="form-message" data-tone="warning">
@@ -801,6 +801,45 @@ function CommunicationBody({
           </p>
         ) : null}
       </section>
+
+      {body.calendarOps.length > 0 ? (
+        <section className="panel">
+          <h2>Calendar operations</h2>
+          <p className="muted">
+            Stable UID lifecycle. Corrections are compensating updates or cancellations —
+            sent invites are never rewritten in place.
+          </p>
+          <ul className="course-check-deltas">
+            {body.calendarOps.map((op) => (
+              <li key={`${op.sessionId}:${op.kind}:${op.sequence}`}>
+                <span className="course-check-delta-type">
+                  {op.kind} · seq {op.sequence}
+                </span>
+                <p>
+                  <strong>{op.title}</strong>
+                </p>
+                <p className="muted">
+                  UID {op.uid}
+                  {op.timePending
+                    ? " · time TBD"
+                    : op.startsAt && op.endsAt
+                      ? ` · ${op.startsAt.slice(0, 16)} → ${op.endsAt.slice(0, 16)}`
+                      : ""}
+                  {op.locationPending
+                    ? " · location pending"
+                    : op.roomName
+                      ? ` · ${op.roomName}`
+                      : ""}
+                  {" · "}
+                  {op.recipients.length} recipient
+                  {op.recipients.length === 1 ? "" : "s"} · reversibility{" "}
+                  {op.reversibility.replaceAll("_", " ")}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <section className="panel course-check-message-content">
         <h2>Message content</h2>
@@ -891,6 +930,20 @@ function CommunicationBody({
                   <strong>{draft.subject}</strong>
                 </p>
                 <p className="muted">{draft.bodyText}</p>
+                {draft.calendarIntent && draft.calendarIntent.operation !== "none" ? (
+                  <p className="muted">
+                    Calendar {draft.calendarIntent.operation} · UID{" "}
+                    {draft.calendarIntent.uid} · seq {draft.calendarIntent.sequence}
+                    {draft.calendarIntent.locationPending
+                      ? " · location pending"
+                      : draft.calendarIntent.location
+                        ? ` · ${draft.calendarIntent.location}`
+                        : ""}
+                    {draft.attachmentRefs.length > 0
+                      ? ` · attachment ${draft.attachmentRefs.join(", ")}`
+                      : ""}
+                  </p>
+                ) : null}
               </li>
             ))}
           </ul>

@@ -1,10 +1,17 @@
 import type { AppBindings } from "./types";
 
+export interface OutboundEmailAttachment {
+  filename: string;
+  content: string;
+  contentType: string;
+}
+
 export interface OutboundEmail {
   to: string;
   subject: string;
   html: string;
   text: string;
+  attachments?: OutboundEmailAttachment[];
 }
 
 export interface EmailSender {
@@ -86,6 +93,15 @@ export function createResendCommunicationSender(
             subject: message.subject,
             html: message.html,
             text: message.text,
+            ...(message.attachments && message.attachments.length > 0
+              ? {
+                  attachments: message.attachments.map((attachment) => ({
+                    filename: attachment.filename,
+                    content: btoa(attachment.content),
+                    content_type: attachment.contentType,
+                  })),
+                }
+              : {}),
           }),
         });
       } catch {

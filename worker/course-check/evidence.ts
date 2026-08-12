@@ -37,6 +37,12 @@ function classifyFinding(finding: CourseCheckFinding): CourseCheckEvidenceKind {
     return "people";
   }
   if (
+    finding.code.startsWith("calendar_") ||
+    finding.code === "linked_communication_no_delivery"
+  ) {
+    return "irreversible";
+  }
+  if (
     finding.code.startsWith("identity") ||
     finding.message.toLowerCase().includes("speaker")
   ) {
@@ -69,6 +75,7 @@ function classifyDelta(delta: CourseCheckDelta): CourseCheckEvidenceKind {
   if (
     delta.entityType === "public_revision" ||
     delta.entityType === "message_draft" ||
+    delta.entityType === "calendar_invite" ||
     (delta.entityType === "proposal" && delta.action === "update")
   ) {
     return "irreversible";
