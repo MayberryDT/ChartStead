@@ -287,6 +287,7 @@ describe("decision exception review", () => {
   });
 
   it("keeps a long shared activity history exact and responsive", async () => {
+    const user = userEvent.setup();
     const withHistory = structuredClone(proposed) as CourseCheckPlan;
     withHistory.activity = Array.from({ length: 120 }, (_, index) => ({
       id: `activity-${index + 1}`,
@@ -303,6 +304,7 @@ describe("decision exception review", () => {
 
     const startedAt = performance.now();
     renderReview();
+    await user.click(await screen.findByText("History and audit details"));
     const activity = await screen.findByRole("region", { name: "Shared activity" });
     expect(performance.now() - startedAt).toBeLessThan(2_000);
     expect(within(activity).getAllByRole("listitem")).toHaveLength(120);

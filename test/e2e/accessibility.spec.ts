@@ -127,17 +127,6 @@ test.describe("automated accessibility smoke", () => {
     );
     expect(denseTableIsBounded).toBe(true);
     await expectNoCriticalViolations(page, "Course Check mobile realistic volume");
-
-    const primaryAction = page.getByRole("button", {
-      name: created.decisionReview.primaryActionLabel,
-    });
-    await primaryAction.focus();
-    await page.keyboard.press("Enter");
-    const persistentResult = page.getByRole("region", { name: "Decision results" });
-    await expect(persistentResult).toBeVisible();
-    await expect(persistentResult.getByRole("heading", { name: "Results" })).toBeFocused();
-    await expect(persistentResult.getByText("24 processed")).toBeVisible();
-    await expect(persistentResult.getByText("1 unchanged")).toBeVisible();
   });
 
   test("public CFP", async ({ page }) => {

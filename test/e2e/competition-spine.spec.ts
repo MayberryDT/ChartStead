@@ -295,7 +295,7 @@ test("speaker announcement stays a draft until an explicit Course Check send", a
   });
   await expect(page.getByRole("heading", { name: "Delivery effects" })).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Send messages" }).click();
+  await page.getByRole("button", { name: /Send \d+ messages?/ }).click();
   await expect(page.getByRole("heading", { name: "Delivery effects" })).toBeVisible({
     timeout: 30_000,
   });
@@ -306,5 +306,5 @@ test("speaker announcement stays a draft until an explicit Course Check send", a
   await expect(page.getByRole("link", { name: subject })).toBeVisible({
     timeout: 30_000,
   });
-  await expect(page.getByText(/Queued|Delivered|Retry scheduled/).first()).toBeVisible();
+  await expect(page.getByText(/Queued|Sending|Delivered|Retry scheduled/).first()).toBeVisible();
 });

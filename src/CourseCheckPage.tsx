@@ -797,6 +797,19 @@ function OperationHistoryPanel({ plan }: { plan: CourseCheckPlan }) {
   );
 }
 
+function DecisionHistoryDisclosure({ plan }: { plan: CourseCheckPlan }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details
+      className="panel decision-exception-details"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>History and audit details</summary>
+      {open ? <OperationHistoryPanel plan={plan} /> : null}
+    </details>
+  );
+}
+
 function GuaranteedBody({ plan }: { plan: CourseCheckPlan }) {
   const body = plan.body;
   if (body.actionType !== "guaranteed_speaker") return null;
@@ -2303,7 +2316,7 @@ export function CourseCheckPage() {
       )}
 
       {isDecision && decisionReview ? (
-        <OperationHistoryPanel plan={currentPlan} />
+        <DecisionHistoryDisclosure plan={currentPlan} />
       ) : null}
 
       <AirtableStage
