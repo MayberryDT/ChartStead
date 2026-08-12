@@ -1,6 +1,6 @@
 # 20 — Create and configure event workspaces
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **Blocked by:** None — can start immediately.
 
@@ -26,3 +26,6 @@ Give an authorized event administrator a complete path from the existing organiz
 
 None — can start immediately.
 
+## Comments
+
+- 2026-08-12 — Started for agent implementation after Tyler authorized the incoming Competition Build frontier; demos, reviews, and human QA are deferred while automated acceptance verification remains required.
