@@ -1,6 +1,6 @@
 # 25 — Import speakers from CSV
 
-**Status:** blocked
+**Status:** ready-for-agent
 
 **Blocked by:** 24 — Manage the organizer speaker directory.
 
@@ -31,4 +31,4 @@ Add a reviewable CSV import into the existing event speaker directory. Organizer
 - 2026-08-12 — Created blocked on Competition 24 so CSV import reuses one authoritative speaker identity and directory command path.
 
 
-- 2026-08-12 — frontier-reconcile: Still blocked on: Competition 24 (in-progress).
+- 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.
