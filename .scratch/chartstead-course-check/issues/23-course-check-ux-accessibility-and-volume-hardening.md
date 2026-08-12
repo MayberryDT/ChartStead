@@ -27,4 +27,4 @@
 
 - 2026-08-12 — Final agent-owned functional closeout. Course Check 11 and 12 remain untouched, independent morning polish tickets and do not block completion.
 
-- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 19 (ready-for-agent); Course Check 20 (ready-for-agent); Course Check 21 (in-progress); Course Check 22 (blocked).
+- 2026-08-12 — frontier-reconcile: Still blocked on: Course Check 19 (ready-for-agent); Course Check 20 (ready-for-agent); Course Check 22 (blocked).
