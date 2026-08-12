@@ -4,7 +4,7 @@
 
 **Blocked by:** Course Check 19 — Truthful communication results and Outbox handoff; Course Check 20 — Shared approval, scoped freshness, and progressive disclosure; Course Check 21 — Unified publication and external-effect review; Course Check 22 — Course Check UX instrumentation and validation pack.
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 ## Source
 
@@ -28,3 +28,5 @@
 - 2026-08-12 — Final agent-owned functional closeout. Course Check 11 and 12 remain untouched, independent morning polish tickets and do not block completion.
 
 - 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.
+
+- 2026-08-12 — Started from integrated main after Course Check 19 and 20 closed. Agent-owned accessibility, realistic-volume, responsive, traceability, and regression hardening are in scope; demos, review agents, and human QA remain deferred per Tyler's instruction.
