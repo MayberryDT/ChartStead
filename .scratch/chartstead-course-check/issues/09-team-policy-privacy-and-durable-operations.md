@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Batch decisions and shared workspace; 04 — External sends and effect recovery; 06 — Program Publication Course Check; 08 — Complete agent API control.
 
-**Status:** in-review
+**Status:** done
 
 - [x] Event policy can require two-person approval, separate roles, mandatory reasons, or stricter agent controls without weakening baseline protections.
 - [x] Authorized administrators and agents see complete evidence; reviewers see only assigned-track decision evidence; speakers and public users see no internal plans.
@@ -26,3 +26,4 @@ Blocked by Course Check 02 — Batch decisions and shared workspace, Course Chec
 - 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.
 - 2026-08-12 — claimed by agent; worktree `.worktrees/course-check-09-team-policy`, branch `course-check-09-team-policy`.
 - 2026-08-12 — implementation complete → **in-review**. Demo `http://100.105.117.93:5190/`. Delivered: event Course Check policy (two-person, distinct approver, mandatory reason, max agent mode), role/track projection, activity model, privacy erasure API, storage secret scrub, Airtable alarm resume hook, linked operation history + a11y open defaults, Settings policy card, `test/worker/course-check-policy-privacy.test.ts` (10).
+- 2026-08-12 — merged to `main` @ `ae783a9`; status → done.
