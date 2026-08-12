@@ -23,6 +23,7 @@ import {
   decisionRevalidationSummary,
   declareDecisionIssueActions,
 } from "./issue-actions";
+import { buildCommunicationReviewProjection } from "./communication-results";
 
 export type CourseCheckProjectionOptions = {
   role: "admin" | "reviewer" | "agent" | "none";
@@ -1538,8 +1539,15 @@ function buildSharedApprovalProjection(
     options.permittedStageIds ??
     (options.role === "admin" ? plan.body.stages.map((stage) => stage.id) : [])
   ).includes(activeStage.id);
+  // A decision batch can be dependency-safe even when its aggregate stage is
+  // blocked: the decision projection declares the exact eligible subset and
+  // the items that must remain unchanged. Treat that declared commit as the
+  // actionable authority instead of making shared approval veto it.
   const actionable =
-    activeStage.status === "ready" || activeStage.status === "approved";
+    activeStage.status === "ready" ||
+    activeStage.status === "approved" ||
+    (activeStage.id === "apply-decision" &&
+      plan.decisionReview?.partialExecution.canExecute === true);
   const violatesDistinctApprover = Boolean(
     policy.requireDistinctApprover && viewerActorId === plan.createdBy.id,
   );
@@ -1764,6 +1772,14 @@ export function projectCourseCheckForViewer(
 
   const externalReview = buildExternalEffectReviewProjection(projected, options);
   if (externalReview) projected = { ...projected, externalReview };
+
+  const communicationReview = buildCommunicationReviewProjection(projected, {
+    canViewCommunicationEvidence: options.canViewCommunicationEvidence,
+    canSend:
+      options.role !== "reviewer" &&
+      (options.permittedStageIds ?? []).includes("send-messages"),
+  });
+  if (communicationReview) projected = { ...projected, communicationReview };
 
   projected = {
     ...projected,

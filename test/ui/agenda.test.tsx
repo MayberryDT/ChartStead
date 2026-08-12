@@ -138,6 +138,29 @@ afterEach(() => {
 });
 
 describe("Ticket 08 agenda workspace", () => {
+  it("opens an exact affected session from a Course Check handoff", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = requestUrl(input);
+        if (url.endsWith("/api/events") || url.endsWith("/api/events/")) {
+          return Response.json(eventsResponse);
+        }
+        if (url.endsWith(`/api/events/${eventId}/sessions`)) {
+          return Response.json(agendaResponse());
+        }
+        throw new Error(`Unexpected request ${url}`);
+      }),
+    );
+
+    renderAgenda(`/e/${eventId}/agenda?sessionIds=ses-2`);
+
+    const inspector = await screen.findByRole("complementary", {
+      name: "Session inspector",
+    });
+    expect(within(inspector).getByRole("heading", { name: "Platform Deep Dive" })).toBeVisible();
+  });
+
   it("shows unplaced pool, live counts, TBD labels, and keyboard Move Session", async () => {
     const user = userEvent.setup();
     let agenda = agendaResponse();

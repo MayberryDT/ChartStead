@@ -43,6 +43,7 @@ import {
   isDecisionFastPathEligible,
 } from "./course-check/DecisionFastPath";
 import { IssueActions } from "./course-check/IssueActions";
+import { CommunicationResultPanel } from "./course-check/CommunicationResultPanel";
 import {
   repairHref,
   saveCourseCheckReturnContext,
@@ -2230,44 +2231,59 @@ export function CourseCheckPage() {
           />
         )
       ) : isCommunication ? (
-        <CommunicationBody
-          plan={currentPlan}
-          subject={subject}
-          bodyText={bodyText}
-          selectedRecipientIds={selectedRecipientIds}
-          onSubjectChange={setSubject}
-          onBodyTextChange={setBodyText}
-          onToggleRecipient={(recipientId) => {
-            setSelectedRecipientIds((current) => {
-              const next = new Set(current);
-              if (next.has(recipientId)) next.delete(recipientId);
-              else next.add(recipientId);
-              return next;
-            });
-          }}
-          effectActionPending={
-            retryEffectMutation.isPending ||
-            reconcileEffectMutation.isPending ||
-            correctionMutation.isPending
-          }
-          onRetryEffect={(effectId) => {
-            setMessage(null);
-            retryEffectMutation.mutate(effectId);
-          }}
-          onReconcileEffect={(effectId, outcome, note, providerReference) => {
-            setMessage(null);
-            reconcileEffectMutation.mutate({
-              effectId,
-              outcome,
-              note,
-              providerReference,
-            });
-          }}
-          onCreateCorrection={(effectId, input) => {
-            setMessage(null);
-            correctionMutation.mutate({ effectId, ...input });
-          }}
-        />
+        <>
+          {currentPlan.communicationReview ? (
+            <CommunicationResultPanel
+              review={currentPlan.communicationReview}
+              onSend={
+                currentPlan.communicationReview.sendAction
+                  ? () => {
+                      setMessage(null);
+                      sendMutation.mutate(currentPlan);
+                    }
+                  : undefined
+              }
+            />
+          ) : null}
+          <CommunicationBody
+            plan={currentPlan}
+            subject={subject}
+            bodyText={bodyText}
+            selectedRecipientIds={selectedRecipientIds}
+            onSubjectChange={setSubject}
+            onBodyTextChange={setBodyText}
+            onToggleRecipient={(recipientId) => {
+              setSelectedRecipientIds((current) => {
+                const next = new Set(current);
+                if (next.has(recipientId)) next.delete(recipientId);
+                else next.add(recipientId);
+                return next;
+              });
+            }}
+            effectActionPending={
+              retryEffectMutation.isPending ||
+              reconcileEffectMutation.isPending ||
+              correctionMutation.isPending
+            }
+            onRetryEffect={(effectId) => {
+              setMessage(null);
+              retryEffectMutation.mutate(effectId);
+            }}
+            onReconcileEffect={(effectId, outcome, note, providerReference) => {
+              setMessage(null);
+              reconcileEffectMutation.mutate({
+                effectId,
+                outcome,
+                note,
+                providerReference,
+              });
+            }}
+            onCreateCorrection={(effectId, input) => {
+              setMessage(null);
+              correctionMutation.mutate({ effectId, ...input });
+            }}
+          />
+        </>
       ) : isPublication ? (
         <PublicationBody
           plan={currentPlan}
@@ -2448,7 +2464,7 @@ export function CourseCheckPage() {
           </>
         ) : null}
 
-        {isCommunication && draftsComplete && !deliveryStarted ? (
+        {isCommunication && draftsComplete && !deliveryStarted && !currentPlan.communicationReview ? (
           <>
             <p className="form-message" data-tone="success" role="status">
               Drafts frozen. Sending will approve these exact messages and track one

@@ -6,6 +6,9 @@ import type {
 
 /** Course Check v1 contract — decision, publication, communication drafts, batch workspace. */
 
+import type { CommunicationReviewProjection } from "./course-check-communication-results";
+export type * from "./course-check-communication-results";
+
 export type ProgramOutcome = "accepted" | "declined";
 
 export type CourseCheckActionType =
@@ -965,6 +968,8 @@ export interface CourseCheckPlan {
   externalReview?: ExternalEffectReviewProjection;
   /** Viewer-specific stage authority, resumption, freshness, and audit adapter. */
   sharedApproval?: CourseCheckSharedApprovalProjection;
+  /** Authenticated viewer-specific communication status, result, and Outbox handoff. */
+  communicationReview?: CommunicationReviewProjection;
   /** Immutable prior versions (newest first, excludes current). */
   versions?: CourseCheckPlanVersion[];
   mutations?: PlanMutationRecord[];

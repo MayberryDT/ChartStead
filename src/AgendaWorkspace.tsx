@@ -103,7 +103,13 @@ function actionLabel(action: ScheduleConflict["actions"][number]): string {
   }
 }
 
-export function AgendaWorkspace({ event }: { event: EventRecord }) {
+export function AgendaWorkspace({
+  event,
+  initialSessionIds = [],
+}: {
+  event: EventRecord;
+  initialSessionIds?: string[];
+}) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const agendaQuery = useQuery({
@@ -111,7 +117,9 @@ export function AgendaWorkspace({ event }: { event: EventRecord }) {
     queryFn: () => fetchAgenda(event.id),
   });
   const [selectedDay, setSelectedDay] = useState(event.startsOn);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    initialSessionIds[0] ?? null,
+  );
   const [moveOpen, setMoveOpen] = useState(false);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);

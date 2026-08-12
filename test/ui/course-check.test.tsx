@@ -1258,4 +1258,80 @@ describe("Course Check review workspace", () => {
       "/e/pacific-open-data-summit-2026/course-checks/plan-1",
     );
   });
+
+  it("keeps the exact draft result and Outbox handoff visible after draft creation", async () => {
+    const frozenPlan: CourseCheckPlan = {
+      ...communicationPlan,
+      state: "Complete",
+      body: {
+        ...communicationBody,
+        stageVisibility: { ...communicationBody.stageVisibility, draft: "complete", send: "ready" },
+        drafts: [
+          {
+            draftId: "draft-1",
+            groupId: "group-1",
+            proposalId: body.proposalId,
+            sessionId: "session-1",
+            toEmail: "speaker@example.test",
+            recipientName: "Example Speaker",
+            subject: communicationBody.subject,
+            bodyText: communicationBody.bodyText,
+            bodyHtml: communicationBody.bodyHtml,
+            attachmentRefs: [],
+            calendarIntent: null,
+            status: "frozen",
+            frozenAt: "2026-08-11T12:02:00.000Z",
+            frozenPlanVersion: 1,
+          },
+        ],
+      },
+      communicationReview: {
+        kind: "communication_review",
+        currentStatus: { key: "ready_to_send", label: "Ready to send" },
+        progress: [
+          { key: "no_draft", label: "No draft", state: "complete" },
+          { key: "draft_prepared", label: "Draft prepared", state: "complete" },
+          { key: "ready_to_send", label: "Ready to send", state: "current" },
+          { key: "sending", label: "Sending", state: "pending" },
+        ],
+        draftResult: {
+          title: "Draft prepared",
+          counts: { prepared: 1, omitted: 0, failed: 0, unchanged: 0 },
+          noEmailsSent: true,
+          statement: "1 draft prepared, 0 recipients omitted, 0 failed, and 0 items unchanged. No emails were sent.",
+          preparedAt: "2026-08-11T12:02:00.000Z",
+        },
+        handoffs: [
+          {
+            kind: "outbox",
+            label: "Review 1 draft in Outbox",
+            href: "/e/pacific-open-data-summit-2026/messages?planId=communication-plan-1",
+            count: 1,
+          },
+          {
+            kind: "submissions",
+            label: "Return to submissions",
+            href: "/e/pacific-open-data-summit-2026/submissions",
+            count: 1,
+          },
+        ],
+        outbox: { exactDraftCount: 1, sourceLabel: "Prepared from applied decisions", groups: [], draftlessGroups: [] },
+        deliveryResult: null,
+        sendAction: { stageId: "send-messages", label: "Send 1 message", effectSummary: "Approve and queue exactly 1 frozen message." },
+        immutableBoundary: null,
+      },
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(frozenPlan));
+    renderCourseCheck(
+      "/e/pacific-open-data-summit-2026/course-checks/plan-1?stage=communication-plan-1",
+    );
+
+    expect(await screen.findByRole("heading", { name: "Ready to send" })).toBeVisible();
+    expect(screen.getByText(frozenPlan.communicationReview!.draftResult!.statement)).toBeVisible();
+    expect(screen.getByRole("link", { name: "Review 1 draft in Outbox" })).toHaveAttribute(
+      "href",
+      "/e/pacific-open-data-summit-2026/messages?planId=communication-plan-1",
+    );
+    expect(screen.getAllByText("No emails were sent.", { exact: true }).length).toBeGreaterThan(0);
+  });
 });

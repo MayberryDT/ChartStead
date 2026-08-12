@@ -647,4 +647,74 @@ describe("Course Check 03 — communication drafts and recipient reasoning", () 
     expect(result.status).toBe(409);
     expect(result.body).toMatchObject({ code: "relevant_input_changed" });
   });
+
+  it("persists exact mixed-eligibility draft results and the Outbox handoff across reload", async () => {
+    const proposalId = "SUB-PODS0031";
+    const store = env.EVENT_STORE.getByName(eventId);
+    const outboxBefore = await store.listOutboxMessages();
+    await store.setProposalCoSpeakersForTest(proposalId, [
+      {
+        name: "Draftless Co-speaker",
+        email: "",
+        biography: "Missing address exercises an omitted draft without blocking the decision.",
+      },
+    ]);
+    const decision = await createDecisionPlan({
+      proposalId,
+      outcome: "declined",
+      idempotencyKey: `cc19-result-decision-${proposalId}`,
+    });
+    await applyDecision(decision, `cc19-result-apply-${proposalId}`);
+    const created = await createCommunication({
+      proposalIds: [proposalId],
+      idempotencyKey: `cc19-result-create-${proposalId}`,
+    });
+    const communication = created.body as CourseCheckPlan;
+    const warnings = communication.body.findings
+      .filter((finding) => finding.severity === "warning")
+      .map((finding) => ({
+        findingId: finding.id,
+        reason: "Prepare eligible drafts and leave the missing address without a draft.",
+      }));
+
+    const frozen = await createDrafts({
+      plan: communication,
+      idempotencyKey: `cc19-result-freeze-${proposalId}`,
+      softWarningOverrides: warnings,
+    });
+    expect(frozen.status).toBe(201);
+    const beforeReload = asCommunication(frozen.body as CourseCheckPlan);
+    expect(beforeReload.stageVisibility.send).toBe("ready");
+
+    const response = await adminApp.request(
+      `https://chartstead.test/api/events/${eventId}/course-checks/${communication.id}`,
+      undefined,
+      env,
+    );
+    expect(response.status).toBe(200);
+    const reloaded = await response.json<CourseCheckPlan>();
+    expect(reloaded.communicationReview).toMatchObject({
+      currentStatus: { key: "ready_to_send", label: "Ready to send" },
+      draftResult: {
+        counts: { prepared: 1, omitted: 1, failed: 0, unchanged: 0 },
+        noEmailsSent: true,
+      },
+      outbox: {
+        exactDraftCount: 1,
+        sourceLabel: "Prepared from an organizer selection",
+      },
+      sendAction: { stageId: "send-messages", label: "Send 1 message" },
+    });
+    expect(reloaded.communicationReview?.draftResult?.statement).toContain(
+      "No emails were sent.",
+    );
+    expect(reloaded.communicationReview?.handoffs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "outbox", count: 1 }),
+        expect.objectContaining({ kind: "submissions" }),
+      ]),
+    );
+    expect(await store.listOutboxMessages()).toEqual(outboxBefore);
+    expect(reloaded.activity?.some((entry) => entry.kind === "create_drafts")).toBe(true);
+  });
 });

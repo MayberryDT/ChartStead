@@ -3293,6 +3293,19 @@ export function createApp(options: AppOptions = {}) {
     };
   }
 
+  async function projectCourseCheckResponsePlan(
+    store: ReturnType<AppBindings["EVENT_STORE"]["getByName"]>,
+    plan: import("../shared/course-check").CourseCheckPlan,
+    principal: OrganizerPrincipal,
+    eventId: string,
+  ) {
+    const policy = (await store.getCourseCheckPolicy()) as EventCourseCheckPolicy;
+    return (await store.projectCourseCheckPlan(
+      plan,
+      courseCheckProjectionOptions(principal, eventId, policy),
+    )) as import("../shared/course-check").CourseCheckPlan | null;
+  }
+
   for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.get(
     `${__ccBase}/policy`,
     async (c) => {
@@ -3475,7 +3488,8 @@ export function createApp(options: AppOptions = {}) {
         ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
         : [];
     try {
-      const result = (await c.env.EVENT_STORE.getByName(eventId).createCommunicationCourseCheck({
+      const store = c.env.EVENT_STORE.getByName(eventId);
+      const result = (await store.createCommunicationCourseCheck({
         decisionPlanId:
           typeof body?.decisionPlanId === "string" ? body.decisionPlanId.trim() : undefined,
         proposalIds: asStringArray(body?.proposalIds),
@@ -3494,7 +3508,14 @@ export function createApp(options: AppOptions = {}) {
         idempotencyKey,
         actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
       })) as { plan: import("../shared/course-check").CourseCheckPlan; created: boolean };
-      return c.json(result.plan, result.created ? 201 : 200);
+      const projected = await projectCourseCheckResponsePlan(
+        store,
+        result.plan,
+        principal!,
+        eventId,
+      );
+      if (!projected) return c.json({ error: "Course Check not found" }, 404);
+      return c.json(projected, result.created ? 201 : 200);
     } catch (error) {
       return c.json(
         {
@@ -3561,7 +3582,8 @@ export function createApp(options: AppOptions = {}) {
           })
           .filter((row): row is { recipientId: string; selected: boolean } => Boolean(row))
       : undefined;
-    const result = (await c.env.EVENT_STORE.getByName(eventId).reviseCommunicationCourseCheck({
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const result = (await store.reviseCommunicationCourseCheck({
       planId,
       planVersion: body.planVersion as number,
       digest: body.digest,
@@ -3590,7 +3612,14 @@ export function createApp(options: AppOptions = {}) {
         result.status,
       );
     }
-    return c.json(result.plan, result.created ? 201 : 200);
+    const projected = await projectCourseCheckResponsePlan(
+      store,
+      result.plan,
+      principal!,
+      eventId,
+    );
+    if (!projected) return c.json({ error: "Course Check not found" }, 404);
+    return c.json(projected, result.created ? 201 : 200);
   });
 
   for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(`${__ccBase}/:planId/create-drafts`, async (c) => {
@@ -3645,7 +3674,8 @@ export function createApp(options: AppOptions = {}) {
           })
           .filter((row): row is { findingId: string; reason: string | null } => Boolean(row))
       : undefined;
-    const result = (await c.env.EVENT_STORE.getByName(eventId).createCommunicationDrafts({
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const result = (await store.createCommunicationDrafts({
       planId,
       planVersion: body.planVersion as number,
       digest: body.digest,
@@ -3676,7 +3706,14 @@ export function createApp(options: AppOptions = {}) {
         result.status,
       );
     }
-    return c.json(result.plan, result.created ? 201 : 200);
+    const projected = await projectCourseCheckResponsePlan(
+      store,
+      result.plan,
+      principal!,
+      eventId,
+    );
+    if (!projected) return c.json({ error: "Course Check not found" }, 404);
+    return c.json(projected, result.created ? 201 : 200);
   });
 
   for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(`${__ccBase}/:planId/send`, async (c) => {
@@ -3762,9 +3799,25 @@ export function createApp(options: AppOptions = {}) {
         limit: 50,
       });
       const delivered = await store.getCourseCheckPlan(planId);
-      if (delivered) return c.json(delivered, 202);
+      if (delivered) {
+        const projected = await projectCourseCheckResponsePlan(
+          store,
+          delivered,
+          principal!,
+          eventId,
+        );
+        if (!projected) return c.json({ error: "Course Check not found" }, 404);
+        return c.json(projected, 202);
+      }
     }
-    return c.json(result.plan, result.created ? 202 : 200);
+    const projected = await projectCourseCheckResponsePlan(
+      store,
+      result.plan,
+      principal!,
+      eventId,
+    );
+    if (!projected) return c.json({ error: "Course Check not found" }, 404);
+    return c.json(projected, result.created ? 202 : 200);
   });
 
   for (const { app: __ccApp, base: __ccBase } of __courseCheckTargets) __ccApp.post(
@@ -3830,9 +3883,25 @@ export function createApp(options: AppOptions = {}) {
           limit: 50,
         });
         const delivered = await store.getCourseCheckPlan(param(c, "planId"));
-        if (delivered) return c.json(delivered);
+        if (delivered) {
+          const projected = await projectCourseCheckResponsePlan(
+            store,
+            delivered,
+            principal!,
+            eventId,
+          );
+          if (!projected) return c.json({ error: "Course Check not found" }, 404);
+          return c.json(projected);
+        }
       }
-      return c.json(result.plan);
+      const projected = await projectCourseCheckResponsePlan(
+        store,
+        result.plan,
+        principal!,
+        eventId,
+      );
+      if (!projected) return c.json({ error: "Course Check not found" }, 404);
+      return c.json(projected);
     },
   );
 
@@ -3905,7 +3974,15 @@ export function createApp(options: AppOptions = {}) {
           result.status,
         );
       }
-      return c.json(result.plan);
+      const store = c.env.EVENT_STORE.getByName(eventId);
+      const projected = await projectCourseCheckResponsePlan(
+        store,
+        result.plan,
+        principal!,
+        eventId,
+      );
+      if (!projected) return c.json({ error: "Course Check not found" }, 404);
+      return c.json(projected);
     },
   );
 
@@ -3948,7 +4025,8 @@ export function createApp(options: AppOptions = {}) {
           400,
         );
       }
-      const result = (await c.env.EVENT_STORE.getByName(eventId).createCommunicationCorrection({
+      const store = c.env.EVENT_STORE.getByName(eventId);
+      const result = (await store.createCommunicationCorrection({
         planId: param(c, "planId"),
         effectId: param(c, "effectId"),
         reason: body.reason,
@@ -3980,7 +4058,14 @@ export function createApp(options: AppOptions = {}) {
           result.status,
         );
       }
-      return c.json(result.plan, result.created ? 201 : 200);
+      const projected = await projectCourseCheckResponsePlan(
+        store,
+        result.plan,
+        principal!,
+        eventId,
+      );
+      if (!projected) return c.json({ error: "Course Check not found" }, 404);
+      return c.json(projected, result.created ? 201 : 200);
     },
   );
 

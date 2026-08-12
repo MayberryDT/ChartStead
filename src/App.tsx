@@ -269,6 +269,8 @@ function EventDesk({
   initialQueue = { query: "", status: "all", track: "", sort: "newest" },
   repairReturnTo = null,
   repairField = null,
+  initialAgendaSessionIds = [],
+  initialMessagePlanId = null,
 }: {
   data: EventListResponse;
   initialNav?: NavItem;
@@ -277,6 +279,8 @@ function EventDesk({
   initialQueue?: ProposalQueueState;
   repairReturnTo?: string | null;
   repairField?: string | null;
+  initialAgendaSessionIds?: string[];
+  initialMessagePlanId?: string | null;
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -621,7 +625,7 @@ function EventDesk({
             cfpHref={cfpHref}
           />
         ) : activeNav === "Agenda" ? (
-          <AgendaWorkspace event={event} />
+          <AgendaWorkspace event={event} initialSessionIds={initialAgendaSessionIds} />
         ) : activeNav === "Overview" ? (
           <OverviewWorkspace event={event} />
         ) : activeNav === "Speakers" ? (
@@ -630,6 +634,7 @@ function EventDesk({
           <MessagesWorkspace
             eventId={event.id}
             eventName={event.name}
+            focusedPlanId={initialMessagePlanId}
             onOpenCourseCheck={(planId) => {
               void navigate({
                 to: "/e/$eventId/course-checks/$planId",
@@ -734,6 +739,10 @@ export function SubmissionsPage() {
 export function AgendaPage() {
   const query = useOrganizerData();
   const params = useParams({ strict: false }) as { eventId?: string };
+  const search = useRouterState({ select: (state) => state.location.search }) as Record<
+    string,
+    unknown
+  >;
 
   if (query.isPending) return <LoadingShell />;
   if (query.error instanceof ApiError && query.error.status === 401) return <SignIn />;
@@ -753,6 +762,11 @@ export function AgendaPage() {
       data={query.data}
       initialNav="Agenda"
       initialEventId={params.eventId ?? null}
+      initialAgendaSessionIds={
+        typeof search.sessionIds === "string"
+          ? search.sessionIds.split(",").filter(Boolean)
+          : []
+      }
     />
   );
 }
@@ -760,6 +774,10 @@ export function AgendaPage() {
 export function MessagesPage() {
   const query = useOrganizerData();
   const params = useParams({ strict: false }) as { eventId?: string };
+  const search = useRouterState({ select: (state) => state.location.search }) as Record<
+    string,
+    unknown
+  >;
 
   if (query.isPending) return <LoadingShell />;
   if (query.error instanceof ApiError && query.error.status === 401) return <SignIn />;
@@ -779,6 +797,7 @@ export function MessagesPage() {
       data={query.data}
       initialNav="Messages"
       initialEventId={params.eventId ?? null}
+      initialMessagePlanId={typeof search.planId === "string" ? search.planId : null}
     />
   );
 }

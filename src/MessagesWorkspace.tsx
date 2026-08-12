@@ -10,6 +10,7 @@ import {
   fetchCourseCheckPlans,
   fetchOnboardingBoard,
 } from "./api";
+import { CommunicationResultPanel } from "./course-check/CommunicationResultPanel";
 
 type AudienceFilter = "all" | "needs_follow_up" | "overdue" | "ready";
 
@@ -49,7 +50,9 @@ function formatDate(value: string): string {
   });
 }
 
-function communicationStatus(body: CommunicationPlanBody): string {
+function communicationStatus(plan: CourseCheckPlan & { body: CommunicationPlanBody }): string {
+  if (plan.communicationReview) return plan.communicationReview.currentStatus.label;
+  const body = plan.body;
   if (body.deliverySummary.unknown > 0) return "Unknown outcome";
   if (body.deliverySummary.retryScheduled > 0) return "Retry scheduled";
   if (body.deliverySummary.failed > 0) return "Failed";
@@ -82,10 +85,12 @@ function communicationRecipientCount(body: CommunicationPlanBody): number {
 export function MessagesWorkspace({
   eventId,
   eventName,
+  focusedPlanId,
   onOpenCourseCheck,
 }: {
   eventId: string;
   eventName: string;
+  focusedPlanId?: string | null;
   onOpenCourseCheck: (planId: string) => void;
 }) {
   const board = useQuery({
@@ -122,6 +127,9 @@ export function MessagesWorkspace({
     (plan): plan is CourseCheckPlan & { body: CommunicationPlanBody } =>
       plan.body.actionType === "communication",
   );
+  const focusedPlan = focusedPlanId
+    ? communicationPlans.find((plan) => plan.id === focusedPlanId) ?? null
+    : null;
 
   const createPlan = useMutation({
     mutationFn: () =>
@@ -159,6 +167,17 @@ export function MessagesWorkspace({
 
   return (
     <div className="workspace messages-workspace">
+      {focusedPlan?.communicationReview ? (
+        <CommunicationResultPanel
+          review={focusedPlan.communicationReview}
+          showOutboxDetails
+          onSend={
+            focusedPlan.communicationReview.sendAction
+              ? () => onOpenCourseCheck(focusedPlan.id)
+              : undefined
+          }
+        />
+      ) : null}
       <section className="messages-intro" aria-labelledby="speaker-messages-title">
         <div>
           <p className="eyebrow">Communications</p>
@@ -378,7 +397,7 @@ export function MessagesWorkspace({
                   <td>{communicationRecipientCount(plan.body)}</td>
                   <td>
                     <span className="messages-delivery-status">
-                      {communicationStatus(plan.body)}
+                      {communicationStatus(plan)}
                     </span>
                   </td>
                   <td>{formatDate(plan.updatedAt)}</td>

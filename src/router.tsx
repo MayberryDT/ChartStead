@@ -103,12 +103,18 @@ const agendaRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/e/$eventId/agenda",
   component: AgendaPage,
+  validateSearch: (search: Record<string, unknown>): { sessionIds?: string } => ({
+    sessionIds: typeof search.sessionIds === "string" ? search.sessionIds : undefined,
+  }),
 });
 
 const messagesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/e/$eventId/messages",
   component: MessagesPage,
+  validateSearch: (search: Record<string, unknown>): { planId?: string } => ({
+    planId: typeof search.planId === "string" ? search.planId : undefined,
+  }),
 });
 
 function validateProgramSearch(search: Record<string, unknown>) {

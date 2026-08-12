@@ -200,6 +200,122 @@ test("decision result advances to draft preparation without leaving the workspac
   await expect(page.getByRole("heading", { name: "Prepare decline messages" })).toBeVisible();
 });
 
+test("draft result stays truthful through the exact Outbox handoff and reload", async ({ page }) => {
+  const proposalsResponse = await page.request.get(
+    "/api/events/pacific-open-data-summit-2026/proposals",
+  );
+  const proposals = (await proposalsResponse.json()) as {
+    proposals: Array<{ id: string; programOutcome: string | null }>;
+  };
+  const proposal = proposals.proposals.find(
+    (row) => row.id === "SUB-PODS0048" && !row.programOutcome,
+  );
+  expect(proposal).toBeTruthy();
+  const key = `cc19-browser-${Date.now()}`;
+  const decisionResponse = await page.request.post(
+    "/api/events/pacific-open-data-summit-2026/course-checks/decisions",
+    {
+      headers: { "idempotency-key": `${key}-decision` },
+      data: {
+        items: [{ proposalId: proposal!.id, outcome: "declined" }],
+        idempotencyKey: `${key}-decision`,
+      },
+    },
+  );
+  const decision = (await decisionResponse.json()) as {
+    id: string;
+    version: number;
+    digest: string;
+  };
+  const applyResponse = await page.request.post(
+    `/api/events/pacific-open-data-summit-2026/course-checks/${decision.id}/apply`,
+    {
+      headers: { "idempotency-key": `${key}-apply` },
+      data: {
+        planVersion: decision.version,
+        digest: decision.digest,
+        stageId: "apply-decision",
+        idempotencyKey: `${key}-apply`,
+      },
+    },
+  );
+  expect(applyResponse.ok()).toBe(true);
+  const communicationResponse = await page.request.post(
+    "/api/events/pacific-open-data-summit-2026/course-checks/communications",
+    {
+      headers: { "idempotency-key": `${key}-communication` },
+      data: {
+        decisionPlanId: decision.id,
+        idempotencyKey: `${key}-communication`,
+      },
+    },
+  );
+  expect(communicationResponse.status()).toBe(201);
+  const communication = (await communicationResponse.json()) as {
+    id: string;
+    version: number;
+    digest: string;
+    body: { findings: Array<{ id: string; severity: string }> };
+    communicationReview: { currentStatus: { label: string } };
+  };
+  expect(communication.communicationReview.currentStatus.label).toBe("No draft");
+  const draftResponse = await page.request.post(
+    `/api/events/pacific-open-data-summit-2026/course-checks/${communication.id}/create-drafts`,
+    {
+      headers: { "idempotency-key": `${key}-drafts` },
+      data: {
+        planVersion: communication.version,
+        digest: communication.digest,
+        stageId: "create-drafts",
+        idempotencyKey: `${key}-drafts`,
+        softWarningOverrides: communication.body.findings
+          .filter((finding) => finding.severity === "warning")
+          .map((finding) => ({ findingId: finding.id, reason: "Reviewed for browser acceptance." })),
+      },
+    },
+  );
+  expect(draftResponse.status()).toBe(201);
+  const frozen = (await draftResponse.json()) as {
+    communicationReview: {
+      currentStatus: { label: string };
+      draftResult: { statement: string };
+      handoffs: Array<{ kind: string; href: string }>;
+    };
+  };
+  expect(frozen.communicationReview.currentStatus.label).toBe("Ready to send");
+  expect(frozen.communicationReview.draftResult.statement).toContain("No emails were sent.");
+  const outboxHref = frozen.communicationReview.handoffs.find(
+    (handoff) => handoff.kind === "outbox",
+  )?.href;
+  expect(outboxHref).toBeTruthy();
+
+  await page.goto(
+    `/e/pacific-open-data-summit-2026/course-checks/${decision.id}?stage=${communication.id}`,
+  );
+  await expect(page.getByRole("heading", { name: "Ready to send" })).toBeVisible();
+  await expect(page.getByText(/No emails were sent\./).first()).toBeVisible();
+  await page.getByRole("link", { name: /Review \d+ drafts? in Outbox/ }).click();
+  await expect(page).toHaveURL(new RegExp(`/messages\\?planId=${communication.id}`));
+  const outbox = page.getByRole("region", { name: "Exact Outbox draft set" });
+  await expect(outbox).toBeVisible();
+  await expect(outbox.getByText("Prepared from applied decisions")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Send \d+ messages?/ })).toBeVisible();
+
+  const unsentResponse = await page.request.get(
+    `/api/events/pacific-open-data-summit-2026/course-checks/${communication.id}`,
+  );
+  const unsent = (await unsentResponse.json()) as {
+    body: { effects: unknown[] };
+    communicationReview: { currentStatus: { label: string } };
+  };
+  expect(unsent.body.effects).toHaveLength(0);
+  expect(unsent.communicationReview.currentStatus.label).toBe("Ready to send");
+
+  await page.reload();
+  await expect(page.getByRole("region", { name: "Exact Outbox draft set" })).toBeVisible();
+  await expect(page.getByText(/No emails were sent\./).first()).toBeVisible();
+});
+
 test("publication uses the same external-effect review in the API and organizer workspace", async ({
   page,
 }) => {

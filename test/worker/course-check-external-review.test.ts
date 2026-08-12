@@ -212,6 +212,189 @@ const adminProjection = {
 };
 
 describe("unified external-effect review projection", () => {
+  it("projects a durable draft result and exact Outbox handoff without implying a send", () => {
+    const prepared = communicationPlan();
+    if (prepared.body.actionType !== "communication") throw new Error("Expected communication");
+    prepared.state = "Complete";
+    prepared.body.source = {
+      kind: "linked_decision",
+      decisionPlanId: "decision-1",
+      decisionPlanVersion: 2,
+      decisionPlanDigest: "private-decision-digest",
+      selection: null,
+    };
+    prepared.body.parentPlanId = "decision-1";
+    prepared.body.recipientGroups = [
+      {
+        groupId: "group-ready",
+        proposalId: "proposal-ready",
+        sessionId: "session-ready",
+        label: "Ready proposal",
+        outcome: "accepted",
+        recipients: [
+          {
+            recipientId: "recipient-ready",
+            address: "ready@example.test",
+            name: "Ready Speaker",
+            role: "primary",
+            speakerId: "speaker-ready",
+            inclusion: "include",
+            inclusionReason: "Primary speaker for Ready proposal.",
+            deliverability: "ok",
+            selected: true,
+            priorCommunications: [
+              {
+                id: "prior-1",
+                kind: "decision",
+                status: "sent",
+                toEmail: "ready@example.test",
+                subject: "Earlier update",
+                createdAt: "2026-08-01T10:00:00.000Z",
+                sentAt: "2026-08-01T10:01:00.000Z",
+                proposalId: "proposal-ready",
+              },
+            ],
+          },
+        ],
+      },
+      {
+        groupId: "group-draftless",
+        proposalId: "proposal-draftless",
+        sessionId: null,
+        label: "Draftless proposal",
+        outcome: "accepted",
+        recipients: [
+          {
+            recipientId: "recipient-draftless",
+            address: "",
+            name: "Draftless Speaker",
+            role: "primary",
+            speakerId: "speaker-draftless",
+            inclusion: "missing",
+            inclusionReason: "No deliverable address is available.",
+            deliverability: "missing",
+            selected: false,
+            priorCommunications: [],
+          },
+        ],
+      },
+    ];
+    prepared.body.drafts = [
+      {
+        draftId: "draft-ready",
+        groupId: "group-ready",
+        proposalId: "proposal-ready",
+        sessionId: "session-ready",
+        toEmail: "ready@example.test",
+        recipientName: "Ready Speaker",
+        subject: "Accepted",
+        bodyText: "Welcome",
+        bodyHtml: "<p>Welcome</p>",
+        attachmentRefs: [],
+        calendarIntent: null,
+        status: "frozen",
+        frozenAt: "2026-08-12T10:09:00.000Z",
+        frozenPlanVersion: 3,
+      },
+    ];
+    prepared.body.effects = [];
+    prepared.body.deliverySummary = {
+      total: 0,
+      queued: 0,
+      sending: 0,
+      succeeded: 0,
+      retryScheduled: 0,
+      failed: 0,
+      unknown: 0,
+    };
+    prepared.body.stageVisibility = {
+      decision: "complete",
+      draft: "complete",
+      send: "ready",
+      delivery: "not_started",
+    };
+
+    const projected = projectCourseCheckForViewer(prepared, adminProjection) as CourseCheckPlan & {
+      communicationReview?: {
+        currentStatus: { key: string; label: string };
+        draftResult: {
+          counts: { prepared: number; omitted: number; failed: number; unchanged: number };
+          noEmailsSent: true;
+          statement: string;
+        } | null;
+        handoffs: Array<{ kind: string; label: string; href: string; count: number }>;
+        outbox: {
+          exactDraftCount: number;
+          groups: Array<{
+            label: string;
+            draftCount: number;
+            recipients: Array<{
+              address: string;
+              inclusionReason: string;
+              priorCommunicationCount: number;
+            }>;
+          }>;
+          draftlessGroups: Array<{ label: string; reason: string }>;
+        };
+        sendAction: { label: string } | null;
+      };
+    };
+
+    expect(projected.communicationReview).toMatchObject({
+      currentStatus: { key: "ready_to_send", label: "Ready to send" },
+      draftResult: {
+        counts: { prepared: 1, omitted: 1, failed: 0, unchanged: 1 },
+        noEmailsSent: true,
+        statement: "1 draft prepared, 1 recipient omitted, 0 failed, and 1 item unchanged. No emails were sent.",
+      },
+      outbox: {
+        exactDraftCount: 1,
+        groups: [
+          {
+            label: "Ready proposal",
+            draftCount: 1,
+            recipients: [
+              {
+                address: "ready@example.test",
+                inclusionReason: "Primary speaker for Ready proposal.",
+                priorCommunicationCount: 1,
+              },
+            ],
+          },
+        ],
+        draftlessGroups: [
+          { label: "Draftless proposal", reason: "No deliverable address is available." },
+        ],
+      },
+      sendAction: { label: "Send 1 message" },
+    });
+    expect(projected.communicationReview?.handoffs).toEqual(
+      expect.arrayContaining([
+        {
+          kind: "outbox",
+          label: "Review 1 draft in Outbox",
+          href: "/e/event-1/messages?planId=communication-1",
+          count: 1,
+        },
+        {
+          kind: "sessions",
+          label: "View 1 affected session",
+          href: "/e/event-1/agenda?sessionIds=session-ready",
+          count: 1,
+        },
+        {
+          kind: "draftless",
+          label: "View 1 draftless item",
+          href: "/e/event-1/messages?planId=communication-1#draftless-items",
+          count: 1,
+        },
+      ]),
+    );
+    expect(JSON.stringify(projected.communicationReview)).not.toContain(
+      "private-decision-digest",
+    );
+  });
+
   it("names attendee publication, exceptions, calendar operations, and optional Airtable actions in business language", () => {
     const projected = projectCourseCheckForViewer(publicationPlan(), adminProjection);
     const review = projected?.externalReview;
@@ -287,6 +470,97 @@ describe("unified external-effect review projection", () => {
     expect(review?.issues.flatMap((issue) => issue.actions).map((action) => action.label)).toEqual(
       expect.arrayContaining(["Retry this address", "Reconcile provider outcome", "Create reviewed correction"]),
     );
+    expect(projected?.communicationReview).toMatchObject({
+      currentStatus: { key: "failed", label: "Failed" },
+      deliveryResult: {
+        counts: {
+          succeeded: 0,
+          retrying: 0,
+          failed: 1,
+          unknown: 1,
+          reconciled: 0,
+          corrected: 0,
+        },
+        statement: "0 succeeded, 0 retrying, 1 failed, 1 unknown, 0 reconciled, and 0 corrected.",
+      },
+      sendAction: null,
+    });
+  });
+
+  it("redacts Outbox groups, addresses, prior messages, and send authority together", () => {
+    const prepared = communicationPlan();
+    if (prepared.body.actionType !== "communication") throw new Error("Expected communication");
+    prepared.body.recipientGroups = [
+      {
+        groupId: "private-group",
+        proposalId: "private-proposal",
+        sessionId: "private-session",
+        label: "Private recipient group",
+        outcome: "accepted",
+        recipients: [
+          {
+            recipientId: "private-recipient",
+            address: "private@example.test",
+            name: "Private Speaker",
+            role: "primary",
+            speakerId: "private-speaker",
+            inclusion: "include",
+            inclusionReason: "Private inclusion reason.",
+            deliverability: "ok",
+            selected: true,
+            priorCommunications: [
+              {
+                id: "private-prior",
+                kind: "decision",
+                status: "sent",
+                toEmail: "private@example.test",
+                subject: "Private prior subject",
+                createdAt: "2026-08-01T10:00:00.000Z",
+                sentAt: "2026-08-01T10:01:00.000Z",
+                proposalId: "private-proposal",
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    prepared.body.drafts = [
+      {
+        draftId: "private-draft",
+        groupId: "private-group",
+        proposalId: "private-proposal",
+        sessionId: "private-session",
+        toEmail: "private@example.test",
+        recipientName: "Private Speaker",
+        subject: "Private subject",
+        bodyText: "Private body",
+        bodyHtml: "<p>Private body</p>",
+        attachmentRefs: [],
+        calendarIntent: null,
+        status: "frozen",
+        frozenAt: "2026-08-12T10:00:00.000Z",
+        frozenPlanVersion: 3,
+      },
+    ];
+    prepared.body.effects = [];
+    prepared.body.deliverySummary = { total: 0, queued: 0, sending: 0, succeeded: 0, retryScheduled: 0, failed: 0, unknown: 0 };
+    prepared.body.stageVisibility = { decision: "complete", draft: "complete", send: "ready", delivery: "not_started" };
+
+    const projected = projectCourseCheckForViewer(prepared, {
+      ...adminProjection,
+      role: "reviewer",
+      canViewCommunicationEvidence: false,
+      canViewFullDecisionEvidence: false,
+      permittedStageIds: [],
+    });
+
+    expect(projected?.communicationReview?.outbox.groups).toEqual([]);
+    expect(projected?.communicationReview?.outbox.draftlessGroups).toEqual([]);
+    expect(projected?.communicationReview?.sendAction).toBeNull();
+    expect(JSON.stringify(projected?.communicationReview)).not.toContain("private@example.test");
+    expect(JSON.stringify(projected?.communicationReview)).not.toContain("Private prior subject");
+    expect(JSON.stringify(projected?.communicationReview)).not.toContain("private-proposal");
+    expect(JSON.stringify(projected?.communicationReview)).not.toContain("private-session");
   });
 
   it("collapses clean publication groups and reports the durable attendee result exactly", () => {
