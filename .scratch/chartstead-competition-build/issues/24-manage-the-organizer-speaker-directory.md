@@ -1,6 +1,6 @@
 # 24 — Manage the organizer speaker directory
 
-**Status:** in-progress
+**Status:** done
 
 **Blocked by:** None — can start immediately.
 
@@ -30,3 +30,5 @@ None — can start immediately.
 
 - 2026-08-12 — Started for agent implementation after Tyler authorized the incoming Competition Build frontier; demos, reviews, and human QA are deferred.
 - 2026-08-12 — Implemented and verified the event-scoped organizer directory: responsive search/readiness filters, explicit manual add and identity-choice recovery, current-profile correction with immutable participation snapshots, portal projection, admin authorization, and cross-event isolation. Session linkage remains on the existing guaranteed-speaker Course Check path; planning alone creates no session. Status intentionally remains `in-progress` for parent integration. Full UI 83/83, worker 188/188 with a 15-second timeout allowance, relevant e2e 3/3, typecheck, and production build pass. The default 5-second worker run still exposes one unrelated guided-CFP timeout that passes with the wider allowance.
+
+- 2026-08-12 — Parent integration verification passed after rebasing onto the current Course Check frontier: speaker-directory worker 5/5, UI 2/2, and typecheck. Marked done under Tyler's explicit instruction to defer demos, reviews, and human QA.
