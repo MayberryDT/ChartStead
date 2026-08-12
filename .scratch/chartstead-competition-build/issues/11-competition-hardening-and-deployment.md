@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — Guided CFP publishing and submitter follow-up; 04 — Shared track review queue; 06 — Onboarding and assisted chasing; 07 — Decision communication and calendar integration verification; 09 — Public program renderer and embed; 10 — Airtable mapping and authenticated HTTP foundation; Course Check 10 — Course Check killer demo and hardening.
 
-**Status:** in-review
+**Status:** done
 
 - [x] The seeded event supports one uninterrupted walkthrough from CFP setup through public program publication.
 - [x] Real email, calendar, file, database, public output, and configured Airtable behavior are verified in the deployed environment.
@@ -34,3 +34,5 @@ Blocked pending Competition 07 — Decision communication and calendar integrati
   - Hardening fixes: agenda tab ARIA, inspector contrast, scrollable agenda grid focus, Airtable pull table name (`event_participations`), seed-count test drift
   - Verify: typecheck pass; UI 72; worker 175; e2e 14
   - Demo: http://100.105.117.93:5211/
+
+- 2026-08-12 — **done**: fast-forward merged `ticket-11-hardening-deploy` → `main` as `10e038c`.
