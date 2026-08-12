@@ -57,6 +57,44 @@ export interface AirtablePullChange {
   mappedValues: Record<string, unknown>;
 }
 
+export type AirtableEffectState =
+  | "pending"
+  | "attempting"
+  | "succeeded"
+  | "retryable_failure"
+  | "permanent_failure"
+  | "unknown"
+  | "compensated";
+
+export type AirtableStageDisposition = "active" | "deferred" | "removed";
+
+/** Exact, immutable provider write preview frozen into a Course Check version. */
+export interface AirtableEffect {
+  id: string;
+  planId: string;
+  planVersion: number;
+  kind: AirtableResourceKind;
+  chartsteadId: string;
+  tableName: string;
+  operation: "create" | "update";
+  fields: Record<string, unknown>;
+  beforeFields: Record<string, unknown> | null;
+  providerRecordId: string | null;
+  state: AirtableEffectState;
+  attemptCount: number;
+  lastError: string | null;
+  nextAttemptAt: string | null;
+  compensatesEffectId: string | null;
+}
+
+export interface CourseCheckAirtableEvidence {
+  configured: boolean;
+  disposition: AirtableStageDisposition;
+  summary: string;
+  effects: AirtableEffect[];
+  redacted?: boolean;
+}
+
 export interface AirtablePullResult {
   ok: boolean;
   health: AirtableSyncHealth;

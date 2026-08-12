@@ -101,6 +101,7 @@ import {
   type ExistingSpeaker,
 } from "./course-check/decision-planner";
 import { digestPayload, stableStringify } from "./course-check/digest";
+import { emptyCourseCheckAirtableEvidence } from "./course-check/airtable-effects";
 import { computeAgeWarning } from "./course-check/evidence";
 import {
   planCommunicationStub,
@@ -575,9 +576,11 @@ function mapProposal(row: ProposalRow, eventId: string): OrganizerProposal {
 }
 
 function normalizeCourseCheckBody(body: CourseCheckPlanBody): CourseCheckPlanBody {
+  const airtable = body.airtable ?? emptyCourseCheckAirtableEvidence();
   if (body.actionType === "guaranteed_speaker") {
     return {
       ...body,
+      airtable,
       evidenceSections: body.evidenceSections ?? [],
       softWarningOverrides: body.softWarningOverrides ?? [],
       ageWarningHours: body.ageWarningHours ?? DEFAULT_AGE_WARNING_HOURS,
@@ -587,6 +590,7 @@ function normalizeCourseCheckBody(body: CourseCheckPlanBody): CourseCheckPlanBod
   if (body.actionType === "publication") {
     return {
       ...body,
+      airtable,
       sessionDeltas: body.sessionDeltas ?? [],
       includedSessionIds: body.includedSessionIds ?? [],
       excludedSessions: body.excludedSessions ?? [],
@@ -604,6 +608,7 @@ function normalizeCourseCheckBody(body: CourseCheckPlanBody): CourseCheckPlanBod
   if (body.actionType === "communication") {
     return {
       ...body,
+      airtable,
       recipientGroups: body.recipientGroups ?? [],
       drafts: body.drafts ?? [],
       recipients: body.recipients ?? [],
@@ -646,6 +651,7 @@ function normalizeCourseCheckBody(body: CourseCheckPlanBody): CourseCheckPlanBod
   if (decision.items && decision.items.length > 0) {
     return {
       ...decision,
+      airtable,
       followUpQueue: decision.followUpQueue ?? [],
       evidenceSections: decision.evidenceSections ?? [],
       softWarningOverrides: decision.softWarningOverrides ?? [],
@@ -666,6 +672,7 @@ function normalizeCourseCheckBody(body: CourseCheckPlanBody): CourseCheckPlanBod
   // Legacy single-decision bodies without items.
   return {
     ...decision,
+    airtable,
     items: [
       {
         itemId: `item_legacy_${decision.proposalId}`,

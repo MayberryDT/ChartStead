@@ -63,6 +63,9 @@ function classifyFinding(finding: CourseCheckFinding): CourseCheckEvidenceKind {
 }
 
 function classifyDelta(delta: CourseCheckDelta): CourseCheckEvidenceKind {
+  if (delta.entityType === "airtable_record") {
+    return "integration";
+  }
   if (
     delta.entityType === "public_revision" ||
     delta.entityType === "message_draft" ||

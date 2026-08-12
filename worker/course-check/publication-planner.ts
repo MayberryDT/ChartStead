@@ -21,6 +21,12 @@ import {
   selectValidPublicSubset,
   sessionPublicFingerprint,
 } from "../../shared/public-program";
+import {
+  airtableEffectDeltas,
+  buildCourseCheckAirtableEvidence,
+  emptyCourseCheckAirtableEvidence,
+  withAirtableStage,
+} from "./airtable-effects";
 import { buildEvidenceSections } from "./evidence";
 
 export interface PublicationPlannerInput {
@@ -335,6 +341,22 @@ export function planPublication(input: PublicationPlannerInput): PublicationPlan
     });
   }
 
+  const airtable = buildCourseCheckAirtableEvidence({
+    planId: input.planId,
+    resources: proposedSessions.map((session) => ({
+      kind: "session" as const,
+      chartsteadId: session.id,
+      values: {
+        title: session.title,
+        format: session.format,
+        trackId: session.trackId,
+        roomId: session.roomId,
+        startsAt: session.startsAt,
+        endsAt: session.endsAt,
+      },
+    })),
+  });
+  deltas.push(...airtableEffectDeltas(airtable));
   const hasBlockers = findings.some((finding) => finding.severity === "blocker");
   return {
     actionType: "publication",
@@ -354,7 +376,11 @@ export function planPublication(input: PublicationPlannerInput): PublicationPlan
     calendarConsequences,
     deltas,
     findings,
-    stages: publicationStages(input.operation, hasBlockers),
+    stages: withAirtableStage(
+      publicationStages(input.operation, hasBlockers),
+      airtable,
+    ),
+    airtable,
     evidenceSections: buildEvidenceSections({ findings, deltas }),
     softWarningOverrides: [],
     linkedPlanIds: [],
@@ -382,6 +408,7 @@ export function publicationBodyDigestPayload(body: PublicationPlanBody): unknown
     softWarningOverrides: body.softWarningOverrides,
     linkedPlanIds: body.linkedPlanIds,
     parentPlanId: body.parentPlanId,
+    airtable: body.airtable,
   };
 }
 
@@ -408,6 +435,7 @@ export function planCommunicationStub(input: {
     after: { ...op },
     sessionId: op.sessionId,
   }));
+  const airtable = emptyCourseCheckAirtableEvidence();
   return {
     actionType: "communication",
     source: {
@@ -447,6 +475,7 @@ export function planCommunicationStub(input: {
         external: true,
       },
     ],
+    airtable,
     evidenceSections: buildEvidenceSections({ findings, deltas }),
     softWarningOverrides: [],
     stageVisibility: {

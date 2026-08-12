@@ -1,3 +1,5 @@
+import type { CourseCheckAirtableEvidence } from "./airtable";
+
 /** Course Check v1 contract — decision, publication, communication drafts, batch workspace. */
 
 export type ProgramOutcome = "accepted" | "declined";
@@ -29,7 +31,9 @@ export type CourseCheckStageStatus =
   | "blocked"
   | "approved"
   | "complete"
-  | "out_of_date";
+  | "out_of_date"
+  | "deferred"
+  | "removed";
 
 export type CourseCheckEvidenceKind =
   | "irreversible"
@@ -64,7 +68,8 @@ export interface CourseCheckDelta {
     | "public_session"
     | "communication_plan"
     | "message_draft"
-    | "recipient";
+    | "recipient"
+    | "airtable_record";
   action:
     | "create"
     | "update"
@@ -220,6 +225,7 @@ export interface DecisionPlanBody {
   deltas: CourseCheckDelta[];
   findings: CourseCheckFinding[];
   stages: CourseCheckStage[];
+  airtable: CourseCheckAirtableEvidence;
   /** Batch items (length >= 1). Single decisions are one-item batches. */
   items: DecisionItem[];
   followUpQueue: FollowUpQueueItem[];
@@ -249,6 +255,7 @@ export interface GuaranteedSpeakerPlanBody {
   deltas: CourseCheckDelta[];
   findings: CourseCheckFinding[];
   stages: CourseCheckStage[];
+  airtable: CourseCheckAirtableEvidence;
   relevantRevisions: {
     speakerEmails: string[];
   };
@@ -321,6 +328,7 @@ export interface PublicationPlanBody {
   deltas: CourseCheckDelta[];
   findings: CourseCheckFinding[];
   stages: CourseCheckStage[];
+  airtable: CourseCheckAirtableEvidence;
   evidenceSections: CourseCheckEvidenceSection[];
   softWarningOverrides: SoftWarningOverride[];
   linkedPlanIds: string[];
@@ -447,6 +455,7 @@ export interface CommunicationPlanBody {
   deltas: CourseCheckDelta[];
   findings: CourseCheckFinding[];
   stages: CourseCheckStage[];
+  airtable: CourseCheckAirtableEvidence;
   evidenceSections: CourseCheckEvidenceSection[];
   softWarningOverrides: SoftWarningOverride[];
   /** Independent stage visibility — never inherits decision/publication approval. */

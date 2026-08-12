@@ -11,6 +11,7 @@ import type {
   ProgramOutcome,
 } from "../../shared/course-check";
 import { DEFAULT_AGE_WARNING_HOURS } from "../../shared/course-check";
+import { emptyCourseCheckAirtableEvidence } from "./airtable-effects";
 import { buildEvidenceSections } from "./evidence";
 
 export interface CommunicationSpeakerRef {
@@ -376,6 +377,7 @@ export function planCommunicationCascade(
       ? "complete"
       : "not_started";
 
+  const airtable = emptyCourseCheckAirtableEvidence();
   return {
     actionType: "communication",
     source: input.source,
@@ -396,6 +398,7 @@ export function planCommunicationCascade(
     deltas,
     findings,
     stages,
+    airtable,
     evidenceSections,
     softWarningOverrides: [],
     stageVisibility: {
@@ -476,6 +479,7 @@ export function communicationBodyDigestPayload(body: CommunicationPlanBody): unk
     parentPlanId: body.parentPlanId,
     softWarningOverrides: body.softWarningOverrides,
     relevantRevisions: body.relevantRevisions,
+    airtable: body.airtable,
   };
 }
 

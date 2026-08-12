@@ -18,6 +18,12 @@ import {
   DEFAULT_DECISION_BATCH_LIMIT,
 } from "../../shared/course-check";
 import type { CoSpeakerInput, OrganizerProposal } from "../../shared/events";
+import {
+  airtableEffectDeltas,
+  buildCourseCheckAirtableEvidence,
+  type AirtableEffectResource,
+  withAirtableStage,
+} from "./airtable-effects";
 import { buildEvidenceSections } from "./evidence";
 
 export interface ExistingSpeaker {
@@ -500,6 +506,51 @@ function aggregateProgress(items: DecisionItem[]): AggregateProgress {
   };
 }
 
+function decisionAirtableResources(items: DecisionItem[]): AirtableEffectResource[] {
+  const resources: AirtableEffectResource[] = [];
+  for (const item of items) {
+    if (item.status !== "active" || item.outcome !== "accepted") continue;
+    for (const speaker of item.speakers) {
+      resources.push({
+        kind: "speaker",
+        chartsteadId: speaker.existingSpeakerId ?? speaker.plannedId,
+        values: {
+          name: speaker.name,
+          email: speaker.email,
+          biography: speaker.biography,
+        },
+      });
+    }
+    if (item.session) {
+      resources.push({
+        kind: "session",
+        chartsteadId: item.session.plannedId,
+        values: {
+          title: item.session.title,
+          format: item.session.format,
+          trackId: item.session.trackId,
+          roomId: item.session.roomId,
+          startsAt: item.session.startsAt,
+          endsAt: item.session.endsAt,
+        },
+      });
+    }
+    for (const task of item.tasks) {
+      resources.push({
+        kind: "task",
+        chartsteadId: task.plannedId,
+        values: {
+          title: task.title,
+          instructions: "",
+          dueAt: null,
+          status: "open",
+        },
+      });
+    }
+  }
+  return resources;
+}
+
 function reaggregateDecisionBody(
   planId: string,
   items: DecisionItem[],
@@ -515,7 +566,14 @@ function reaggregateDecisionBody(
 ): DecisionPlanBody {
   const active = items.filter((item) => item.status === "active");
   const primary = active[0] ?? items[0]!;
-  const deltas = active.flatMap((item) => item.deltas);
+  const airtable = buildCourseCheckAirtableEvidence({
+    planId,
+    resources: decisionAirtableResources(active),
+  });
+  const deltas = [
+    ...active.flatMap((item) => item.deltas),
+    ...airtableEffectDeltas(airtable),
+  ];
   const findings = [
     ...active.flatMap((item) => item.findings),
     {
@@ -541,7 +599,7 @@ function reaggregateDecisionBody(
   // Single-item body keeps session; multi-item apply walks items directly.
   const session = active.length === 1 ? active[0]!.session : null;
   const hasBlockers = findings.some((finding) => finding.severity === "blocker");
-  const stages = decisionStages(hasBlockers);
+  const stages = withAirtableStage(decisionStages(hasBlockers), airtable);
   return {
     actionType: "decision",
     proposalId: primary.proposalId,
@@ -555,6 +613,7 @@ function reaggregateDecisionBody(
     deltas,
     findings,
     stages,
+    airtable,
     items,
     followUpQueue: extras.followUpQueue,
     evidenceSections: buildEvidenceSections({ findings, deltas }),
@@ -800,6 +859,26 @@ export function planGuaranteedSpeaker(
       "Applying this decision does not draft, queue, or send speaker email, calendar invites, public-program changes, or integration writes.",
   });
 
+  const airtable = buildCourseCheckAirtableEvidence({
+    planId: input.planId,
+    resources: decisionAirtableResources([
+      {
+        itemId: `item_${input.planId}_0`,
+        proposalId: input.planId,
+        outcome: "accepted",
+        proposalRevision: 0,
+        status: "active",
+        speakers: planned.speakers,
+        participations,
+        session,
+        tasks,
+        portalAccess,
+        deltas: [],
+        findings: [],
+      },
+    ]),
+  });
+  deltas.push(...airtableEffectDeltas(airtable));
   const hasBlockers = findings.some((finding) => finding.severity === "blocker");
   return {
     actionType: "guaranteed_speaker",
@@ -811,7 +890,8 @@ export function planGuaranteedSpeaker(
     portalAccess,
     deltas,
     findings,
-    stages: decisionStages(hasBlockers),
+    stages: withAirtableStage(decisionStages(hasBlockers), airtable),
+    airtable,
     relevantRevisions: {
       speakerEmails: planned.speakers.map((speaker) => speaker.email),
     },
@@ -851,5 +931,6 @@ export function decisionBodyDigestPayload(body: DecisionPlanBody): unknown {
     parentPlanId: body.parentPlanId,
     batchGroupId: body.batchGroupId,
     splitExplanation: body.splitExplanation,
+    airtable: body.airtable,
   };
 }
