@@ -1,9 +1,13 @@
 import { env, evictDurableObject } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import type { CourseCheckPlan } from "../../shared/course-check";
+import type {
+  CourseCheckPlan,
+  DecisionPlanBody,
+} from "../../shared/course-check";
 import type { OrganizerPrincipal } from "../../shared/events";
 import { createApp } from "../../worker/app";
+import { projectCourseCheckForViewer } from "../../worker/course-check/projection";
 
 const eventId = "pacific-open-data-summit-2026";
 
@@ -75,6 +79,16 @@ type DecisionReview = {
 };
 
 type ProjectedPlan = CourseCheckPlan & { decisionReview?: DecisionReview };
+
+const fullAdminProjection = {
+  role: "admin" as const,
+  trackIds: [],
+  canViewCommunicationEvidence: true,
+  canViewFullDecisionEvidence: true,
+  permittedStageIds: ["apply-decision"],
+  canDeferItems: true,
+  canStartDraftPreparation: true,
+};
 
 async function loadEvent() {
   const response = await adminApp.request(
@@ -275,5 +289,204 @@ describe("Course Check 14 decision review projection", () => {
         externalCommunication: { emailsSent: 0, label: "No emails were sent." },
       },
     });
+  });
+
+  it("classifies and groups exception-first issues without hiding their affected submissions", async () => {
+    const created = await createDecision(
+      [
+        { proposalId: "SUB-PODS0033", outcome: "accepted" },
+        { proposalId: "SUB-PODS0034", outcome: "accepted" },
+        { proposalId: "SUB-PODS0035", outcome: "declined" },
+      ],
+      "cc16-grouped-exceptions",
+    );
+    if (created.body.actionType !== "decision") throw new Error("expected decision plan");
+    const [first, second, third] = created.body.items;
+    if (!first || !second || !third) throw new Error("expected three decision items");
+    const unavailable = {
+      id: "suppression-check-unavailable",
+      severity: "warning" as const,
+      code: "checker_unavailable",
+      message: "Delivery suppression status could not be checked.",
+      recoveryGuidance: "Review later or continue with the decision only.",
+      entityRef: first.proposalId,
+    };
+    const groupedWarning = {
+      id: "readiness-group",
+      severity: "warning" as const,
+      code: "readiness_tasks",
+      message: "Speaker onboarding details are incomplete.",
+      recoveryGuidance: "Accept now and complete onboarding later.",
+    };
+    const detail = {
+      id: "decision-only-detail",
+      severity: "info" as const,
+      code: "decline_no_speakers",
+      message: "The declined submission changes only the program decision.",
+      entityRef: third.proposalId,
+    };
+    const body: DecisionPlanBody = {
+      ...created.body,
+      findings: [
+        ...created.body.findings,
+        unavailable,
+        groupedWarning,
+        detail,
+      ],
+      items: [
+        { ...first, findings: [...first.findings, unavailable, groupedWarning] },
+        { ...second, findings: [...second.findings, groupedWarning] },
+        { ...third, findings: [...third.findings, detail] },
+      ],
+    };
+    const projected = projectCourseCheckForViewer(
+      { ...created, body },
+      fullAdminProjection,
+    )!;
+
+    expect(projected.decisionReview?.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          classification: "could_not_check",
+          label: "Could not check",
+          affectedObjectLabel: expect.stringContaining(first.proposalId),
+          consequence: "The check remains unknown; the decision can proceed where policy permits.",
+          scope: "This does not block the decision commit.",
+          safeAlternativeLabel: "Review later",
+          affectedItems: [{ itemId: first.itemId, proposalId: first.proposalId }],
+        }),
+        expect.objectContaining({
+          classification: "check",
+          label: "Check",
+          affectedItemCount: 2,
+          safeAlternativeLabel: "Accept without a draft",
+          affectedItems: [
+            { itemId: first.itemId, proposalId: first.proposalId },
+            { itemId: second.itemId, proposalId: second.proposalId },
+          ],
+        }),
+        expect.objectContaining({
+          classification: "details",
+          label: "Details",
+          affectedObjectLabel: expect.stringContaining(third.proposalId),
+        }),
+      ]),
+    );
+    expect(projected.decisionReview?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          itemId: first.itemId,
+          proposalId: first.proposalId,
+          proposedDecision: "Will accept",
+          speakerContext: expect.stringContaining(first.speakers[0]!.name),
+          decisionReadiness: "Ready",
+          draftReadiness: "Could not check",
+          batchOutcome: "Will process",
+          filter: "check",
+        }),
+        expect.objectContaining({
+          itemId: third.itemId,
+          proposalId: third.proposalId,
+          proposedDecision: "Will decline",
+          decisionReadiness: "Ready",
+          batchOutcome: "Will process",
+          filter: "ready",
+        }),
+      ]),
+    );
+  });
+
+  it("permits safe partial execution but never bypasses blockers within their affected scope", async () => {
+    const created = await createDecision(
+      [
+        { proposalId: "SUB-PODS0036", outcome: "accepted" },
+        { proposalId: "SUB-PODS0037", outcome: "declined" },
+      ],
+      "cc16-safe-partial",
+    );
+    if (created.body.actionType !== "decision") throw new Error("expected decision plan");
+    const [blockedItem, readyItem] = created.body.items;
+    if (!blockedItem || !readyItem) throw new Error("expected two decision items");
+    const identityBlocker = {
+      id: "identity-scope-blocker",
+      severity: "blocker" as const,
+      code: "identity_ambiguity",
+      message: `${blockedItem.proposalId} has an ambiguous speaker identity.`,
+      recoveryGuidance: "Resolve the speaker identity or remove this submission from the batch.",
+      entityRef: blockedItem.proposalId,
+    };
+    const body: DecisionPlanBody = {
+      ...created.body,
+      findings: [identityBlocker],
+      items: [
+        { ...blockedItem, findings: [identityBlocker] },
+        { ...readyItem, findings: [] },
+      ],
+      stages: created.body.stages.map((stage) =>
+        stage.id === "apply-decision" ? { ...stage, status: "blocked" as const } : stage,
+      ),
+    };
+    const projected = projectCourseCheckForViewer(
+      { ...created, state: "Needs attention", body },
+      fullAdminProjection,
+    )!;
+
+    expect(projected.decisionReview).toMatchObject({
+      counts: { selected: 2, eligible: 1, needsAction: 1, skipped: 0 },
+      partialExecution: {
+        eligibleCount: 1,
+        skippedCount: 1,
+        canExecute: true,
+        requiredDeferredItemIds: [blockedItem.itemId],
+        primaryActionLabel: "Decline 1 submission; leave 1 unchanged",
+        skippedOutcomeLabel: "Leave decision unchanged",
+      },
+    });
+    expect(projected.decisionReview?.permittedCommits).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stageId: "apply-decision",
+          requiresDeferredItemIds: [blockedItem.itemId],
+          label: "Decline 1 submission; leave 1 unchanged",
+        }),
+      ]),
+    );
+    expect(projected.decisionReview?.issues[0]).toMatchObject({
+      classification: "needs_action",
+      scope: `Blocks ${blockedItem.proposalId} only; 1 other submission can proceed.`,
+      safeAlternativeLabel: "Leave decision unchanged",
+    });
+
+    const secondBlocker = {
+      ...identityBlocker,
+      id: "integrity-scope-blocker",
+      code: "durable_integrity",
+      message: `${readyItem.proposalId} has invalid durable scope.`,
+      entityRef: readyItem.proposalId,
+    };
+    const allBlocked = projectCourseCheckForViewer(
+      {
+        ...created,
+        state: "Needs attention",
+        body: {
+          ...body,
+          findings: [identityBlocker, secondBlocker],
+          items: [
+            body.items[0]!,
+            { ...readyItem, findings: [secondBlocker] },
+          ],
+        },
+      },
+      fullAdminProjection,
+    )!;
+    expect(allBlocked.decisionReview).toMatchObject({
+      partialExecution: { eligibleCount: 0, canExecute: false },
+      primaryActionLabel: null,
+    });
+    expect(
+      allBlocked.decisionReview?.effectGroups.find(
+        (group) => group.key === "decisions",
+      )?.summary,
+    ).toBe("No decisions will be applied.");
   });
 });

@@ -249,3 +249,66 @@ test("clean decision fast path preserves keyboard focus, history, and batch sele
   await page.goBack();
   await expect(dialog).toBeVisible();
 });
+
+test("exception-first batch processes eligible decisions and leaves blocked work unchanged", async ({
+  page,
+}) => {
+  const proposalsBefore = await page.request.get(
+    "/api/events/pacific-open-data-summit-2026/proposals",
+  );
+  const proposalsBeforeBody = (await proposalsBefore.json()) as {
+    proposals: Array<{ id: string; programOutcome: string | null }>;
+  };
+  const readyProposal = proposalsBeforeBody.proposals.find(
+    (row) => row.id !== "SUB-PODS0050" && !row.programOutcome,
+  );
+  expect(readyProposal).toBeTruthy();
+  const key = `cc16-browser-partial-${Date.now()}`;
+  const createResponse = await page.request.post(
+    "/api/events/pacific-open-data-summit-2026/course-checks/decisions",
+    {
+      headers: { "idempotency-key": key },
+      data: {
+        items: [
+          { proposalId: "SUB-PODS0050", outcome: "accepted" },
+          { proposalId: readyProposal!.id, outcome: "declined" },
+        ],
+        idempotencyKey: key,
+      },
+    },
+  );
+  expect(createResponse.status()).toBe(201);
+  const plan = (await createResponse.json()) as { id: string };
+
+  await page.goto(`/e/pacific-open-data-summit-2026/course-checks/${plan.id}`);
+  await expect(page.getByRole("heading", { name: "Needs action" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What will happen" })).toBeVisible();
+  await expect(page.getByText("SUB-PODS0050", { exact: true }).first()).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: "Decline 1 submission; leave 1 unchanged",
+    }),
+  ).toBeEnabled();
+  await expect(page.getByText("1 eligible · 1 will stay unchanged")).toBeVisible();
+  await expect(page.getByText(/defer/i)).toHaveCount(0);
+
+  await page
+    .getByRole("button", { name: "Decline 1 submission; leave 1 unchanged" })
+    .click();
+
+  const results = page.getByRole("region", { name: "Decision results" });
+  await expect(results.getByText("1 processed")).toBeVisible();
+  await expect(results.getByText("0 failed")).toBeVisible();
+  await expect(results.getByText("1 skipped")).toBeVisible();
+  await expect(results.getByText("1 unchanged")).toBeVisible();
+  await expect(results.getByText("No emails were sent.")).toBeVisible();
+
+  const proposals = await page.request.get(
+    "/api/events/pacific-open-data-summit-2026/proposals",
+  );
+  const body = (await proposals.json()) as {
+    proposals: Array<{ id: string; programOutcome: string | null }>;
+  };
+  expect(body.proposals.find((row) => row.id === "SUB-PODS0050")?.programOutcome).toBeNull();
+  expect(body.proposals.find((row) => row.id === readyProposal!.id)?.programOutcome).toBe("declined");
+});

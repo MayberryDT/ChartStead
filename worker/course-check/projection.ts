@@ -2,6 +2,9 @@ import type {
   CommunicationPlanBody,
   CourseCheckPlan,
   DecisionReviewGeneratedRecords,
+  DecisionReviewIssue,
+  DecisionReviewIssueClass,
+  DecisionReviewItemProjection,
   DecisionReviewProjection,
   DecisionItem,
   DecisionPlanBody,
@@ -166,6 +169,11 @@ function decisionSummary(
       } declined`,
     );
   }
+  if (clauses.length === 0) {
+    return phase === "applied"
+      ? "No decisions were applied."
+      : "No decisions will be applied.";
+  }
   return `${clauses.join(" and ")}.`;
 }
 
@@ -214,6 +222,265 @@ function decisionReviewTitle(
   return `Review ${selected} decisions`;
 }
 
+function issueClassForFinding(
+  finding: DecisionPlanBody["findings"][number],
+): DecisionReviewIssueClass {
+  if (
+    finding.code === "checker_unavailable" ||
+    finding.code.endsWith("_check_unavailable") ||
+    finding.code.endsWith("_checker_unavailable")
+  ) {
+    return "could_not_check";
+  }
+  if (finding.severity === "blocker") return "needs_action";
+  if (finding.severity === "warning") return "check";
+  return "details";
+}
+
+function issueLabel(
+  classification: DecisionReviewIssueClass,
+): DecisionReviewIssue["label"] {
+  if (classification === "needs_action") return "Needs action";
+  if (classification === "could_not_check") return "Could not check";
+  if (classification === "check") return "Check";
+  return "Details";
+}
+
+function issueGroupKey(finding: DecisionPlanBody["findings"][number]): string {
+  return [
+    issueClassForFinding(finding),
+    finding.code,
+    finding.recoveryGuidance ?? "",
+  ].join("\u0000");
+}
+
+function affectedItemsForFinding(
+  finding: DecisionPlanBody["findings"][number],
+  items: DecisionItem[],
+): DecisionItem[] {
+  const key = issueGroupKey(finding);
+  const direct = items.filter((item) =>
+    item.findings.some((itemFinding) => issueGroupKey(itemFinding) === key),
+  );
+  if (direct.length > 0) return direct;
+  if (!finding.entityRef) return [];
+  return items.filter(
+    (item) =>
+      item.itemId === finding.entityRef ||
+      item.proposalId === finding.entityRef ||
+      item.speakers.some(
+        (speaker) =>
+          speaker.plannedId === finding.entityRef ||
+          speaker.existingSpeakerId === finding.entityRef ||
+          speaker.email === finding.entityRef,
+      ),
+  );
+}
+
+function affectedObjectLabel(items: DecisionItem[]): string {
+  if (items.length === 0) return "This decision batch";
+  if (items.length === 1) {
+    const item = items[0]!;
+    const title = item.session?.title;
+    const speakers = item.speakers.map((speaker) => speaker.name).filter(Boolean);
+    if (!title && speakers.length === 0) return item.proposalId;
+    const object = title ? `${title} (${item.proposalId})` : item.proposalId;
+    return speakers.length > 0 ? `${object} — ${speakers.join(", ")}` : object;
+  }
+  return `${items.length} submissions: ${items.map((item) => item.proposalId).join(", ")}`;
+}
+
+function issueScope(
+  affected: DecisionItem[],
+  activeItems: DecisionItem[],
+  blocks: boolean,
+): string {
+  if (!blocks) {
+    return "This does not block the decision commit.";
+  }
+  if (affected.length === 0) return "Blocks the permitted decision commit.";
+  const otherCount = Math.max(0, activeItems.length - affected.length);
+  if (affected.length === 1 && otherCount > 0) {
+    return `Blocks ${affected[0]!.proposalId} only; ${otherCount} other ${plural(
+      otherCount,
+      "submission",
+    )} can proceed.`;
+  }
+  if (affected.length === 1) return `Blocks ${affected[0]!.proposalId}.`;
+  if (otherCount > 0) {
+    return `Blocks these ${affected.length} submissions; ${otherCount} other ${plural(
+      otherCount,
+      "submission",
+    )} can proceed.`;
+  }
+  return `Blocks all ${affected.length} selected submissions.`;
+}
+
+function issueConsequence(
+  classification: DecisionReviewIssueClass,
+  finding: DecisionPlanBody["findings"][number],
+  affected: DecisionItem[],
+): string {
+  if (classification === "needs_action") {
+    return affected.length === 1
+      ? `${affected[0]!.proposalId} will stay unchanged until this is resolved or removed from the batch.`
+      : "The affected decisions will stay unchanged until this is resolved or removed from the batch.";
+  }
+  if (classification === "could_not_check") {
+    return finding.severity === "blocker"
+      ? "The affected scope cannot proceed while this required check is unavailable."
+      : "The check remains unknown; the decision can proceed where policy permits.";
+  }
+  if (classification === "check") {
+    return "The decision can proceed with this warning unchanged.";
+  }
+  return finding.message;
+}
+
+function safeAlternativeLabel(
+  classification: DecisionReviewIssueClass,
+  finding: DecisionPlanBody["findings"][number],
+  affected: DecisionItem[],
+): string | null {
+  if (classification === "could_not_check") return "Review later";
+  if (classification === "details") return null;
+  if (classification === "needs_action") return "Leave decision unchanged";
+  if (
+    finding.code.includes("recipient") ||
+    finding.code.includes("readiness") ||
+    affected.some((item) => item.outcome === "accepted")
+  ) {
+    return "Accept without a draft";
+  }
+  return "Review later";
+}
+
+function buildDecisionIssues(
+  body: DecisionPlanBody,
+  activeItems: DecisionItem[],
+): DecisionReviewIssue[] {
+  const severityRank: Record<DecisionReviewIssueClass, number> = {
+    needs_action: 0,
+    could_not_check: 1,
+    check: 2,
+    details: 3,
+  };
+  const groups = new Map<
+    string,
+    {
+      finding: DecisionPlanBody["findings"][number];
+      affected: DecisionItem[];
+    }
+  >();
+  for (const finding of body.findings) {
+    const key = issueGroupKey(finding);
+    if (groups.has(key)) continue;
+    groups.set(key, {
+      finding,
+      affected: affectedItemsForFinding(finding, body.items),
+    });
+  }
+  return [...groups.values()]
+    .map(({ finding, affected }) => {
+      const classification = issueClassForFinding(finding);
+      return {
+        severity: finding.severity,
+        classification,
+        label: issueLabel(classification),
+        summary: finding.message,
+        affectedObjectLabel: affectedObjectLabel(affected),
+        consequence: issueConsequence(classification, finding, affected),
+        scope: issueScope(
+          affected,
+          activeItems,
+          finding.severity === "blocker",
+        ),
+        nextStep: finding.recoveryGuidance ?? null,
+        safeAlternativeLabel: safeAlternativeLabel(
+          classification,
+          finding,
+          affected,
+        ),
+        affectedItemCount: Math.max(1, affected.length),
+        affectedItems: affected.map((item) => ({
+          itemId: item.itemId,
+          proposalId: item.proposalId,
+        })),
+      } satisfies DecisionReviewIssue;
+    })
+    .sort(
+      (a, b) => severityRank[a.classification] - severityRank[b.classification],
+    );
+}
+
+function itemProjection(
+  item: DecisionItem,
+  phase: DecisionReviewProjection["phase"],
+): DecisionReviewItemProjection {
+  const classifications = item.findings.map(issueClassForFinding);
+  const needsAction = classifications.includes("needs_action");
+  const couldNotCheck = classifications.includes("could_not_check");
+  const check = classifications.includes("check") || couldNotCheck;
+  const skipped = item.status === "deferred";
+  const applied = item.status === "applied" || phase === "applied";
+  const speakers = item.speakers.map((speaker) => speaker.name).filter(Boolean);
+  return {
+    itemId: item.itemId,
+    proposalId: item.proposalId,
+    proposalLabel: item.session?.title ?? item.proposalId,
+    proposedDecision:
+      item.outcome === "accepted"
+        ? applied
+          ? "Accepted"
+          : "Will accept"
+        : applied
+          ? "Declined"
+          : "Will decline",
+    speakerContext:
+      speakers.length === 0
+        ? "No speaker records will be created"
+        : speakers.join(", "),
+    decisionReadiness: skipped
+      ? "Skipped"
+      : applied
+        ? "Applied"
+        : needsAction
+          ? "Needs action"
+          : "Ready",
+    draftReadiness: skipped
+      ? "Skipped"
+      : couldNotCheck
+        ? "Could not check"
+        : check
+          ? "Check"
+          : "Not prepared",
+    batchOutcome: skipped
+      ? applied
+        ? "Unchanged"
+        : "Will stay unchanged"
+      : applied
+        ? "Processed"
+        : needsAction
+          ? "Will stay unchanged"
+          : "Will process",
+    filter: skipped
+      ? "skipped"
+      : needsAction
+        ? "needs_action"
+        : check
+          ? "check"
+          : "ready",
+  };
+}
+
+function partialActionLabel(
+  baseLabel: string,
+  skippedCount: number,
+): string {
+  if (skippedCount === 0) return baseLabel;
+  return `${baseLabel}; leave ${skippedCount} unchanged`;
+}
+
 function buildDecisionReviewProjection(
   plan: CourseCheckPlan,
   body: DecisionPlanBody,
@@ -222,6 +489,19 @@ function buildDecisionReviewProjection(
   const phase: DecisionReviewProjection["phase"] =
     plan.receipt?.stageId === "apply-decision" ? "applied" : "proposed";
   const selected = body.items.length;
+  const activeItems = body.items.filter((item) => item.status === "active");
+  const globalBlocker = body.findings.some(
+    (finding) =>
+      finding.severity === "blocker" &&
+      affectedItemsForFinding(finding, body.items).length === 0,
+  );
+  const eligibleItems = globalBlocker
+    ? []
+    : activeItems.filter(
+        (item) =>
+          !item.findings.some((finding) => finding.severity === "blocker"),
+      );
+  const blockedItems = activeItems.filter((item) => !eligibleItems.includes(item));
   const ready = body.items.filter(
     (item) =>
       item.status === "active" &&
@@ -239,7 +519,7 @@ function buildDecisionReviewProjection(
   ).length;
   const skipped = body.items.filter((item) => item.status === "deferred").length;
   const scopedItems = body.items.filter((item) =>
-    phase === "applied" ? item.status === "applied" : item.status === "active",
+    phase === "applied" ? item.status === "applied" : eligibleItems.includes(item),
   );
   const accepted = scopedItems.filter((item) => item.outcome === "accepted").length;
   const declined = scopedItems.filter((item) => item.outcome === "declined").length;
@@ -249,39 +529,19 @@ function buildDecisionReviewProjection(
     declined,
     records.totalCreated,
   );
-  const severityRank = { blocker: 0, warning: 1, info: 2 } as const;
-  const issues = [...body.findings]
-    .sort((a, b) => severityRank[a.severity] - severityRank[b.severity])
-    .map((finding) => ({
-      severity: finding.severity,
-      summary: finding.message,
-      nextStep: finding.recoveryGuidance ?? null,
-      affectedItemCount: Math.max(
-        1,
-        body.items.filter((item) =>
-          item.findings.some((itemFinding) => itemFinding.id === finding.id),
-        ).length,
-      ),
-    }));
-  const issueCounts = issues.reduce(
-    (counts, issue) => {
-      counts[issue.severity] += 1;
-      return counts;
-    },
-    { blocker: 0, warning: 0, info: 0 },
-  );
+  const issues = buildDecisionIssues(body, activeItems);
   const issueSummaryParts: string[] = [];
-  if (issueCounts.blocker > 0) {
+  if (needsAction > 0) {
     issueSummaryParts.push(
-      `${issueCounts.blocker} ${plural(
-        issueCounts.blocker,
+      `${needsAction} ${plural(
+        needsAction,
         "item",
       )} that need attention`,
     );
   }
-  if (issueCounts.warning > 0) {
+  if (warning > 0) {
     issueSummaryParts.push(
-      `${issueCounts.warning} ${plural(issueCounts.warning, "warning")}`,
+      `${warning} ${plural(warning, "warning")}`,
     );
   }
   const courseCheckSummary =
@@ -295,12 +555,14 @@ function buildDecisionReviewProjection(
           records.totalCreated,
           "record",
         )} ${phase === "applied" ? (records.totalCreated === 1 ? "was" : "were") : "will be"} created.`;
+  const projectedSkipped =
+    phase === "applied" ? skipped : skipped + blockedItems.length;
   const unchangedSummary =
-    skipped === 0
+    projectedSkipped === 0
       ? `No submissions ${phase === "applied" ? "were" : "will stay"} unchanged.`
-      : `${skipped} ${plural(skipped, "submission")} ${
+      : `${projectedSkipped} ${plural(projectedSkipped, "submission")} ${
           phase === "applied"
-            ? skipped === 1
+            ? projectedSkipped === 1
               ? "was"
               : "were"
             : "will stay"
@@ -309,7 +571,7 @@ function buildDecisionReviewProjection(
     options.permittedStageIds ??
       (options.role === "admin" ? body.stages.map((stage) => stage.id) : []),
   );
-  const permittedCommits = body.stages
+  let permittedCommits: DecisionReviewProjection["permittedCommits"] = body.stages
     .filter(
       (stage) =>
         allowedStageIds.has(stage.id) &&
@@ -331,6 +593,33 @@ function buildDecisionReviewProjection(
           ? `${decisionSummary(accepted, declined, phase)} ${recordsSummary}`
           : body.airtable.summary,
     }));
+  const mayUseApplyStage = allowedStageIds.has("apply-decision");
+  const mayPartiallyExecute =
+    phase === "proposed" &&
+    eligibleItems.length > 0 &&
+    blockedItems.length > 0 &&
+    !globalBlocker &&
+    mayUseApplyStage &&
+    (options.canDeferItems ?? options.role === "admin") &&
+    plan.state !== "Out of date" &&
+    !body.stages.some((stage) => stage.status === "out_of_date");
+  const partialLabel = mayPartiallyExecute
+    ? partialActionLabel(actionLabel, projectedSkipped)
+    : null;
+  if (mayPartiallyExecute && partialLabel) {
+    permittedCommits = [
+      {
+        stageId: "apply-decision",
+        label: partialLabel,
+        effectSummary: `${decisionSummary(accepted, declined, phase)} ${projectedSkipped} ${plural(
+          projectedSkipped,
+          "submission",
+        )} will stay unchanged.`,
+        requiresDeferredItemIds: blockedItems.map((item) => item.itemId),
+      },
+      ...permittedCommits.filter((commit) => commit.stageId !== "apply-decision"),
+    ];
+  }
   const applyCommit = permittedCommits.find(
     (commit) => commit.stageId === "apply-decision",
   );
@@ -374,6 +663,17 @@ function buildDecisionReviewProjection(
             emailsSent: 0,
             label: "No emails were sent.",
           },
+          outcomeCounts: {
+            processed: scopedItems.length,
+            // Deferred items were never attempted; transactional decision apply
+            // either processes the complete active scope or records no receipt.
+            failed: 0,
+            warned: scopedItems.filter((item) =>
+              item.findings.some((finding) => finding.severity === "warning"),
+            ).length,
+            skipped,
+            unchanged: skipped,
+          },
           appliedAt: plan.receipt.appliedAt,
           appliedBy: plan.receipt.actor.displayName,
         }
@@ -384,8 +684,16 @@ function buildDecisionReviewProjection(
     phase,
     title,
     courseCheckSummary,
-    counts: { selected, ready, needsAction, warning, skipped },
+    counts: {
+      selected,
+      ready,
+      eligible: eligibleItems.length,
+      needsAction,
+      warning,
+      skipped,
+    },
     issues,
+    items: body.items.map((item) => itemProjection(item, phase)),
     effectGroups: [
       {
         key: "decisions",
@@ -410,7 +718,7 @@ function buildDecisionReviewProjection(
         key: "unchanged",
         title: "Unchanged",
         state: "unchanged",
-        count: skipped,
+        count: projectedSkipped,
         summary: unchangedSummary,
       },
       {
@@ -446,6 +754,24 @@ function buildDecisionReviewProjection(
         : []),
     ],
     permittedCommits,
+    partialExecution: {
+      eligibleCount: eligibleItems.length,
+      skippedCount: projectedSkipped,
+      canExecute:
+        phase === "proposed" &&
+        Boolean(
+          permittedCommits.find((commit) => commit.stageId === "apply-decision"),
+        ),
+      requiredDeferredItemIds: mayPartiallyExecute
+        ? blockedItems.map((item) => item.itemId)
+        : [],
+      primaryActionLabel:
+        phase === "proposed"
+          ? permittedCommits.find((commit) => commit.stageId === "apply-decision")
+              ?.label ?? null
+          : null,
+      skippedOutcomeLabel: "Leave decision unchanged",
+    },
     canDeferItems: options.canDeferItems ?? options.role === "admin",
     canStartDraftPreparation:
       options.canStartDraftPreparation ?? options.role === "admin",
@@ -454,7 +780,13 @@ function buildDecisionReviewProjection(
       phase === "proposed"
         ? "Nothing has changed. No external communication has been sent."
         : null,
-    primaryActionLabel: phase === "proposed" ? (applyCommit?.label ?? null) : null,
+    primaryActionLabel:
+      phase === "proposed"
+        ? permittedCommits.find((commit) => commit.stageId === "apply-decision")
+            ?.label ??
+          applyCommit?.label ??
+          null
+        : null,
     result,
   };
 }

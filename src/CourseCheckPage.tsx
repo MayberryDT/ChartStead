@@ -33,6 +33,7 @@ import {
   sendCommunication,
   setCourseCheckAirtableDisposition,
 } from "./api";
+import { DecisionExceptionReview } from "./course-check/DecisionExceptionReview";
 import { createClientId } from "./id";
 import {
   DecisionFastPath,
@@ -1340,13 +1341,21 @@ export function CourseCheckPage() {
   });
 
   const deferMutation = useMutation({
-    mutationFn: (current: CourseCheckPlan) =>
+    mutationFn: ({
+      current,
+      itemIds,
+      reason,
+    }: {
+      current: CourseCheckPlan;
+      itemIds: string[];
+      reason: string;
+    }) =>
       deferCourseCheckItems(eventId, current.id, {
         planVersion: current.version,
         digest: current.digest,
-        itemIds: [...selectedItemIds],
-        reason: deferReason.trim(),
-        idempotencyKey: `${deferKey}-${[...selectedItemIds].join(",")}`,
+        itemIds,
+        reason,
+        idempotencyKey: `${deferKey}-${itemIds.join(",")}`,
       }),
     onSuccess: (next) => {
       queryClient.setQueryData(["course-check", eventId, planId], next);
@@ -1713,17 +1722,15 @@ export function CourseCheckPage() {
 
       {isDecision ? (
         decisionReview ? (
-          <DecisionReviewBody
-            plan={currentPlan}
+          <DecisionExceptionReview
             review={decisionReview}
-            selectedItemIds={selectedItemIds}
-            onToggleItem={(itemId) => {
-              setSelectedItemIds((current) => {
-                const next = new Set(current);
-                if (next.has(itemId)) next.delete(itemId);
-                else next.add(itemId);
-                return next;
-              });
+            onChooseAlternative={(issue) => {
+              setSelectedItemIds(
+                new Set(issue.affectedItems.map((item) => item.itemId)),
+              );
+              setMessage(
+                `${issue.safeAlternativeLabel}: ${issue.affectedObjectLabel}.`,
+              );
             }}
           />
         ) : (
@@ -1833,7 +1840,13 @@ export function CourseCheckPage() {
           decisionReview.canDeferItems ||
           decisionReview.primaryActionLabel) ? (
           <>
-            {!decisionReview || decisionReview.canDeferItems ? (
+            {decisionReview ? (
+              <p className="course-check-action-scope" aria-live="polite">
+                {decisionReview.partialExecution.eligibleCount} eligible ·{" "}
+                {decisionReview.partialExecution.skippedCount} will stay unchanged
+              </p>
+            ) : null}
+            {!decisionReview ? (
               <div className="course-check-defer">
                 <label>
                   Defer selected blocked items
@@ -1854,7 +1867,11 @@ export function CourseCheckPage() {
                   }
                   onClick={() => {
                     setMessage(null);
-                    deferMutation.mutate(currentPlan);
+                    deferMutation.mutate({
+                      current: currentPlan,
+                      itemIds: [...selectedItemIds],
+                      reason: deferReason.trim(),
+                    });
                   }}
                 >
                   Defer to follow-up
@@ -1865,13 +1882,33 @@ export function CourseCheckPage() {
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={blocked || applyMutation.isPending || !applyStage}
+                disabled={
+                  decisionReview
+                    ? !decisionReview.partialExecution.canExecute ||
+                      applyMutation.isPending ||
+                      deferMutation.isPending
+                    : blocked || applyMutation.isPending || !applyStage
+                }
                 onClick={() => {
                   setMessage(null);
+                  const requiredDeferredItemIds =
+                    decisionReview?.partialExecution.requiredDeferredItemIds ?? [];
+                  if (requiredDeferredItemIds.length > 0) {
+                    deferMutation.mutate({
+                      current: currentPlan,
+                      itemIds: requiredDeferredItemIds,
+                      reason:
+                        "Leave these decisions unchanged and process the eligible submissions.",
+                    });
+                    return;
+                  }
                   applyMutation.mutate(currentPlan);
                 }}
               >
-                {decisionReview?.primaryActionLabel ?? applyStage?.verb ?? "Apply decision"}
+                {decisionReview?.partialExecution.primaryActionLabel ??
+                  decisionReview?.primaryActionLabel ??
+                  applyStage?.verb ??
+                  "Apply decision"}
               </button>
             ) : null}
           </>

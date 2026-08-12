@@ -625,11 +625,51 @@ export interface CourseCheckReceipt {
 
 export type DecisionReviewEffectState = "pending" | "applied" | "unchanged";
 
+export type DecisionReviewIssueClass =
+  | "needs_action"
+  | "check"
+  | "details"
+  | "could_not_check";
+
+export interface DecisionReviewAffectedItem {
+  itemId: string;
+  proposalId: string;
+}
+
 export interface DecisionReviewIssue {
   severity: CourseCheckFindingSeverity;
+  classification: DecisionReviewIssueClass;
+  label: "Needs action" | "Check" | "Details" | "Could not check";
   summary: string;
+  /** Plain-language description of the affected object(s). */
+  affectedObjectLabel: string;
+  /** What happens when the organizer leaves the issue unchanged. */
+  consequence: string;
+  /** Whether the issue blocks one item, one effect, or the permitted commit. */
+  scope: string;
   nextStep: string | null;
+  /** Consequence-specific safe alternative; ticket 17 may add direct repair actions. */
+  safeAlternativeLabel: string | null;
   affectedItemCount: number;
+  affectedItems: DecisionReviewAffectedItem[];
+}
+
+export type DecisionReviewItemFilter =
+  | "needs_action"
+  | "check"
+  | "ready"
+  | "skipped";
+
+export interface DecisionReviewItemProjection {
+  itemId: string;
+  proposalId: string;
+  proposalLabel: string;
+  proposedDecision: "Will accept" | "Will decline" | "Accepted" | "Declined";
+  speakerContext: string;
+  decisionReadiness: "Needs action" | "Ready" | "Applied" | "Skipped";
+  draftReadiness: "Not prepared" | "Check" | "Could not check" | "Skipped";
+  batchOutcome: "Will process" | "Processed" | "Will stay unchanged" | "Unchanged";
+  filter: DecisionReviewItemFilter;
 }
 
 export interface DecisionReviewEffectGroup {
@@ -650,6 +690,17 @@ export interface DecisionReviewPermittedCommit {
   stageId: string;
   label: string;
   effectSummary: string;
+  /** Item deferrals that must occur before this existing kernel stage is ready. */
+  requiresDeferredItemIds?: string[];
+}
+
+export interface DecisionReviewPartialExecution {
+  eligibleCount: number;
+  skippedCount: number;
+  canExecute: boolean;
+  requiredDeferredItemIds: string[];
+  primaryActionLabel: string | null;
+  skippedOutcomeLabel: "Leave decision unchanged";
 }
 
 export interface DecisionReviewGeneratedRecords {
@@ -674,6 +725,13 @@ export interface DecisionReviewAppliedResult {
     label: string;
   };
   externalCommunication: { emailsSent: number; label: string };
+  outcomeCounts: {
+    processed: number;
+    failed: number;
+    warned: number;
+    skipped: number;
+    unchanged: number;
+  };
   appliedAt: string;
   appliedBy: string;
 }
@@ -691,13 +749,16 @@ export interface DecisionReviewProjection {
   counts: {
     selected: number;
     ready: number;
+    eligible: number;
     needsAction: number;
     warning: number;
     skipped: number;
   };
   issues: DecisionReviewIssue[];
+  items: DecisionReviewItemProjection[];
   effectGroups: DecisionReviewEffectGroup[];
   permittedCommits: DecisionReviewPermittedCommit[];
+  partialExecution: DecisionReviewPartialExecution;
   canDeferItems: boolean;
   canStartDraftPreparation: boolean;
   freshness: {

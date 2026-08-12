@@ -12,16 +12,16 @@
 
 ## Acceptance criteria
 
-- [ ] Findings project into four user-facing classes with distinct behavior: **Needs action**, **Check**, **Details**, and **Could not check**.
-- [ ] The review opens with prioritized exceptions, followed by a concise always-visible **What will happen** summary; selected-item detail and technical evidence use progressive disclosure.
-- [ ] Every issue names the affected proposal, speaker, recipient group, message, session, or effect and explains both the consequence of leaving it unchanged and whether it blocks one item, one effect, or the permitted commit.
-- [ ] Repeated issues with an identical resolution can be grouped and acted on in bulk without hiding the affected objects.
-- [ ] The selected-submissions table supports **Needs action**, **Check**, **Ready**, and **Skipped** filters and shows proposed decision, speaker context, decision readiness, draft readiness, and batch outcome.
-- [ ] Valid items can proceed while ineligible items remain unchanged when policy permits; identity, authority, freshness, and durable-integrity blockers remain non-bypassable for their affected scope.
-- [ ] Generic **Defer** language is replaced by consequence-specific outcomes such as **Leave decision unchanged**, **Accept without a draft**, **Review later**, or **Remove from this batch**.
-- [ ] The sticky action area names the exact eligible and skipped counts and remains disabled only when every permitted execution option is blocked.
-- [ ] The persistent result enumerates processed, failed, warned, skipped, and unchanged outcomes without presenting partial success as complete batch success.
-- [ ] Contract, UI, and browser tests cover grouped exceptions, warnings, unavailable checks, safe partial execution, non-bypassable blockers, and exact result counts.
+- [x] Findings project into four user-facing classes with distinct behavior: **Needs action**, **Check**, **Details**, and **Could not check**.
+- [x] The review opens with prioritized exceptions, followed by a concise always-visible **What will happen** summary; selected-item detail and technical evidence use progressive disclosure.
+- [x] Every issue names the affected proposal, speaker, recipient group, message, session, or effect and explains both the consequence of leaving it unchanged and whether it blocks one item, one effect, or the permitted commit.
+- [x] Repeated issues with an identical resolution can be grouped and acted on in bulk without hiding the affected objects.
+- [x] The selected-submissions table supports **Needs action**, **Check**, **Ready**, and **Skipped** filters and shows proposed decision, speaker context, decision readiness, draft readiness, and batch outcome.
+- [x] Valid items can proceed while ineligible items remain unchanged when policy permits; identity, authority, freshness, and durable-integrity blockers remain non-bypassable for their affected scope.
+- [x] Generic **Defer** language is replaced by consequence-specific outcomes such as **Leave decision unchanged**, **Accept without a draft**, **Review later**, or **Remove from this batch**.
+- [x] The sticky action area names the exact eligible and skipped counts and remains disabled only when every permitted execution option is blocked.
+- [x] The persistent result enumerates processed, failed, warned, skipped, and unchanged outcomes without presenting partial success as complete batch success.
+- [x] Contract, UI, and browser tests cover grouped exceptions, warnings, unavailable checks, safe partial execution, non-bypassable blockers, and exact result counts.
 
 ## Comments
 
@@ -29,3 +29,4 @@
 
 - 2026-08-12 — frontier-reconcile: All blockers done → ready-for-agent.
 - 2026-08-12 — Started in the overnight parallel frontier after Course Check 14; automated verification is required, with demos/review/QA deferred per Tyler's instruction.
+- 2026-08-12 — Implemented exception-first projection and review UI with grouped affected objects, four behavior classes, selected-submission filters, consequence-specific alternatives, safe defer-then-apply partial execution, and persistent exact outcome counts. Verification: typecheck and build passed; full UI 76/76 and worker 185/185 passed; focused Course Check browser file 4/4 passed. A broad E2E run reached 16/17 with this ticket's scenario passing; its unrelated failure was the older single-decision test selecting a proposal already finalized by earlier persisted suite state. Status intentionally remains in-progress for root closeout.

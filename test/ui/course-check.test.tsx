@@ -135,13 +135,33 @@ const proposedDecisionReview = {
   phase: "proposed",
   title: "Review 1 acceptance decision",
   courseCheckSummary: "Course Check found 1 warning.",
-  counts: { selected: 1, ready: 1, needsAction: 0, warning: 1, skipped: 0 },
+  counts: { selected: 1, ready: 1, eligible: 1, needsAction: 0, warning: 1, skipped: 0 },
   issues: [
     {
       severity: "warning",
+      classification: "check",
+      label: "Check",
       summary: warning.message,
+      affectedObjectLabel: body.proposalId,
+      consequence: warning.message,
+      scope: "This does not block the decision commit.",
       nextStep: warning.recoveryGuidance,
+      safeAlternativeLabel: "Accept without a draft",
       affectedItemCount: 1,
+      affectedItems: [{ itemId: body.items[0]!.itemId, proposalId: body.proposalId }],
+    },
+  ],
+  items: [
+    {
+      itemId: body.items[0]!.itemId,
+      proposalId: body.proposalId,
+      proposalLabel: body.proposalId,
+      proposedDecision: "Will accept",
+      speakerContext: "No speaker records will be created",
+      decisionReadiness: "Ready",
+      draftReadiness: "Check",
+      batchOutcome: "Will process",
+      filter: "check",
     },
   ],
   effectGroups: [
@@ -181,6 +201,14 @@ const proposedDecisionReview = {
       effectSummary: "1 submission will be accepted.",
     },
   ],
+  partialExecution: {
+    eligibleCount: 1,
+    skippedCount: 0,
+    canExecute: true,
+    requiredDeferredItemIds: [],
+    primaryActionLabel: "Accept 1 submission",
+    skippedOutcomeLabel: "Leave decision unchanged",
+  },
   canDeferItems: true,
   canStartDraftPreparation: true,
   freshness: {
@@ -279,6 +307,7 @@ const projectedAppliedPlan = {
       unchangedCount: 0,
       drafts: { state: "not_prepared", count: 0, label: "No drafts were prepared." },
       externalCommunication: { emailsSent: 0, label: "No emails were sent." },
+      outcomeCounts: { processed: 1, failed: 0, warned: 1, skipped: 0, unchanged: 0 },
       appliedAt: appliedPlan.receipt!.appliedAt,
       appliedBy: appliedPlan.createdBy.displayName,
     },
@@ -760,18 +789,42 @@ describe("Course Check review workspace", () => {
       decisionReview: {
         ...proposedDecisionReview,
         title: "Review 2 acceptance decisions",
-        counts: { selected: 2, ready: 1, needsAction: 1, warning: 1, skipped: 0 },
+        counts: { selected: 2, ready: 1, eligible: 1, needsAction: 1, warning: 1, skipped: 0 },
         issues: [
           {
             severity: "blocker",
+            classification: "needs_action",
+            label: "Needs action",
             summary: blocker.message,
+            affectedObjectLabel: "SUB-BLOCKED",
+            consequence: "The decision will stay unchanged.",
+            scope: "Blocks SUB-BLOCKED only; 1 other submission can proceed.",
             nextStep: blocker.recoveryGuidance,
+            safeAlternativeLabel: "Leave decision unchanged",
             affectedItemCount: 1,
+            affectedItems: [{ itemId: "blocked-item", proposalId: "SUB-BLOCKED" }],
           },
         ],
-        permittedCommits: [],
+        items: [
+          { ...proposedDecisionReview.items[0], itemId: "blocked-item", proposalId: "SUB-BLOCKED", proposalLabel: "SUB-BLOCKED", decisionReadiness: "Needs action", batchOutcome: "Will stay unchanged", filter: "needs_action" },
+          { ...proposedDecisionReview.items[0], itemId: "ready-item", proposalId: "SUB-READY", proposalLabel: "SUB-READY" },
+        ],
+        permittedCommits: [{
+          stageId: "apply-decision",
+          label: "Accept 1 submission; leave 1 unchanged",
+          effectSummary: "1 submission will be accepted. 1 submission will stay unchanged.",
+          requiresDeferredItemIds: ["blocked-item"],
+        }],
+        partialExecution: {
+          eligibleCount: 1,
+          skippedCount: 1,
+          canExecute: true,
+          requiredDeferredItemIds: ["blocked-item"],
+          primaryActionLabel: "Accept 1 submission; leave 1 unchanged",
+          skippedOutcomeLabel: "Leave decision unchanged",
+        },
         canDeferItems: true,
-        primaryActionLabel: null,
+        primaryActionLabel: "Accept 1 submission; leave 1 unchanged",
         effectGroups: proposedDecisionReview.effectGroups.map((group) =>
           group.key === "decisions"
             ? { ...group, count: 2, summary: "2 submissions will be accepted." }
@@ -813,12 +866,13 @@ describe("Course Check review workspace", () => {
       decisionReview: {
         ...projectedAppliedPlan.decisionReview,
         title: "Acceptance decision applied",
-        counts: { selected: 2, ready: 0, needsAction: 0, warning: 0, skipped: 1 },
+        counts: { selected: 2, ready: 0, eligible: 0, needsAction: 0, warning: 0, skipped: 1 },
         result: {
           ...projectedAppliedPlan.decisionReview.result,
           summary: "1 submission was accepted. 1 submission was unchanged.",
           decisions: { accepted: 1, declined: 0, total: 1 },
           unchangedCount: 1,
+          outcomeCounts: { processed: 1, failed: 0, warned: 1, skipped: 1, unchanged: 1 },
         },
       },
     } as const;
@@ -844,9 +898,11 @@ describe("Course Check review workspace", () => {
       await screen.findByRole("heading", { name: "Review 2 acceptance decisions" }),
     ).toBeVisible();
     expect(screen.getByText("2 submissions will be accepted.")).toBeVisible();
-    await user.click(await screen.findByRole("checkbox", { name: /SUB-BLOCKED/ }));
-    await user.type(screen.getByPlaceholderText("Why defer these items?"), "Needs follow-up");
-    await user.click(screen.getByRole("button", { name: "Defer to follow-up" }));
+    await user.click(
+      screen.getByRole("button", {
+        name: "Accept 1 submission; leave 1 unchanged",
+      }),
+    );
 
     expect(await screen.findByText("1 submission was accepted. 1 submission was unchanged.")).toBeVisible();
     expect(screen.getByText("No emails were sent.")).toBeVisible();

@@ -343,6 +343,13 @@ describe("Course Check 02 batch decisions and shared workspace", () => {
     expect(body.aggregateProgress.applied).toBe(1);
     expect(body.aggregateProgress.deferred).toBe(1);
     expect(body.followUpQueue[0]?.proposalId).toBe(open[0]);
+    expect(applied.body.decisionReview?.result?.outcomeCounts).toEqual({
+      processed: 1,
+      failed: 0,
+      warned: 0,
+      skipped: 1,
+      unchanged: 1,
+    });
 
     const remainingBody = await getProposal(open[1]!);
     expect(remainingBody.programOutcome).toBe("declined");
