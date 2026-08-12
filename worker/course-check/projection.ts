@@ -8,6 +8,12 @@ import type {
   DecisionReviewProjection,
   DecisionItem,
   DecisionPlanBody,
+  ExternalEffectReviewAction,
+  ExternalEffectReviewGroup,
+  ExternalEffectReviewIssue,
+  ExternalEffectReviewPhase,
+  ExternalEffectReviewProjection,
+  PublicationPlanBody,
 } from "../../shared/course-check";
 import { redactCommunicationBody } from "./communication-planner";
 import {
@@ -824,6 +830,620 @@ function buildDecisionReviewProjection(
   };
 }
 
+function externalPhase(plan: CourseCheckPlan): ExternalEffectReviewPhase {
+  if (plan.body.actionType === "communication") {
+    const summary = plan.body.deliverySummary;
+    if (summary.failed > 0 || summary.unknown > 0) return "needs_attention";
+    if (summary.total > 0 && summary.succeeded === summary.total) return "complete";
+    if (summary.succeeded > 0) return "partially_complete";
+    if (
+      summary.total > 0 ||
+      summary.queued > 0 ||
+      summary.sending > 0 ||
+      summary.retryScheduled > 0
+    ) {
+      return "in_progress";
+    }
+  }
+  const activeAirtable =
+    plan.body.airtable.disposition === "active" ? plan.body.airtable.effects : [];
+  if (
+    activeAirtable.some(
+      (effect) =>
+        effect.state === "unknown" ||
+        effect.state === "permanent_failure" ||
+        effect.state === "retryable_failure",
+    )
+  ) {
+    return "needs_attention";
+  }
+  if (activeAirtable.some((effect) => effect.state === "attempting")) {
+    return "in_progress";
+  }
+  if (
+    plan.receipt &&
+    activeAirtable.some((effect) => effect.state === "pending")
+  ) {
+    return "partially_complete";
+  }
+  if (plan.state === "Needs attention") return "needs_attention";
+  if (plan.state === "Partially complete") return "partially_complete";
+  if (plan.receipt || plan.state === "Complete") return "complete";
+  if (plan.state === "In progress") return "in_progress";
+  return "proposed";
+}
+
+function publicationActionLabel(body: PublicationPlanBody): string {
+  const count = body.includedSessionIds.length;
+  if (body.operation === "unpublish") return "Unpublish the attendee program";
+  if (body.operation === "restore") {
+    return `Restore ${count} ${plural(count, "session")} to the attendee program`;
+  }
+  return `Publish ${count} ${plural(count, "session")} to the attendee program`;
+}
+
+function externalRouteAction(input: {
+  id: string;
+  label: string;
+  href: string;
+  resultingEffectSummary: string;
+}): ExternalEffectReviewAction {
+  return { ...input, kind: "repair", target: { type: "route", href: input.href } };
+}
+
+function externalCommandAction(input: {
+  id: string;
+  label: string;
+  kind: ExternalEffectReviewAction["kind"];
+  command: Extract<ExternalEffectReviewAction["target"], { type: "command" }>["command"];
+  entityIds: string[];
+  resultingEffectSummary: string;
+}): ExternalEffectReviewAction {
+  return {
+    id: input.id,
+    label: input.label,
+    kind: input.kind,
+    target: { type: "command", command: input.command, entityIds: input.entityIds },
+    resultingEffectSummary: input.resultingEffectSummary,
+  };
+}
+
+function publicationIssue(
+  plan: CourseCheckPlan,
+  finding: PublicationPlanBody["findings"][number],
+  canMutate: boolean,
+): ExternalEffectReviewIssue {
+  const sessionIds = finding.entityRef?.split(",").map((id) => id.trim()).filter(Boolean) ?? [];
+  const classification =
+    finding.severity === "blocker"
+      ? "needs_action"
+      : finding.materialExternal
+        ? "check"
+        : "details";
+  const label =
+    classification === "needs_action"
+      ? "Needs action"
+      : classification === "check"
+        ? "Check"
+        : "Details";
+  const firstSession = sessionIds[0];
+  const actions: ExternalEffectReviewAction[] = [];
+  if (firstSession) {
+    actions.push(
+      externalRouteAction({
+        id: `publication:${finding.id}:repair`,
+        label: "Open affected session",
+        href: `/e/${encodeURIComponent(plan.eventId)}/agenda?session=${encodeURIComponent(firstSession)}`,
+        resultingEffectSummary: "The working session opens; this frozen review does not change until it is refreshed.",
+      }),
+    );
+  }
+  if (canMutate && sessionIds.length > 0) {
+    actions.push(
+      externalCommandAction({
+        id: `publication:${finding.id}:exclude`,
+        label: sessionIds.length === 1 ? "Exclude affected session" : "Exclude affected sessions",
+        kind: "exclude",
+        command: "exclude_publication_sessions",
+        entityIds: sessionIds,
+        resultingEffectSummary: `${sessionIds.length} affected ${plural(sessionIds.length, "session")} will stay internal.`,
+      }),
+    );
+  }
+  if (canMutate && finding.materialExternal) {
+    actions.push(
+      externalCommandAction({
+        id: `publication:${finding.id}:override`,
+        label: "Record reasoned override",
+        kind: "override",
+        command: "record_reasoned_override",
+        entityIds: [finding.id],
+        resultingEffectSummary: "The warning remains on the receipt with the organizer's reason.",
+      }),
+    );
+  }
+  return {
+    classification,
+    label,
+    summary: finding.message,
+    affectedObjectLabel:
+      sessionIds.length > 0
+        ? `${sessionIds.length} ${plural(sessionIds.length, "session")}`
+        : "Attendee program",
+    consequence:
+      finding.severity === "blocker"
+        ? "The attendee-facing release cannot proceed until this is repaired or excluded."
+        : finding.materialExternal
+          ? "Publishing unchanged makes this known issue attendee-facing."
+          : "This remains visible as a stated TBD detail; it does not imply delivery.",
+    actions,
+  };
+}
+
+function airtableState(
+  effects: CourseCheckPlan["body"]["airtable"]["effects"],
+): ExternalEffectReviewGroup["state"] {
+  if (effects.some((effect) => effect.state === "unknown")) return "unknown";
+  if (
+    effects.some(
+      (effect) =>
+        effect.state === "permanent_failure" || effect.state === "retryable_failure",
+    )
+  ) {
+    return "failed";
+  }
+  if (effects.length > 0 && effects.every((effect) => effect.state === "succeeded")) {
+    return "succeeded";
+  }
+  if (effects.length > 0 && effects.every((effect) => effect.state === "compensated")) {
+    return "compensated";
+  }
+  if (effects.some((effect) => effect.state === "attempting")) return "in_progress";
+  return "pending";
+}
+
+function integrationReview(input: {
+  plan: CourseCheckPlan;
+  options: CourseCheckProjectionOptions;
+}): Pick<ExternalEffectReviewProjection, "issues" | "effectGroups" | "integrationActions"> {
+  const { plan, options } = input;
+  const airtable = plan.body.airtable;
+  if (airtable.effects.length === 0 || airtable.disposition === "removed") {
+    return { issues: [], effectGroups: [], integrationActions: [] };
+  }
+  const allowed = new Set(options.permittedStageIds ?? []);
+  const mayMutate = options.role !== "reviewer" && allowed.has("write-airtable");
+  const state = airtableState(airtable.effects);
+  const providerDetails = options.canViewCommunicationEvidence
+    ? airtable.effects.map(
+        (effect) =>
+          `${effect.operation} ${effect.tableName}/${effect.providerRecordId ?? effect.chartsteadId} · ${effect.state}`,
+      )
+    : [];
+  const effectGroups: ExternalEffectReviewGroup[] = [
+    {
+      key: "airtable",
+      title: "Airtable records",
+      state,
+      count: airtable.effects.length,
+      summary: airtable.summary,
+      details: airtable.effects.map(
+        (effect) =>
+          `${effect.operation === "create" ? "Create" : "Update"} ${effect.kind} ${effect.chartsteadId} in ${effect.tableName}`,
+      ),
+      providerDetails,
+    },
+  ];
+  const uncertain = airtable.effects.filter(
+    (effect) =>
+      effect.state === "unknown" ||
+      effect.state === "retryable_failure" ||
+      effect.state === "permanent_failure",
+  );
+  const issues: ExternalEffectReviewIssue[] = uncertain.map((effect) => ({
+    classification: effect.state === "unknown" ? "could_not_check" : "needs_action",
+    label: effect.state === "unknown" ? "Could not check" : "Needs action",
+    summary:
+      effect.state === "unknown"
+        ? `Airtable may or may not have ${effect.operation === "create" ? "created" : "updated"} ${effect.kind} ${effect.chartsteadId}.`
+        : `Airtable did not ${effect.operation} ${effect.kind} ${effect.chartsteadId}.`,
+    affectedObjectLabel: `${effect.kind} ${effect.chartsteadId}`,
+    consequence:
+      "ChartStead's internal work remains committed; only this optional mirror is uncertain.",
+    actions: mayMutate
+      ? [
+          externalCommandAction({
+            id: `airtable:${effect.id}:reconcile`,
+            label: "Reconcile unknown writes",
+            kind: "reconcile",
+            command: "reconcile_airtable",
+            entityIds: [effect.id],
+            resultingEffectSummary: "The provider is checked before any new write is attempted.",
+          }),
+        ]
+      : [],
+  }));
+  const count = airtable.effects.length;
+  const integrationActions = mayMutate
+    ? [
+        {
+          action: "execute" as const,
+          label: `Write ${count} ${plural(count, "record")} to Airtable`,
+          effectSummary: airtable.summary,
+        },
+        ...(uncertain.some((effect) => effect.state === "unknown")
+          ? [
+              {
+                action: "reconcile" as const,
+                label: "Reconcile unknown writes",
+                effectSummary: "Check the existing provider result without duplicating a write.",
+              },
+            ]
+          : []),
+        {
+          action: "deferred" as const,
+          label: "Defer Airtable",
+          effectSummary: "Keep internal work committed and leave the optional mirror pending.",
+        },
+        {
+          action: "removed" as const,
+          label: "Remove Airtable stage",
+          effectSummary: "Keep internal work committed and remove these optional provider writes.",
+        },
+      ]
+    : [];
+  return { issues, effectGroups, integrationActions };
+}
+
+function deliveryReview(
+  plan: CourseCheckPlan,
+  options: CourseCheckProjectionOptions,
+): Pick<ExternalEffectReviewProjection, "issues" | "effectGroups" | "result"> {
+  if (plan.body.actionType !== "communication" || plan.body.effects.length === 0) {
+    return { issues: [], effectGroups: [], result: null };
+  }
+  const body = plan.body;
+  const canMutate =
+    options.role !== "reviewer" &&
+    options.canViewCommunicationEvidence &&
+    (options.permittedStageIds ?? []).includes("send-messages");
+  const issues: ExternalEffectReviewIssue[] = body.effects
+    .filter(
+      (effect) =>
+        effect.status === "permanent_failure" ||
+        effect.status === "exhausted" ||
+        effect.status === "unknown",
+    )
+    .map((effect) => {
+      const unknown = effect.status === "unknown";
+      const actions: ExternalEffectReviewAction[] = canMutate
+        ? [
+            ...(unknown
+              ? [
+                  externalCommandAction({
+                    id: `delivery:${effect.effectId}:reconcile`,
+                    label: "Reconcile provider outcome",
+                    kind: "reconcile",
+                    command: "reconcile_delivery",
+                    entityIds: [effect.effectId],
+                    resultingEffectSummary: "Confirm delivered or not delivered before any retry.",
+                  }),
+                ]
+              : [
+                  externalCommandAction({
+                    id: `delivery:${effect.effectId}:retry`,
+                    label: "Retry this address",
+                    kind: "retry",
+                    command: "retry_delivery",
+                    entityIds: [effect.effectId],
+                    resultingEffectSummary: "Queue one bounded attempt for this address only.",
+                  }),
+                ]),
+            externalCommandAction({
+              id: `delivery:${effect.effectId}:correction`,
+              label: "Create reviewed correction",
+              kind: "compensate",
+              command: "create_delivery_correction",
+              entityIds: [effect.effectId],
+              resultingEffectSummary: "Create a new reviewed plan; the original delivery remains immutable.",
+            }),
+          ]
+        : [];
+      return {
+        classification: unknown ? "could_not_check" : "needs_action",
+        label: unknown ? "Could not check" : "Needs action",
+        summary: unknown
+          ? `Delivery to ${effect.toEmail} has an unknown provider outcome.`
+          : `Delivery to ${effect.toEmail} failed after ${effect.attemptCount} ${plural(effect.attemptCount, "attempt")}.`,
+        affectedObjectLabel: effect.toEmail,
+        consequence: unknown
+          ? "Do not retry until the provider outcome is reconciled; a duplicate message is possible."
+          : "This person has not received the message; successful deliveries stay unchanged.",
+        actions,
+      } satisfies ExternalEffectReviewIssue;
+    });
+  const summary = body.deliverySummary;
+  const active = summary.queued + summary.sending + summary.retryScheduled;
+  const deliveryState: ExternalEffectReviewGroup["state"] =
+    summary.unknown > 0
+      ? "unknown"
+      : summary.failed > 0
+        ? "failed"
+        : active > 0
+          ? "in_progress"
+          : summary.total > 0 && summary.succeeded === summary.total
+            ? "succeeded"
+            : "pending";
+  const resultSummary = `${summary.succeeded} of ${summary.total} deliveries succeeded; ${summary.failed} failed and ${summary.unknown} ${summary.unknown === 1 ? "has" : "have"} an unknown outcome.`;
+  return {
+    issues,
+    effectGroups: [
+      {
+        key: "delivery",
+        title: "Message delivery",
+        state: deliveryState,
+        count: summary.total,
+        summary: resultSummary,
+        details: body.effects.map(
+          (effect) => `${effect.toEmail} · ${effect.status.replaceAll("_", " ")} · ${effect.attemptCount} ${plural(effect.attemptCount, "attempt")}`,
+        ),
+        providerDetails: options.canViewCommunicationEvidence
+          ? body.effects.map(
+              (effect) => `${effect.effectId} · ${effect.providerReference ?? "no provider reference"}`,
+            )
+          : [],
+      },
+    ],
+    result: {
+      state: externalPhase(plan) === "proposed" ? "in_progress" : (externalPhase(plan) as Exclude<ExternalEffectReviewPhase, "proposed">),
+      summary: resultSummary,
+      processed: summary.succeeded + summary.failed + summary.unknown,
+      succeeded: summary.succeeded,
+      failed: summary.failed,
+      unknown: summary.unknown,
+      compensated: 0,
+    },
+  };
+}
+
+function buildExternalEffectReviewProjection(
+  plan: CourseCheckPlan,
+  options: CourseCheckProjectionOptions,
+): ExternalEffectReviewProjection | null {
+  // Decision plans already expose the authoritative decisionReview adapter,
+  // including their independently approved integration group. Do not place a
+  // second review surface ahead of that decision scope.
+  if (plan.body.actionType === "decision") return null;
+  const allowed = new Set(options.permittedStageIds ?? []);
+  const phase = externalPhase(plan);
+  const integration = integrationReview({ plan, options });
+  const delivery = deliveryReview(plan, options);
+  let family: ExternalEffectReviewProjection["family"] = "integration";
+  let title = "Review optional Airtable effects";
+  let summary = plan.body.airtable.summary;
+  let issues = [...integration.issues];
+  let effectGroups = [...integration.effectGroups];
+  let permittedActions: ExternalEffectReviewProjection["permittedActions"] = [];
+  let primaryActionLabel: string | null = null;
+  let result = delivery.result;
+
+  if (plan.body.actionType === "publication") {
+    family = "publication";
+    const body = plan.body;
+    const actionLabel = publicationActionLabel(body);
+    title = plan.receipt ? `${actionLabel} — result` : actionLabel;
+    summary = `${body.includedSessionIds.length} ${plural(body.includedSessionIds.length, "session")} will be attendee-facing; ${body.excludedSessions.length} will stay internal.`;
+    const canMutate =
+      options.role !== "reviewer" &&
+      body.stages.some(
+        (stage) => stage.id !== "write-airtable" && allowed.has(stage.id),
+      );
+    issues = [
+      ...body.findings
+        .filter(
+          (finding) =>
+            finding.severity !== "info" ||
+            finding.code === "session_tbd" ||
+            finding.code === "session_unplaced",
+        )
+        .map((finding) => publicationIssue(plan, finding, canMutate)),
+      ...integration.issues,
+    ];
+    effectGroups = [
+      {
+        key: "publication",
+        title: "Attendee program",
+        state: plan.receipt ? "applied" : "pending",
+        count: body.includedSessionIds.length,
+        summary: actionLabel,
+        details: body.sessionDeltas.map(
+          (delta) => `${delta.title}: ${delta.changes.join(", ")}`,
+        ),
+        providerDetails: [],
+      },
+      ...(body.excludedSessions.length > 0
+        ? [
+            {
+              key: "exclusions" as const,
+              title: "Kept internal",
+              state: "unchanged" as const,
+              count: body.excludedSessions.length,
+              summary: `${body.excludedSessions.length} ${plural(body.excludedSessions.length, "session")} will remain out of the attendee program.`,
+              details: body.excludedSessions.map(
+                (row) => `${row.title}: ${row.reasons.join("; ")}`,
+              ),
+              providerDetails: [],
+            },
+          ]
+        : []),
+      ...(body.calendarConsequences.length > 0
+        ? [
+            {
+              key: "calendar" as const,
+              title: "Calendar follow-up",
+              state: "pending" as const,
+              count: body.calendarConsequences.length,
+              summary: `${body.calendarConsequences.length} calendar ${plural(body.calendarConsequences.length, "operation")} will open in a separately approved Communication Course Check. Nothing is sent by publication.`,
+              details: body.calendarConsequences.map(
+                (op) => `${op.kind === "create" ? "Create" : op.kind === "update" ? "Update" : "Cancel"} ${op.title}${op.timePending ? " · time TBD" : ""}${op.locationPending ? " · location TBD" : op.roomName ? ` · ${op.roomName}` : ""}`,
+              ),
+              providerDetails: options.canViewCommunicationEvidence
+                ? body.calendarConsequences.map(
+                    (op) => `UID ${op.uid} · sequence ${op.sequence} · ${op.reversibility.replaceAll("_", " ")}`,
+                  )
+                : [],
+            },
+          ]
+        : []),
+      ...integration.effectGroups,
+    ];
+    const stage = body.stages.find(
+      (candidate) =>
+        candidate.id !== "write-airtable" &&
+        allowed.has(candidate.id) &&
+        (candidate.status === "ready" || candidate.status === "approved"),
+    );
+    if (stage && !plan.receipt) {
+      primaryActionLabel = actionLabel;
+      permittedActions.push({
+        stageId: stage.id,
+        label: actionLabel,
+        effectSummary: `${summary} Calendar delivery and Airtable remain separately approved.`,
+      });
+    }
+    if (plan.receipt) {
+      const airtableSucceeded = body.airtable.effects.filter(
+        (effect) => effect.state === "succeeded",
+      ).length;
+      const airtableFailed = body.airtable.effects.filter(
+        (effect) =>
+          effect.state === "permanent_failure" ||
+          effect.state === "retryable_failure",
+      ).length;
+      const airtableUnknown = body.airtable.effects.filter(
+        (effect) => effect.state === "unknown",
+      ).length;
+      const airtableCompensated = body.airtable.effects.filter(
+        (effect) => effect.state === "compensated",
+      ).length;
+      const integrationClause =
+        body.airtable.effects.length === 0 || body.airtable.disposition !== "active"
+          ? " No Airtable write was required."
+          : ` Airtable: ${airtableSucceeded} succeeded, ${airtableFailed} failed, ${airtableUnknown} unknown, and ${airtableCompensated} compensated.`;
+      result = {
+        state: phase === "proposed" ? "complete" : phase,
+        summary: `${body.operation === "unpublish" ? "The attendee program was unpublished" : body.operation === "restore" ? `${body.includedSessionIds.length} sessions were restored to the attendee program` : `${body.includedSessionIds.length} sessions were published to the attendee program`}.${integrationClause}`,
+        processed: body.includedSessionIds.length + airtableSucceeded + airtableFailed + airtableUnknown + airtableCompensated,
+        succeeded: body.includedSessionIds.length + airtableSucceeded,
+        failed: airtableFailed,
+        unknown: airtableUnknown,
+        compensated: airtableCompensated,
+      };
+    }
+  } else if (plan.body.actionType === "communication") {
+    family = "communication";
+    const body = plan.body;
+    const total = body.deliverySummary.total || body.drafts.length;
+    title =
+      phase === "needs_attention"
+        ? `Recover delivery for ${body.deliverySummary.failed + body.deliverySummary.unknown} ${plural(body.deliverySummary.failed + body.deliverySummary.unknown, "person", "people")}`
+        : body.compensation
+          ? "Review a corrective message"
+          : `Review delivery to ${total} ${plural(total, "person", "people")}`;
+    summary = delivery.result?.summary ?? `${body.drafts.length} frozen ${plural(body.drafts.length, "draft")}; sending remains separately approved.`;
+    issues = [...delivery.issues, ...integration.issues];
+    effectGroups = [
+      ...delivery.effectGroups,
+      ...(body.compensation
+        ? [
+            {
+              key: "compensation" as const,
+              title: "Corrective message",
+              state: phase === "complete" ? ("compensated" as const) : ("pending" as const),
+              count: 1,
+              summary: `The original delivery ${body.compensation.originalEffectId} remains immutable; this is a separately reviewed correction.`,
+              details: [body.compensation.reason],
+              providerDetails: options.canViewCommunicationEvidence
+                ? [body.compensation.originalEffectId]
+                : [],
+            },
+          ]
+        : []),
+      ...integration.effectGroups,
+    ];
+    const sendStage = body.stages.find(
+      (candidate) =>
+        candidate.id === "send-messages" &&
+        allowed.has(candidate.id) &&
+        (candidate.status === "ready" || candidate.status === "approved"),
+    );
+    if (sendStage) {
+      primaryActionLabel = `Send ${body.drafts.length} ${plural(body.drafts.length, "message")}`;
+      permittedActions.push({
+        stageId: sendStage.id,
+        label: primaryActionLabel,
+        effectSummary: `Queue exactly ${body.drafts.length} frozen recipient ${plural(body.drafts.length, "payload")}; calendar operations, when present, use their frozen UID and sequence.`,
+      });
+    }
+  }
+
+  if (effectGroups.length === 0) return null;
+  if (
+    allowed.has("write-airtable") &&
+    plan.body.airtable.effects.length > 0 &&
+    plan.body.airtable.disposition === "active"
+  ) {
+    const writeStage = plan.body.stages.find(
+      (stage) =>
+        stage.id === "write-airtable" &&
+        (stage.status === "ready" || stage.status === "approved"),
+    );
+    if (writeStage) {
+      permittedActions.push({
+        stageId: writeStage.id,
+        label: `Write ${plan.body.airtable.effects.length} ${plural(plan.body.airtable.effects.length, "record")} to Airtable`,
+        effectSummary: plan.body.airtable.summary,
+      });
+    }
+  }
+  if (!result && family === "integration" && plan.body.airtable.effects.length > 0) {
+    const effects = plan.body.airtable.effects;
+    const succeeded = effects.filter((effect) => effect.state === "succeeded").length;
+    const failed = effects.filter(
+      (effect) =>
+        effect.state === "permanent_failure" || effect.state === "retryable_failure",
+    ).length;
+    const unknown = effects.filter((effect) => effect.state === "unknown").length;
+    const compensated = effects.filter((effect) => effect.state === "compensated").length;
+    if (succeeded + failed + unknown + compensated > 0) {
+      result = {
+        state: phase === "proposed" ? "in_progress" : phase,
+        summary: `${succeeded} of ${effects.length} Airtable writes succeeded; ${failed} failed, ${unknown} unknown, and ${compensated} compensated. Internal ChartStead work is unchanged.`,
+        processed: succeeded + failed + unknown + compensated,
+        succeeded,
+        failed,
+        unknown,
+        compensated,
+      };
+    }
+  }
+  return {
+    kind: "external_effect_review",
+    family,
+    phase,
+    title,
+    summary,
+    attentionCount: issues.filter((issue) => issue.classification !== "details").length +
+      issues.filter((issue) => issue.classification === "details").length,
+    issues,
+    effectGroups,
+    permittedActions,
+    integrationActions: integration.integrationActions,
+    primaryActionLabel,
+    result,
+  };
+}
+
 /**
  * Role-aware Course Check projection.
  * Admins/agents with full authority see complete evidence.
@@ -904,6 +1524,9 @@ export function projectCourseCheckForViewer(
       })),
     };
   }
+
+  const externalReview = buildExternalEffectReviewProjection(projected, options);
+  if (externalReview) projected = { ...projected, externalReview };
 
   return projected;
 }

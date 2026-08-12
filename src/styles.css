@@ -5300,6 +5300,83 @@ details[open] > summary .course-check-chevron { transform: rotate(180deg); }
   padding-top: 14px;
 }
 
+.external-effect-review {
+  display: grid;
+  gap: 20px;
+}
+
+.external-review-issues,
+.external-review-groups {
+  display: grid;
+  gap: 12px;
+}
+
+.external-review-issue {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--outline);
+  border-radius: var(--r-control);
+  background: var(--surface-muted);
+}
+
+.external-review-issue h3,
+.external-review-issue p {
+  margin: 0;
+}
+
+.external-review-issue p + p,
+.external-review-issue .course-check-issue-actions {
+  margin-top: 8px;
+}
+
+.external-review-group {
+  border: 1px solid var(--outline);
+  border-radius: var(--r-control);
+  background: var(--surface);
+}
+
+.external-review-group > summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 16px;
+  padding: 16px;
+  cursor: pointer;
+}
+
+.external-review-group > summary > span:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.external-review-group > summary > span:first-child > span {
+  color: var(--text-muted);
+}
+
+.external-review-group > ul,
+.external-review-provider-details {
+  margin: 0 16px 16px;
+}
+
+.external-review-provider-details {
+  padding: 12px;
+  border-radius: var(--r-control);
+  background: var(--surface-muted);
+}
+
+@media (max-width: 640px) {
+  .external-review-issue {
+    grid-template-columns: 1fr;
+  }
+
+  .external-review-group > summary {
+    flex-direction: column;
+  }
+}
+
 .course-check-airtable-actions .btn { min-height: 44px; }
 
 @media (max-width: 760px) {

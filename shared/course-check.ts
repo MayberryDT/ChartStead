@@ -777,6 +777,116 @@ export interface DecisionReviewProjection {
   result: DecisionReviewAppliedResult | null;
 }
 
+export type ExternalEffectReviewFamily =
+  | "publication"
+  | "communication"
+  | "integration";
+
+export type ExternalEffectReviewPhase =
+  | "proposed"
+  | "in_progress"
+  | "partially_complete"
+  | "needs_attention"
+  | "complete";
+
+export type ExternalEffectReviewState =
+  | "pending"
+  | "in_progress"
+  | "applied"
+  | "unchanged"
+  | "succeeded"
+  | "failed"
+  | "unknown"
+  | "compensated";
+
+export interface ExternalEffectReviewAction {
+  id: string;
+  label: string;
+  kind: "repair" | "exclude" | "override" | "retry" | "reconcile" | "compensate";
+  target:
+    | { type: "route"; href: string }
+    | {
+        type: "command";
+        command:
+          | "exclude_publication_sessions"
+          | "record_reasoned_override"
+          | "retry_delivery"
+          | "reconcile_delivery"
+          | "create_delivery_correction"
+          | "reconcile_airtable";
+        entityIds: string[];
+      };
+  resultingEffectSummary: string;
+}
+
+export interface ExternalEffectReviewIssue {
+  classification: DecisionReviewIssueClass;
+  label: "Needs action" | "Check" | "Details" | "Could not check";
+  summary: string;
+  affectedObjectLabel: string;
+  consequence: string;
+  actions: ExternalEffectReviewAction[];
+}
+
+export interface ExternalEffectReviewGroup {
+  key:
+    | "publication"
+    | "exclusions"
+    | "calendar"
+    | "airtable"
+    | "delivery"
+    | "compensation";
+  title: string;
+  state: ExternalEffectReviewState;
+  count: number;
+  summary: string;
+  /** Organizer-language operation detail, safe for the projected viewer. */
+  details: string[];
+  /** Provider identifiers and protocol detail, permission-gated by the API projection. */
+  providerDetails: string[];
+}
+
+export interface ExternalEffectReviewCommit {
+  stageId: string;
+  label: string;
+  effectSummary: string;
+}
+
+export interface ExternalEffectReviewIntegrationAction {
+  action: "execute" | "deferred" | "removed" | "reconcile";
+  label: string;
+  effectSummary: string;
+}
+
+export interface ExternalEffectReviewResult {
+  state: Exclude<ExternalEffectReviewPhase, "proposed">;
+  summary: string;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  unknown: number;
+  compensated: number;
+}
+
+/**
+ * Viewer-specific business adapter for externally visible effects. Execution
+ * remains governed by the durable stage, approval, digest, and effect kernels.
+ */
+export interface ExternalEffectReviewProjection {
+  kind: "external_effect_review";
+  family: ExternalEffectReviewFamily;
+  phase: ExternalEffectReviewPhase;
+  title: string;
+  summary: string;
+  attentionCount: number;
+  issues: ExternalEffectReviewIssue[];
+  effectGroups: ExternalEffectReviewGroup[];
+  permittedActions: ExternalEffectReviewCommit[];
+  integrationActions: ExternalEffectReviewIntegrationAction[];
+  primaryActionLabel: string | null;
+  result: ExternalEffectReviewResult | null;
+}
+
 export interface CourseCheckPlanVersion {
   planId: string;
   version: number;
@@ -804,6 +914,8 @@ export interface CourseCheckPlan {
   receipt: CourseCheckReceipt | null;
   /** Authenticated viewer-specific business projection for decision reviews. */
   decisionReview?: DecisionReviewProjection;
+  /** Authenticated viewer-specific publication, delivery, and integration review. */
+  externalReview?: ExternalEffectReviewProjection;
   /** Immutable prior versions (newest first, excludes current). */
   versions?: CourseCheckPlanVersion[];
   mutations?: PlanMutationRecord[];

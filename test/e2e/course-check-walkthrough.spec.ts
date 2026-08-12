@@ -42,7 +42,9 @@ test("decision review stays truthful before and after commit", async ({ page }) 
   const proposals = (await proposalsResponse.json()) as {
     proposals: Array<{ id: string; programOutcome: string | null }>;
   };
-  const proposal = proposals.proposals.find((row) => !row.programOutcome);
+  const proposal = proposals.proposals.find(
+    (row) => row.id !== "SUB-PODS0050" && !row.programOutcome,
+  );
   expect(proposal).toBeTruthy();
 
   const key = `cc14-browser-${Date.now()}`;
@@ -91,7 +93,9 @@ test("decision result advances to draft preparation without leaving the workspac
   const proposals = (await proposalsResponse.json()) as {
     proposals: Array<{ id: string; programOutcome: string | null }>;
   };
-  const proposal = proposals.proposals.find((row) => !row.programOutcome);
+  const proposal = proposals.proposals.find(
+    (row) => row.id !== "SUB-PODS0050" && !row.programOutcome,
+  );
   expect(proposal).toBeTruthy();
   const key = `cc18-browser-${Date.now()}`;
   const createResponse = await page.request.post(
@@ -122,6 +126,62 @@ test("decision result advances to draft preparation without leaving the workspac
   await expect(page.getByRole("heading", { name: "Prepare decline messages" })).toBeVisible();
 });
 
+test("publication uses the same external-effect review in the API and organizer workspace", async ({
+  page,
+}) => {
+  const key = `cc21-publication-${Date.now()}`;
+  const createResponse = await page.request.post(
+    "/api/events/pacific-open-data-summit-2026/course-checks/publications",
+    {
+      headers: { "idempotency-key": key },
+      data: { operation: "publish", idempotencyKey: key },
+    },
+  );
+  expect([200, 201]).toContain(createResponse.status());
+  const created = (await createResponse.json()) as { id: string };
+
+  const projectedResponse = await page.request.get(
+    `/api/events/pacific-open-data-summit-2026/course-checks/${created.id}`,
+  );
+  expect(projectedResponse.ok()).toBe(true);
+  const projected = (await projectedResponse.json()) as {
+    externalReview: {
+      kind: string;
+      title: string;
+      summary: string;
+      effectGroups: Array<{ key: string; summary: string }>;
+      permittedActions: Array<{ stageId: string; label: string }>;
+    };
+  };
+  expect(projected.externalReview.kind).toBe("external_effect_review");
+  expect(projected.externalReview.effectGroups.some((group) => group.key === "publication")).toBe(true);
+  expect(
+    projected.externalReview.permittedActions.some((action) =>
+      ["publish-program", "unpublish-program", "restore-program"].includes(
+        action.stageId,
+      ),
+    ),
+  ).toBe(true);
+
+  await page.goto(
+    `/e/pacific-open-data-summit-2026/course-checks/${created.id}`,
+  );
+  await expect(
+    page.getByRole("heading", { name: projected.externalReview.title }).first(),
+  ).toBeVisible();
+  await expect(
+    page.getByText(projected.externalReview.summary).first(),
+  ).toBeVisible();
+  await expect(page.getByText("External-effect review")).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: projected.externalReview.permittedActions.find(
+        (action) => action.stageId !== "write-airtable",
+      )!.label,
+    }),
+  ).toBeVisible();
+});
+
 test("batch decision review reports exact scope before and after commit", async ({
   page,
 }) => {
@@ -131,7 +191,9 @@ test("batch decision review reports exact scope before and after commit", async 
   const proposals = (await proposalsResponse.json()) as {
     proposals: Array<{ id: string; programOutcome: string | null }>;
   };
-  const selected = proposals.proposals.filter((row) => !row.programOutcome).slice(0, 2);
+  const selected = proposals.proposals
+    .filter((row) => row.id !== "SUB-PODS0050" && !row.programOutcome)
+    .slice(0, 2);
   expect(selected).toHaveLength(2);
 
   const key = `cc14-browser-batch-${Date.now()}`;
@@ -179,7 +241,9 @@ test("clean decision fast path preserves keyboard focus, history, and batch sele
   const proposals = (await proposalsResponse.json()) as {
     proposals: Array<{ id: string; programOutcome: string | null }>;
   };
-  const proposal = proposals.proposals.find((row) => !row.programOutcome);
+  const proposal = proposals.proposals.find(
+    (row) => row.id !== "SUB-PODS0050" && !row.programOutcome,
+  );
   expect(proposal).toBeTruthy();
   const key = `cc15-browser-fast-${Date.now()}`;
   const createResponse = await page.request.post(

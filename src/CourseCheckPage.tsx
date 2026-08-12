@@ -9,6 +9,8 @@ import type {
   CourseCheckFinding,
   CourseCheckPlan,
   DecisionReviewProjection,
+  ExternalEffectReviewAction,
+  ExternalEffectReviewProjection,
   DecisionPlanBody,
   PublicationPlanBody,
 } from "../shared/course-check";
@@ -52,6 +54,147 @@ function findingTone(severity: CourseCheckFinding["severity"]) {
   if (severity === "blocker") return "error";
   if (severity === "warning") return "warning";
   return "info";
+}
+
+function externalGroupTone(state: ExternalEffectReviewProjection["effectGroups"][number]["state"]) {
+  if (state === "failed" || state === "unknown") return "error";
+  if (state === "in_progress" || state === "pending") return "warning";
+  return "success";
+}
+
+export function ExternalEffectReviewPanel({
+  review,
+  onIssueAction,
+  onIntegrationAction,
+}: {
+  review: ExternalEffectReviewProjection;
+  onIssueAction?: (action: ExternalEffectReviewAction) => void;
+  onIntegrationAction?: (
+    action: ExternalEffectReviewProjection["integrationActions"][number]["action"],
+  ) => void;
+}) {
+  return (
+    <section
+      className="panel external-effect-review"
+      aria-labelledby="external-effect-review-title"
+    >
+      <header className="course-check-section-header">
+        <div>
+          <p className="eyebrow">External-effect review</p>
+          <h2 id="external-effect-review-title">{review.title}</h2>
+          <p className="lede">{review.summary}</p>
+        </div>
+        {review.attentionCount > 0 ? (
+          <span className="course-check-risk-badge" data-severity="warning">
+            {review.attentionCount} need{review.attentionCount === 1 ? "s" : ""} attention
+          </span>
+        ) : null}
+      </header>
+
+      {review.issues.length > 0 ? (
+        <div className="external-review-issues" aria-label="External-effect exceptions">
+          {review.issues.map((issue, index) => (
+            <article
+              key={`${issue.classification}:${issue.affectedObjectLabel}:${index}`}
+              className="external-review-issue"
+              data-classification={issue.classification}
+            >
+              <span className="course-check-risk-badge" data-severity={issue.classification === "needs_action" || issue.classification === "could_not_check" ? "blocker" : issue.classification === "check" ? "warning" : "info"}>
+                {issue.label}
+              </span>
+              <div>
+                <h3>{issue.affectedObjectLabel}</h3>
+                <p>{issue.summary}</p>
+                <p className="muted">{issue.consequence}</p>
+                {issue.actions.length > 0 ? (
+                  <div className="course-check-issue-actions">
+                    {issue.actions.map((action) =>
+                      action.target.type === "route" ? (
+                        <a className="btn btn-secondary btn-sm" href={action.target.href} key={action.id}>
+                          {action.label}
+                        </a>
+                      ) : (
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          key={action.id}
+                          type="button"
+                          onClick={() => onIssueAction?.(action)}
+                        >
+                          {action.label}
+                        </button>
+                      ),
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="external-review-groups">
+        {review.effectGroups.map((group) => (
+          <details
+            className="external-review-group"
+            key={group.key}
+            open={group.state === "failed" || group.state === "unknown"}
+          >
+            <summary>
+              <span>
+                <strong>{group.title}</strong>
+                <span>{group.summary}</span>
+              </span>
+              <span className="course-check-stage-badge" data-tone={externalGroupTone(group.state)}>
+                {group.count} · {group.state.replaceAll("_", " ")}
+              </span>
+            </summary>
+            {group.details.length > 0 ? (
+              <ul>
+                {group.details.map((detail, index) => (
+                  <li key={`${group.key}:detail:${index}`}>{detail}</li>
+                ))}
+              </ul>
+            ) : null}
+            {group.providerDetails.length > 0 ? (
+              <details className="external-review-provider-details">
+                <summary>Provider details</summary>
+                <ul className="mono">
+                  {group.providerDetails.map((detail, index) => (
+                    <li key={`${group.key}:provider:${index}`}>{detail}</li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
+          </details>
+        ))}
+      </div>
+
+      {review.integrationActions.length > 0 ? (
+        <div className="course-check-airtable-actions" aria-label="Airtable actions">
+          {review.integrationActions.map((action) => (
+            <button
+              type="button"
+              className={action.action === "execute" ? "btn btn-primary" : "btn btn-secondary"}
+              key={action.action}
+              onClick={() => onIntegrationAction?.(action.action)}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {review.result ? (
+        <p
+          className="form-message"
+          data-tone={review.result.state === "complete" ? "success" : review.result.state === "needs_attention" ? "error" : "warning"}
+          role="status"
+        >
+          {review.result.summary}
+        </p>
+      ) : null}
+    </section>
+  );
 }
 
 function EvidenceSectionView({
@@ -149,10 +292,11 @@ function AirtableStage({
   const effects = plan.body.airtable.effects;
   if (effects.length === 0) return null;
   const canCommitIntegration =
-    !plan.decisionReview ||
-    plan.decisionReview.permittedCommits.some(
-      (commit) => commit.stageId === "write-airtable",
-    );
+    !plan.externalReview &&
+    (!plan.decisionReview ||
+      plan.decisionReview.permittedCommits.some(
+        (commit) => commit.stageId === "write-airtable",
+      ));
 
   return (
     <section className="course-check-airtable" aria-labelledby="airtable-effects-title">
@@ -769,6 +913,7 @@ function PublicationBody({
                 <label>
                   Override reason
                   <input
+                    id={`override-${finding.id}`}
                     type="text"
                     value={overrideReasons[finding.id] ?? ""}
                     onChange={(event) =>
@@ -856,7 +1001,11 @@ function CommunicationEffectCard({
     effect.status === "permanent_failure" || effect.status === "exhausted";
 
   return (
-    <li className="course-check-effect" data-status={effect.status}>
+    <li
+      className="course-check-effect"
+      data-status={effect.status}
+      id={`delivery-${effect.effectId}`}
+    >
       <div className="course-check-effect-heading">
         <div>
           <strong>{effect.toEmail}</strong>
@@ -1774,6 +1923,7 @@ export function CourseCheckPage() {
     ? (currentPlan.body as PublicationPlanBody)
     : null;
   const decisionReview = isDecision ? currentPlan.decisionReview ?? null : null;
+  const externalReview = currentPlan.externalReview ?? null;
   const issueActionContext = {
     returnPath: `/e/${eventId}/course-checks/${planId}`,
     selectedItemIds: [...selectedItemIds],
@@ -1860,7 +2010,9 @@ export function CourseCheckPage() {
         <div className="course-check-header-copy">
           <p className="eyebrow">Course Check</p>
           <h1>
-            {isCommunication
+            {externalReview
+              ? externalReview.title
+              : isCommunication
               ? communicationBody?.source.kind === "linked_decision"
                 ? communicationBody.templateKind === "acceptance"
                   ? "Prepare acceptance messages"
@@ -1875,7 +2027,9 @@ export function CourseCheckPage() {
                   : "Course Check workspace"}
           </h1>
           <p className="lede">
-            {isCommunication
+            {externalReview
+              ? externalReview.summary
+              : isCommunication
               ? communicationBody?.source.kind === "linked_decision"
                 ? "Continue the decision review here: edit message content, check exact recipients, then separately create drafts. No messages are sent at this stage."
                 : "Review exact recipients, approve delivery, and recover every address from the delivery results."
@@ -1915,6 +2069,40 @@ export function CourseCheckPage() {
           reviewed. Refresh the plan or open a new Course Check, then approve the
           updated exact result before applying.
         </p>
+      ) : null}
+
+      {externalReview ? (
+        <ExternalEffectReviewPanel
+          review={externalReview}
+          onIntegrationAction={(action) =>
+            airtableMutation.mutate({ plan: currentPlan, action })
+          }
+          onIssueAction={(action) => {
+            if (action.target.type !== "command") return;
+            const effectId = action.target.entityIds[0];
+            if (action.target.command === "retry_delivery" && effectId) {
+              retryEffectMutation.mutate(effectId);
+              return;
+            }
+            if (action.target.command === "record_reasoned_override" && effectId) {
+              document.getElementById(`override-${effectId}`)?.focus();
+              return;
+            }
+            if (
+              (action.target.command === "reconcile_delivery" ||
+                action.target.command === "create_delivery_correction") &&
+              effectId
+            ) {
+              document.getElementById(`delivery-${effectId}`)?.scrollIntoView({
+                behavior: "smooth",
+                block: "center",
+              });
+              setMessage("Complete the bounded recovery action for this address below.");
+              return;
+            }
+            setMessage(action.resultingEffectSummary);
+          }}
+        />
       ) : null}
 
       {isDecision ? (
@@ -2170,7 +2358,7 @@ export function CourseCheckPage() {
                 sendMutation.mutate(currentPlan);
               }}
             >
-              Send messages
+              {externalReview?.primaryActionLabel ?? "Send messages"}
             </button>
           </>
         ) : null}
@@ -2225,10 +2413,12 @@ export function CourseCheckPage() {
               applyMutation.mutate(currentPlan);
             }}
           >
-            {(
-              currentPlan.body.stages.find((s) => s.status === "ready") ??
-              currentPlan.body.stages[0]
-            )?.verb ?? "Publish program"}
+            {externalReview?.primaryActionLabel ??
+              (
+                currentPlan.body.stages.find((s) => s.status === "ready") ??
+                currentPlan.body.stages[0]
+              )?.verb ??
+              "Publish program"}
           </button>
         ) : null}
 
