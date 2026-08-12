@@ -29,7 +29,20 @@ Full resource foundation: [http-api-v1.md](./http-api-v1.md).
 | `compensation` | correction / compensation Course Checks |
 | `all` | expands to every row above (stored expanded) |
 
-## Mint an agent key
+## Where organizers mint keys (UI)
+
+**Settings → Agent API keys** in the organizer app.
+
+1. Open the event → **Settings** (left nav).
+2. In **Agent API keys**, set name, operating mode, and Course Check stages.
+3. Click **Create agent key**.
+4. **Copy the token immediately** — it is shown once.
+5. Give the agent: base URL (this origin), `Authorization: Bearer <token>`, and optional `X-ChartStead-Initiating-Human: id|Name`.
+6. **Revoke** from the same table when access should end (takes effect before the next stage call).
+
+Default for a new key is propose-only; grant stages (or all) deliberately.
+
+## Mint an agent key (HTTP)
 
 ```http
 POST /api/v1/events/:eventId/api-keys
@@ -41,6 +54,10 @@ Content-Type: application/json
   "agentMode": "delegated_execution",
   "courseCheckScopes": ["all"]
 }
+```
+
+```http
+GET /api/v1/events/:eventId/api-keys
 ```
 
 Response (token once):

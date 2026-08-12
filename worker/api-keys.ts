@@ -186,6 +186,75 @@ export async function createApiKey(input: {
   };
 }
 
+export interface ListedApiKey {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  principalKind: "human" | "agent";
+  agentMode: AgentOperatingMode | null;
+  courseCheckScopes: CourseCheckScope[];
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+
+export async function listApiKeysForEvent(input: {
+  db: D1Like;
+  eventId: string;
+  includeRevoked?: boolean;
+}): Promise<ListedApiKey[]> {
+  await ensureApiKeysTable(input.db);
+  const result = await input.db
+    .prepare(
+      `SELECT id, name, key_prefix, principal_kind, agent_id, agent_mode,
+              course_check_scopes_by_event_json, event_ids_json,
+              created_at, last_used_at, revoked_at
+       FROM api_keys
+       ORDER BY created_at DESC`,
+    )
+    .bind()
+    .all<{
+      id: string;
+      name: string;
+      key_prefix: string;
+      principal_kind: string | null;
+      agent_id: string | null;
+      agent_mode: string | null;
+      course_check_scopes_by_event_json: string | null;
+      event_ids_json: string;
+      created_at: string;
+      last_used_at: string | null;
+      revoked_at: string | null;
+    }>();
+
+  const listed: ListedApiKey[] = [];
+  for (const row of result.results ?? []) {
+    if (!input.includeRevoked && row.revoked_at) continue;
+    const eventIds = parseStringArray(row.event_ids_json);
+    if (!eventIds.includes(input.eventId)) continue;
+    const scopesByEvent = parseScopesByEvent(row.course_check_scopes_by_event_json);
+    const principalKind =
+      row.principal_kind === "agent" ? ("agent" as const) : ("human" as const);
+    listed.push({
+      id: row.id,
+      name: row.name,
+      keyPrefix: row.key_prefix,
+      principalKind,
+      agentMode:
+        principalKind === "agent"
+          ? isAgentOperatingMode(row.agent_mode)
+            ? row.agent_mode
+            : DEFAULT_AGENT_MODE
+          : null,
+      courseCheckScopes: scopesByEvent[input.eventId] ?? [],
+      createdAt: row.created_at,
+      lastUsedAt: row.last_used_at,
+      revokedAt: row.revoked_at,
+    });
+  }
+  return listed;
+}
+
 export async function updateApiKeyGrant(input: {
   db: D1Like;
   keyId: string;

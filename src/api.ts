@@ -1337,6 +1337,126 @@ export async function updateSubmitterProposal(
   return body.proposal;
 }
 
+export type AgentOperatingMode =
+  | "propose_only"
+  | "delegated_execution"
+  | "autonomous_policy";
+
+export type CourseCheckScopeGrant =
+  | "all"
+  | "decisions"
+  | "drafts"
+  | "sends"
+  | "calendars"
+  | "publication"
+  | "integrations"
+  | "retries"
+  | "reconciliation"
+  | "compensation";
+
+export interface EventApiKeySummary {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  principalKind: "human" | "agent";
+  agentMode: AgentOperatingMode | null;
+  courseCheckScopes: string[];
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface CreatedEventApiKey extends EventApiKeySummary {
+  token: string;
+  courseCheckScopesByEvent?: Record<string, string[]>;
+}
+
+export async function listEventApiKeys(
+  eventId: string,
+): Promise<{ apiKeys: EventApiKeySummary[] }> {
+  const response = await fetch(`/api/v1/events/${eventId}/api-keys`);
+  const body = await readJson<{ apiKeys: EventApiKeySummary[] } | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("apiKeys" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to load API keys",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function createEventApiKey(
+  eventId: string,
+  input: {
+    name: string;
+    principalKind?: "human" | "agent";
+    agentMode?: AgentOperatingMode;
+    courseCheckScopes?: CourseCheckScopeGrant[];
+  },
+): Promise<{ apiKey: CreatedEventApiKey }> {
+  const response = await fetch(`/api/v1/events/${eventId}/api-keys`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<{ apiKey: CreatedEventApiKey } | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("apiKey" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to create API key",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function updateEventApiKey(
+  eventId: string,
+  keyId: string,
+  input: {
+    agentMode?: AgentOperatingMode;
+    courseCheckScopes?: CourseCheckScopeGrant[];
+    revoke?: boolean;
+  },
+): Promise<{
+  apiKey: {
+    id: string;
+    revoked: boolean;
+    agentMode: AgentOperatingMode | null;
+    courseCheckScopes: string[];
+  };
+}> {
+  const response = await fetch(`/api/v1/events/${eventId}/api-keys/${keyId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<
+    | {
+        apiKey: {
+          id: string;
+          revoked: boolean;
+          agentMode: AgentOperatingMode | null;
+          courseCheckScopes: string[];
+        };
+      }
+    | { error: string }
+  >(response);
+  if (!response.ok || !("apiKey" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to update API key",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
 export async function fetchAirtableSync(
   eventId: string,
 ): Promise<{ sync: AirtableSyncState }> {

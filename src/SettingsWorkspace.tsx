@@ -3,16 +3,44 @@ import { FormEvent, useEffect, useState } from "react";
 
 import type { AirtableSyncHealth, AirtableSyncState } from "../shared/airtable";
 import {
+  COURSE_CHECK_SCOPES,
+  type AgentOperatingMode,
+  type CourseCheckScope,
+} from "../shared/agent-api";
+import {
   ApiError,
   connectAirtableSync,
+  createEventApiKey,
   disconnectAirtableSync,
   fetchAirtableSync,
+  listEventApiKeys,
   pullAirtableSync,
+  updateEventApiKey,
+  type CreatedEventApiKey,
+  type EventApiKeySummary,
 } from "./api";
 
 /** Must match worker/airtable/demo-sandbox.ts */
 const DEMO_BASE_ID = "appChartSteadDemo";
 const DEMO_TOKEN = "pat_demo_sandbox";
+
+const MODE_LABELS: Record<AgentOperatingMode, string> = {
+  propose_only: "Propose only",
+  delegated_execution: "Delegated execution",
+  autonomous_policy: "Autonomous policy",
+};
+
+const SCOPE_LABELS: Record<CourseCheckScope, string> = {
+  decisions: "Decisions",
+  drafts: "Drafts",
+  sends: "Sends",
+  calendars: "Calendars",
+  publication: "Publication",
+  integrations: "Integrations",
+  retries: "Retries",
+  reconciliation: "Reconciliation",
+  compensation: "Compensation",
+};
 
 function healthLabel(health: AirtableSyncHealth): string {
   switch (health) {
@@ -52,6 +80,283 @@ function formatTimestamp(value: string | null): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
+}
+
+function AgentApiKeysCard({ eventId }: { eventId: string }) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState("Program ops agent");
+  const [mode, setMode] = useState<AgentOperatingMode>("propose_only");
+  const [grantAll, setGrantAll] = useState(false);
+  const [scopes, setScopes] = useState<CourseCheckScope[]>(["decisions", "drafts"]);
+  const [message, setMessage] = useState<string | null>(null);
+  const [tone, setTone] = useState<"success" | "error">("success");
+  const [revealed, setRevealed] = useState<CreatedEventApiKey | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const keysQuery = useQuery({
+    queryKey: ["event-api-keys", eventId],
+    queryFn: () => listEventApiKeys(eventId),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: () =>
+      createEventApiKey(eventId, {
+        name: name.trim() || "Agent",
+        principalKind: "agent",
+        agentMode: mode,
+        courseCheckScopes: grantAll ? ["all"] : scopes,
+      }),
+    onSuccess: async (result) => {
+      setRevealed(result.apiKey);
+      setCopied(false);
+      setTone("success");
+      setMessage(
+        "Agent key created. Copy the token now — ChartStead only shows it once.",
+      );
+      await queryClient.invalidateQueries({ queryKey: ["event-api-keys", eventId] });
+    },
+    onError: (error) => {
+      setTone("error");
+      setMessage(error instanceof ApiError ? error.message : "Unable to create agent key.");
+    },
+  });
+
+  const revokeMutation = useMutation({
+    mutationFn: (keyId: string) => updateEventApiKey(eventId, keyId, { revoke: true }),
+    onSuccess: async () => {
+      setTone("success");
+      setMessage("Key revoked. It cannot call the API on the next request.");
+      await queryClient.invalidateQueries({ queryKey: ["event-api-keys", eventId] });
+    },
+    onError: (error) => {
+      setTone("error");
+      setMessage(error instanceof ApiError ? error.message : "Unable to revoke key.");
+    },
+  });
+
+  function toggleScope(scope: CourseCheckScope) {
+    setGrantAll(false);
+    setScopes((current) =>
+      current.includes(scope)
+        ? current.filter((entry) => entry !== scope)
+        : [...current, scope],
+    );
+  }
+
+  function onCreate(event: FormEvent) {
+    event.preventDefault();
+    setMessage(null);
+    if (!grantAll && scopes.length === 0) {
+      setTone("error");
+      setMessage("Choose at least one Course Check scope, or grant all stages.");
+      return;
+    }
+    createMutation.mutate();
+  }
+
+  async function copyToken() {
+    if (!revealed?.token) return;
+    try {
+      await navigator.clipboard.writeText(revealed.token);
+      setCopied(true);
+    } catch {
+      setTone("error");
+      setMessage("Could not copy automatically — select the token and copy manually.");
+    }
+  }
+
+  const keys: EventApiKeySummary[] = (keysQuery.data?.apiKeys ?? []).filter(
+    (key) => key.principalKind === "agent" && !key.revokedAt,
+  );
+
+  return (
+    <section className="settings-card" aria-labelledby="agent-api-heading">
+      <div className="settings-card-header">
+        <div>
+          <h3 id="agent-api-heading">Agent API keys</h3>
+          <p className="muted">
+            Give a scoped AI agent the same Course Check path as organizers. New keys are
+            propose-only with no stages until you grant them. The secret token is shown once.
+          </p>
+        </div>
+      </div>
+
+      <form className="settings-form settings-form-wide" onSubmit={onCreate}>
+        <p className="settings-form-legend">Create agent key</p>
+
+        <label className="settings-label" htmlFor="agent-key-name">
+          Name
+        </label>
+        <input
+          id="agent-key-name"
+          className="settings-input"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Program ops agent"
+          autoComplete="off"
+        />
+
+        <label className="settings-label" htmlFor="agent-key-mode">
+          Operating mode
+        </label>
+        <select
+          id="agent-key-mode"
+          className="settings-input"
+          value={mode}
+          onChange={(e) => setMode(e.target.value as AgentOperatingMode)}
+        >
+          <option value="propose_only">Propose only — create and revise plans</option>
+          <option value="delegated_execution">
+            Delegated execution — may apply granted stages
+          </option>
+          <option value="autonomous_policy">
+            Autonomous policy — explicit unsupervised execution
+          </option>
+        </select>
+
+        <fieldset className="settings-scope-fieldset">
+          <legend className="settings-label">Course Check stages</legend>
+          <label className="settings-check">
+            <input
+              type="checkbox"
+              checked={grantAll}
+              onChange={(e) => {
+                setGrantAll(e.target.checked);
+                if (e.target.checked) setScopes([...COURSE_CHECK_SCOPES]);
+              }}
+            />
+            <span>All stages (stored as expanded individual scopes)</span>
+          </label>
+          <div className="settings-scope-grid">
+            {COURSE_CHECK_SCOPES.map((scope) => (
+              <label key={scope} className="settings-check">
+                <input
+                  type="checkbox"
+                  checked={grantAll || scopes.includes(scope)}
+                  disabled={grantAll}
+                  onChange={() => toggleScope(scope)}
+                />
+                <span>{SCOPE_LABELS[scope]}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+
+        <div className="settings-actions">
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={createMutation.isPending}
+          >
+            {createMutation.isPending ? "Creating…" : "Create agent key"}
+          </button>
+        </div>
+      </form>
+
+      {revealed ? (
+        <div className="settings-token-reveal" role="status">
+          <strong>Copy this token now</strong>
+          <p className="muted">
+            {revealed.name} · {MODE_LABELS[revealed.agentMode ?? "propose_only"]} ·{" "}
+            {revealed.courseCheckScopes.length === 0
+              ? "no stages"
+              : revealed.courseCheckScopes.join(", ")}
+          </p>
+          <code className="settings-token-value">{revealed.token}</code>
+          <div className="settings-actions">
+            <button type="button" className="btn btn-secondary" onClick={() => void copyToken()}>
+              {copied ? "Copied" : "Copy token"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setRevealed(null)}
+            >
+              Hide
+            </button>
+          </div>
+          <p className="muted">
+            Base URL for agents:{" "}
+            <code>{typeof window !== "undefined" ? window.location.origin : ""}</code>
+            {" · "}
+            Header: <code>Authorization: Bearer …</code>
+          </p>
+        </div>
+      ) : null}
+
+      {keysQuery.isPending ? (
+        <p className="empty-state padded">Loading agent keys…</p>
+      ) : keysQuery.error instanceof ApiError ? (
+        <p className="form-message error" role="alert">
+          {keysQuery.error.message}
+        </p>
+      ) : keys.length === 0 ? (
+        <p className="muted">No active agent keys for this event yet.</p>
+      ) : (
+        <div className="settings-key-table-wrap">
+          <table className="settings-key-table">
+            <thead>
+              <tr>
+                <th scope="col">Name</th>
+                <th scope="col">Mode</th>
+                <th scope="col">Scopes</th>
+                <th scope="col">Prefix</th>
+                <th scope="col">Last used</th>
+                <th scope="col">
+                  <span className="visually-hidden">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {keys.map((key) => (
+                <tr key={key.id}>
+                  <td>{key.name}</td>
+                  <td>{key.agentMode ? MODE_LABELS[key.agentMode] : "—"}</td>
+                  <td>
+                    {key.courseCheckScopes.length === 0
+                      ? "None"
+                      : key.courseCheckScopes.length === COURSE_CHECK_SCOPES.length
+                        ? "All stages"
+                        : key.courseCheckScopes
+                            .map((scope) => SCOPE_LABELS[scope as CourseCheckScope] ?? scope)
+                            .join(", ")}
+                  </td>
+                  <td>
+                    <code>{key.keyPrefix}…</code>
+                  </td>
+                  <td>{formatTimestamp(key.lastUsedAt)}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      disabled={revokeMutation.isPending}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Revoke “${key.name}”? The agent loses access on the next call.`,
+                          )
+                        ) {
+                          revokeMutation.mutate(key.id);
+                        }
+                      }}
+                    >
+                      Revoke
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {message ? (
+        <p className={`form-message ${tone}`} role="status">
+          {message}
+        </p>
+      ) : null}
+    </section>
+  );
 }
 
 export function SettingsWorkspace({ eventId }: { eventId: string }) {
@@ -166,6 +471,8 @@ export function SettingsWorkspace({ eventId }: { eventId: string }) {
           <h2>Settings</h2>
         </div>
         <div className="settings-stack">
+          <AgentApiKeysCard eventId={eventId} />
+
           <section className="settings-card" aria-labelledby="airtable-sync-heading">
             <div className="settings-card-header">
               <div>

@@ -17,6 +17,7 @@ import {
 import {
   createApiKey,
   extractBearerToken,
+  listApiKeysForEvent,
   parseApiKeyGrantBody,
   resolvePrincipalFromApiKey,
   updateApiKeyGrant,
@@ -493,6 +494,24 @@ export function createV1App(options: V1AppOptions = {}) {
       baseId: connection?.baseId ?? null,
     });
     return c.json({ pull: result, sync: await store.getAirtableSyncState() });
+  });
+
+  app.get("/events/:eventId/api-keys", async (c) => {
+    const principal = await resolveV1Principal(c.req.raw, c.env, options);
+    const eventId = c.req.param("eventId");
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    if (!c.env.AUTH_DB) {
+      return c.json({ error: "API keys require AUTH_DB." }, 503);
+    }
+    const includeRevoked = c.req.query("includeRevoked") === "1";
+    const apiKeys = await listApiKeysForEvent({
+      db: c.env.AUTH_DB,
+      eventId,
+      includeRevoked,
+    });
+    return c.json({ apiKeys });
   });
 
   app.post("/events/:eventId/api-keys", async (c) => {
