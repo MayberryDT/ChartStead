@@ -185,8 +185,29 @@ interface CourseCheckPlanRow {
   updated_at: string;
   created_by_id: string;
   created_by_name: string;
+  created_by_json: string | null;
   approval_json: string | null;
   receipt_id: string | null;
+}
+
+function serializeCourseCheckActor(actor: CourseCheckActor): string {
+  return JSON.stringify(actor);
+}
+
+function parseCourseCheckActor(
+  id: string,
+  displayName: string,
+  json: string | null | undefined,
+): CourseCheckActor {
+  if (json) {
+    try {
+      const parsed = JSON.parse(json) as CourseCheckActor;
+      if (parsed && typeof parsed.id === "string") return parsed;
+    } catch {
+      // fall through
+    }
+  }
+  return { id, displayName };
 }
 
 interface SpeakerRow {
@@ -770,10 +791,11 @@ function mapCourseCheckPlan(row: CourseCheckPlanRow, eventId: string): CourseChe
     digest: row.digest,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    createdBy: {
-      id: row.created_by_id,
-      displayName: row.created_by_name,
-    },
+    createdBy: parseCourseCheckActor(
+      row.created_by_id,
+      row.created_by_name,
+      row.created_by_json,
+    ),
     body: normalizeCourseCheckBody(JSON.parse(row.body_json) as CourseCheckPlanBody),
     approval,
     receipt,
@@ -1131,6 +1153,7 @@ export class EventStore extends DurableObject<AppBindings> {
           updated_at TEXT NOT NULL,
           created_by_id TEXT NOT NULL,
           created_by_name TEXT NOT NULL,
+          created_by_json TEXT,
           approval_json TEXT,
           receipt_id TEXT
         )
@@ -1205,6 +1228,10 @@ export class EventStore extends DurableObject<AppBindings> {
           status TEXT NOT NULL
         )
       `);
+      this.ensureColumn("course_check_plans", "created_by_json", "TEXT");
+      this.ensureColumn("course_check_receipts", "actor_json", "TEXT");
+      this.ensureColumn("course_check_plan_versions", "created_by_json", "TEXT");
+      this.ensureColumn("course_check_mutations", "actor_json", "TEXT");
       this.ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS communication_drafts (
           id TEXT PRIMARY KEY,
@@ -5203,7 +5230,8 @@ export class EventStore extends DurableObject<AppBindings> {
       this.ctx.storage.sql
         .exec<CourseCheckPlanRow>(
           `SELECT id, action_type, state, version, digest, body_json, created_at,
-                  updated_at, created_by_id, created_by_name, approval_json, receipt_id
+                  updated_at, created_by_id, created_by_name, created_by_json,
+                  approval_json, receipt_id
            FROM course_check_plans
            WHERE id = ?`,
           planId,
@@ -5578,7 +5606,8 @@ export class EventStore extends DurableObject<AppBindings> {
     return this.ctx.storage.sql
       .exec<CourseCheckPlanRow>(
         `SELECT id, action_type, state, version, digest, body_json, created_at,
-                updated_at, created_by_id, created_by_name, approval_json, receipt_id
+                updated_at, created_by_id, created_by_name, created_by_json,
+                approval_json, receipt_id
          FROM course_check_plans
          ORDER BY created_at DESC, id DESC`,
       )
@@ -5885,8 +5914,8 @@ export class EventStore extends DurableObject<AppBindings> {
       this.ctx.storage.sql.exec(
         `INSERT INTO course_check_plans
           (id, action_type, state, version, digest, body_json, created_at, updated_at,
-           created_by_id, created_by_name, approval_json, receipt_id)
-         VALUES (?, 'decision', ?, 1, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+           created_by_id, created_by_name, created_by_json, approval_json, receipt_id)
+         VALUES (?, 'decision', ?, 1, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
         planId,
         state,
         digest,
@@ -5895,6 +5924,7 @@ export class EventStore extends DurableObject<AppBindings> {
         now,
         input.actor.id,
         input.actor.displayName,
+        serializeCourseCheckActor(input.actor),
       );
       this.recordPlanVersion({
         planId,
@@ -6164,8 +6194,8 @@ export class EventStore extends DurableObject<AppBindings> {
     this.ctx.storage.sql.exec(
       `INSERT INTO course_check_plans
         (id, action_type, state, version, digest, body_json, created_at, updated_at,
-         created_by_id, created_by_name, approval_json, receipt_id)
-       VALUES (?, 'guaranteed_speaker', ?, 1, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+         created_by_id, created_by_name, created_by_json, approval_json, receipt_id)
+       VALUES (?, 'guaranteed_speaker', ?, 1, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
       planId,
       state,
       digest,
@@ -6174,6 +6204,7 @@ export class EventStore extends DurableObject<AppBindings> {
       now,
       input.actor.id,
       input.actor.displayName,
+        serializeCourseCheckActor(input.actor),
     );
     const plan = this.getCourseCheckPlan(planId);
     if (!plan) throw new Error("Guaranteed-speaker Course Check was not persisted.");
@@ -6548,8 +6579,8 @@ export class EventStore extends DurableObject<AppBindings> {
     this.ctx.storage.sql.exec(
       `INSERT INTO course_check_plans
         (id, action_type, state, version, digest, body_json, created_at, updated_at,
-         created_by_id, created_by_name, approval_json, receipt_id)
-       VALUES (?, 'communication', ?, 1, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+         created_by_id, created_by_name, created_by_json, approval_json, receipt_id)
+       VALUES (?, 'communication', ?, 1, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
       planId,
       state,
       digest,
@@ -6558,6 +6589,7 @@ export class EventStore extends DurableObject<AppBindings> {
       now,
       input.actor.id,
       input.actor.displayName,
+        serializeCourseCheckActor(input.actor),
     );
     this.recordPlanVersion({
       planId,
@@ -8088,8 +8120,8 @@ export class EventStore extends DurableObject<AppBindings> {
       this.ctx.storage.sql.exec(
         `INSERT INTO course_check_plans
           (id, action_type, state, version, digest, body_json, created_at, updated_at,
-           created_by_id, created_by_name, approval_json, receipt_id)
-         VALUES (?, 'communication', ?, 1, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+           created_by_id, created_by_name, created_by_json, approval_json, receipt_id)
+         VALUES (?, 'communication', ?, 1, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
         planId,
         state,
         digest,
@@ -8098,6 +8130,7 @@ export class EventStore extends DurableObject<AppBindings> {
         now,
         input.actor.id,
         input.actor.displayName,
+        serializeCourseCheckActor(input.actor),
       );
       this.recordPlanVersion({
         planId,
@@ -8279,8 +8312,8 @@ export class EventStore extends DurableObject<AppBindings> {
     this.ctx.storage.sql.exec(
       `INSERT INTO course_check_plans
         (id, action_type, state, version, digest, body_json, created_at, updated_at,
-         created_by_id, created_by_name, approval_json, receipt_id)
-       VALUES (?, 'publication', ?, 1, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+         created_by_id, created_by_name, created_by_json, approval_json, receipt_id)
+       VALUES (?, 'publication', ?, 1, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
       planId,
       state,
       digest,
@@ -8289,6 +8322,7 @@ export class EventStore extends DurableObject<AppBindings> {
       now,
       input.actor.id,
       input.actor.displayName,
+        serializeCourseCheckActor(input.actor),
     );
     this.recordPlanVersion({
       planId,
@@ -8713,8 +8747,8 @@ export class EventStore extends DurableObject<AppBindings> {
       this.ctx.storage.sql.exec(
         `INSERT INTO course_check_plans
           (id, action_type, state, version, digest, body_json, created_at, updated_at,
-           created_by_id, created_by_name, approval_json, receipt_id)
-         VALUES (?, 'communication', 'Ready', 1, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+           created_by_id, created_by_name, created_by_json, approval_json, receipt_id)
+         VALUES (?, 'communication', 'Ready', 1, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
         linkedCommunication.planId,
         linkedCommunication.digest,
         JSON.stringify(linkedCommunication.body),
@@ -8722,6 +8756,7 @@ export class EventStore extends DurableObject<AppBindings> {
         now,
         actor.id,
         actor.displayName,
+        serializeCourseCheckActor(actor),
       );
       this.recordPlanVersion({
         planId: linkedCommunication.planId,

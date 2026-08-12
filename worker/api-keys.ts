@@ -1,3 +1,12 @@
+import {
+  DEFAULT_AGENT_MODE,
+  expandCourseCheckScopes,
+  isAgentOperatingMode,
+  isCourseCheckScopeGrant,
+  type AgentOperatingMode,
+  type CourseCheckScope,
+  type CourseCheckScopeGrant,
+} from "../shared/agent-api";
 import type { OrganizerPrincipal } from "../shared/events";
 
 /** Minimal D1 surface used by API key storage (avoids workers-types import). */
@@ -6,6 +15,7 @@ type D1Like = {
     bind(...values: unknown[]): {
       run(): Promise<unknown>;
       first<T>(): Promise<T | null>;
+      all<T>(): Promise<{ results: T[] }>;
     };
     run(): Promise<unknown>;
   };
@@ -24,6 +34,10 @@ export interface ApiKeyRow {
   event_ids_json: string;
   roles_by_event_json: string;
   track_ids_by_event_json: string;
+  principal_kind: string | null;
+  agent_id: string | null;
+  agent_mode: string | null;
+  course_check_scopes_by_event_json: string | null;
   created_at: string;
   revoked_at: string | null;
   last_used_at: string | null;
@@ -43,6 +57,10 @@ export async function ensureApiKeysTable(db: D1Like): Promise<void> {
         event_ids_json TEXT NOT NULL,
         roles_by_event_json TEXT NOT NULL DEFAULT '{}',
         track_ids_by_event_json TEXT NOT NULL DEFAULT '{}',
+        principal_kind TEXT,
+        agent_id TEXT,
+        agent_mode TEXT,
+        course_check_scopes_by_event_json TEXT,
         created_at TEXT NOT NULL,
         revoked_at TEXT,
         last_used_at TEXT
@@ -54,6 +72,19 @@ export async function ensureApiKeysTable(db: D1Like): Promise<void> {
       `CREATE INDEX IF NOT EXISTS api_keys_hash_idx ON api_keys (key_hash)`,
     )
     .run();
+  // Additive columns for pre-existing tables (IF NOT EXISTS not available — ignore errors).
+  for (const ddl of [
+    `ALTER TABLE api_keys ADD COLUMN principal_kind TEXT`,
+    `ALTER TABLE api_keys ADD COLUMN agent_id TEXT`,
+    `ALTER TABLE api_keys ADD COLUMN agent_mode TEXT`,
+    `ALTER TABLE api_keys ADD COLUMN course_check_scopes_by_event_json TEXT`,
+  ]) {
+    try {
+      await db.prepare(ddl).run();
+    } catch {
+      // column already exists
+    }
+  }
 }
 
 export async function createApiKey(input: {
@@ -62,7 +93,21 @@ export async function createApiKey(input: {
   principal: OrganizerPrincipal;
   rawKey?: string;
   now?: Date;
-}): Promise<{ id: string; name: string; token: string; createdAt: string }> {
+  principalKind?: "human" | "agent";
+  agentMode?: AgentOperatingMode;
+  /** Grants may include `all`; stored expanded per event. */
+  courseCheckScopes?: CourseCheckScopeGrant[];
+  eventId?: string;
+}): Promise<{
+  id: string;
+  name: string;
+  token: string;
+  createdAt: string;
+  principalKind: "human" | "agent";
+  agentMode: AgentOperatingMode | null;
+  courseCheckScopes: CourseCheckScope[];
+  courseCheckScopesByEvent: Record<string, CourseCheckScope[]>;
+}> {
   await ensureApiKeysTable(input.db);
   const now = (input.now ?? new Date()).toISOString();
   const id = crypto.randomUUID();
@@ -70,30 +115,143 @@ export async function createApiKey(input: {
   const keyHash = await hashApiKey(token);
   const keyPrefix = token.slice(0, 12);
 
+  const principalKind = input.principalKind ?? input.principal.principalKind ?? "human";
+  const agentMode: AgentOperatingMode | null =
+    principalKind === "agent"
+      ? (input.agentMode ?? input.principal.agentMode ?? DEFAULT_AGENT_MODE)
+      : null;
+
+  const eventId =
+    input.eventId ??
+    input.principal.eventIds[0] ??
+    Object.keys(input.principal.rolesByEvent ?? {})[0];
+
+  let scopesByEvent: Record<string, CourseCheckScope[]> = {
+    ...(input.principal.courseCheckScopesByEvent ?? {}),
+  };
+  if (principalKind === "agent") {
+    const expanded = expandCourseCheckScopes(input.courseCheckScopes ?? []);
+    if (eventId) {
+      scopesByEvent = { ...scopesByEvent, [eventId]: expanded };
+    }
+  }
+
+  const agentId = principalKind === "agent" ? id : null;
+  const userId =
+    principalKind === "agent" ? `agent:${id}` : input.principal.id;
+  const displayName =
+    principalKind === "agent"
+      ? input.name.trim() || input.principal.displayName || "Agent"
+      : input.principal.displayName;
+
   await input.db
     .prepare(
       `INSERT INTO api_keys (
         id, name, key_prefix, key_hash, user_id, display_name, role,
         event_ids_json, roles_by_event_json, track_ids_by_event_json,
+        principal_kind, agent_id, agent_mode, course_check_scopes_by_event_json,
         created_at, revoked_at, last_used_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
     )
     .bind(
       id,
       input.name.trim() || "API key",
       keyPrefix,
       keyHash,
-      input.principal.id,
-      input.principal.displayName,
+      userId,
+      displayName,
       input.principal.role,
       JSON.stringify(input.principal.eventIds),
       JSON.stringify(input.principal.rolesByEvent ?? {}),
       JSON.stringify(input.principal.trackIdsByEvent ?? {}),
+      principalKind,
+      agentId,
+      agentMode,
+      JSON.stringify(scopesByEvent),
       now,
     )
     .run();
 
-  return { id, name: input.name.trim() || "API key", token, createdAt: now };
+  const courseCheckScopes = eventId ? (scopesByEvent[eventId] ?? []) : [];
+
+  return {
+    id,
+    name: input.name.trim() || "API key",
+    token,
+    createdAt: now,
+    principalKind,
+    agentMode,
+    courseCheckScopes,
+    courseCheckScopesByEvent: scopesByEvent,
+  };
+}
+
+export async function updateApiKeyGrant(input: {
+  db: D1Like;
+  keyId: string;
+  eventId: string;
+  agentMode?: AgentOperatingMode;
+  courseCheckScopes?: CourseCheckScopeGrant[];
+  revoke?: boolean;
+  now?: Date;
+}): Promise<{
+  id: string;
+  revoked: boolean;
+  agentMode: AgentOperatingMode | null;
+  courseCheckScopes: CourseCheckScope[];
+} | null> {
+  await ensureApiKeysTable(input.db);
+  const row = await input.db
+    .prepare(
+      `SELECT id, agent_mode, course_check_scopes_by_event_json, revoked_at
+       FROM api_keys WHERE id = ? LIMIT 1`,
+    )
+    .bind(input.keyId)
+    .first<{
+      id: string;
+      agent_mode: string | null;
+      course_check_scopes_by_event_json: string | null;
+      revoked_at: string | null;
+    }>();
+  if (!row) return null;
+
+  const now = (input.now ?? new Date()).toISOString();
+  if (input.revoke) {
+    await input.db
+      .prepare(`UPDATE api_keys SET revoked_at = ? WHERE id = ?`)
+      .bind(now, input.keyId)
+      .run();
+    return {
+      id: row.id,
+      revoked: true,
+      agentMode: isAgentOperatingMode(row.agent_mode) ? row.agent_mode : null,
+      courseCheckScopes: [],
+    };
+  }
+
+  const scopesByEvent = parseScopesByEvent(row.course_check_scopes_by_event_json);
+  if (input.courseCheckScopes) {
+    scopesByEvent[input.eventId] = expandCourseCheckScopes(input.courseCheckScopes);
+  }
+  const agentMode =
+    input.agentMode ??
+    (isAgentOperatingMode(row.agent_mode) ? row.agent_mode : DEFAULT_AGENT_MODE);
+
+  await input.db
+    .prepare(
+      `UPDATE api_keys
+       SET agent_mode = ?, course_check_scopes_by_event_json = ?, revoked_at = NULL
+       WHERE id = ?`,
+    )
+    .bind(agentMode, JSON.stringify(scopesByEvent), input.keyId)
+    .run();
+
+  return {
+    id: row.id,
+    revoked: false,
+    agentMode,
+    courseCheckScopes: scopesByEvent[input.eventId] ?? [],
+  };
 }
 
 export async function resolvePrincipalFromApiKey(
@@ -108,6 +266,7 @@ export async function resolvePrincipalFromApiKey(
     .prepare(
       `SELECT id, name, key_prefix, key_hash, user_id, display_name, role,
               event_ids_json, roles_by_event_json, track_ids_by_event_json,
+              principal_kind, agent_id, agent_mode, course_check_scopes_by_event_json,
               created_at, revoked_at, last_used_at
        FROM api_keys
        WHERE key_hash = ? AND revoked_at IS NULL
@@ -128,15 +287,29 @@ export async function resolvePrincipalFromApiKey(
     | Record<string, "admin" | "reviewer">
     | undefined;
   const trackIdsByEvent = parseTrackMap(row.track_ids_by_event_json);
+  const principalKind =
+    row.principal_kind === "agent" ? ("agent" as const) : ("human" as const);
+  const scopesByEvent = parseScopesByEvent(row.course_check_scopes_by_event_json);
 
-  return {
+  const principal: OrganizerPrincipal = {
     id: row.user_id,
     displayName: row.display_name,
     role: row.role,
     eventIds,
     rolesByEvent,
     trackIdsByEvent,
+    principalKind,
   };
+
+  if (principalKind === "agent") {
+    principal.agentId = row.agent_id ?? row.id;
+    principal.agentMode = isAgentOperatingMode(row.agent_mode)
+      ? row.agent_mode
+      : DEFAULT_AGENT_MODE;
+    principal.courseCheckScopesByEvent = scopesByEvent;
+  }
+
+  return principal;
 }
 
 export function extractBearerToken(request: Request): string | null {
@@ -154,6 +327,32 @@ export async function hashApiKey(rawKey: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) =>
     byte.toString(16).padStart(2, "0"),
   ).join("");
+}
+
+export function parseApiKeyGrantBody(body: unknown): {
+  name: string;
+  principalKind: "human" | "agent";
+  agentMode: AgentOperatingMode;
+  courseCheckScopes: CourseCheckScopeGrant[];
+} {
+  const raw = (body && typeof body === "object" ? body : {}) as Record<
+    string,
+    unknown
+  >;
+  const name = typeof raw.name === "string" ? raw.name : "API key";
+  const principalKind = raw.principalKind === "agent" ? "agent" : "human";
+  const agentMode = isAgentOperatingMode(raw.agentMode)
+    ? raw.agentMode
+    : DEFAULT_AGENT_MODE;
+  const courseCheckScopes: CourseCheckScopeGrant[] = [];
+  if (Array.isArray(raw.courseCheckScopes)) {
+    for (const entry of raw.courseCheckScopes) {
+      if (isCourseCheckScopeGrant(entry)) courseCheckScopes.push(entry);
+    }
+  } else if (raw.courseCheckScopes === "all") {
+    courseCheckScopes.push("all");
+  }
+  return { name, principalKind, agentMode, courseCheckScopes };
 }
 
 function randomTokenPart(): string {
@@ -200,5 +399,26 @@ function parseTrackMap(raw: string): Record<string, string[]> | undefined {
     return out;
   } catch {
     return undefined;
+  }
+}
+
+function parseScopesByEvent(
+  raw: string | null | undefined,
+): Record<string, CourseCheckScope[]> {
+  if (!raw) return {};
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const out: Record<string, CourseCheckScope[]> = {};
+    for (const [eventId, entry] of Object.entries(value as Record<string, unknown>)) {
+      if (Array.isArray(entry)) {
+        out[eventId] = expandCourseCheckScopes(
+          entry.filter(isCourseCheckScopeGrant),
+        );
+      }
+    }
+    return out;
+  } catch {
+    return {};
   }
 }

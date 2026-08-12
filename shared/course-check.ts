@@ -580,6 +580,12 @@ export type CourseCheckPlanBody =
 export interface CourseCheckActor {
   id: string;
   displayName: string;
+  /** Distinct agent vs human principal — agents never silently impersonate users. */
+  kind?: "human" | "agent";
+  agentId?: string;
+  agentMode?: import("./agent-api").AgentOperatingMode;
+  /** Optional human request provenance when an agent acts. */
+  initiatingHuman?: { id: string; displayName: string } | null;
 }
 
 export interface CourseCheckApproval {
