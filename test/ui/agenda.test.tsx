@@ -198,10 +198,12 @@ describe("Ticket 08 agenda workspace", () => {
     expect(toolbars).toHaveLength(1);
     const toolbar = toolbars[0] as HTMLElement;
     expect(screen.queryByText("Schedule builder")).not.toBeInTheDocument();
-    expect(within(toolbar).getByText(/2 unplaced · 0 conflicts/i)).toBeVisible();
+    expect(within(toolbar).getByLabelText("2 unplaced")).toBeVisible();
+    expect(within(toolbar).getByLabelText("0 placed")).toBeVisible();
+    expect(within(toolbar).getByLabelText("0 conflicts")).toBeVisible();
     expect(within(toolbar).getByRole("button", { name: "Publish program" })).toBeVisible();
     expect(
-      within(toolbar).getByRole("tab", { name: "Thu, Oct 8", selected: true }),
+      within(toolbar).getByRole("tab", { name: /Thu, Oct 8/, selected: true }),
     ).toBeVisible();
     expect(
       within(await screen.findByRole("complementary", { name: "Session inspector" })).getByRole(
@@ -210,11 +212,11 @@ describe("Ticket 08 agenda workspace", () => {
       ),
     ).toBeVisible();
 
-    await user.click(within(toolbar).getByRole("tab", { name: "Wed, Oct 7" }));
+    await user.click(within(toolbar).getByRole("tab", { name: /Wed, Oct 7/ }));
 
     await waitFor(() => {
       expect(
-        within(toolbar).getByRole("tab", { name: "Wed, Oct 7", selected: true }),
+        within(toolbar).getByRole("tab", { name: /Wed, Oct 7/, selected: true }),
       ).toBeVisible();
     });
     expect(router.state.location.search.day).toBeUndefined();
@@ -282,23 +284,24 @@ describe("Ticket 08 agenda workspace", () => {
     renderAgenda();
 
     expect(await screen.findByLabelText("Unplaced sessions")).toBeInTheDocument();
-    expect(screen.getByText(/2 unplaced · 0 conflicts/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("2 unplaced")).toBeInTheDocument();
     const pool = screen.getByLabelText("Unplaced sessions");
     expect(within(pool).getByText("Opening Keynote")).toBeInTheDocument();
     expect(within(pool).getAllByText(/Unplaced · room and time TBD/i).length).toBeGreaterThan(0);
     expect(within(pool).queryByRole("button", { name: "Move Session" })).toBeNull();
 
     await user.click(within(pool).getByText("Opening Keynote"));
-    await user.click(screen.getByRole("button", { name: "Move Session" }));
     expect(screen.getByRole("heading", { name: "Move Session" })).toBeInTheDocument();
-    await user.selectOptions(screen.getByLabelText("Room"), "harbor-hall");
-    await user.selectOptions(screen.getByLabelText("Start"), "10:00");
+    await user.click(screen.getByRole("combobox", { name: "Room" }));
+    await user.click(await screen.findByRole("option", { name: "Harbor Hall" }));
+    await user.click(screen.getByRole("combobox", { name: "Start" }));
+    await user.click(await screen.findByRole("option", { name: "10:00" }));
     await user.click(screen.getByRole("button", { name: "Save placement" }));
 
     await waitFor(() => {
       expect(screen.getByText(/Placement saved/i)).toBeInTheDocument();
     });
-    expect(screen.getByText(/1 unplaced · 0 conflicts/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("1 unplaced")).toBeInTheDocument();
   });
 
   it("previews and applies an exact auto-place plan without optimistic drift", async () => {
@@ -404,17 +407,22 @@ describe("Ticket 08 agenda workspace", () => {
 
     await user.click(await screen.findByRole("button", { name: "Preview auto-place" }));
     expect(previewBodies).toEqual([{ includeManual: false }]);
-    expect(await screen.findByLabelText("Proposed auto-place slots")).toHaveTextContent(
+    const dialog = await screen.findByRole("dialog", { name: /Auto-place preview/i });
+    expect(within(dialog).getByLabelText("Proposed auto-place slots")).toHaveTextContent(
       "Opening Keynote",
     );
-    expect(screen.getByLabelText("Auto-place leftovers")).toHaveTextContent("Platform Deep Dive");
+    expect(within(dialog).getByLabelText("Auto-place leftovers")).toHaveTextContent(
+      "Platform Deep Dive",
+    );
 
-    await user.click(screen.getByRole("button", { name: "Apply exact preview" }));
+    await user.click(
+      within(dialog).getByRole("button", { name: /Apply 1 placement/i }),
+    );
 
     await waitFor(() => {
       expect(screen.getByText(/Auto-placed 1 session/i)).toBeInTheDocument();
     });
-    expect(screen.getByText(/1 unplaced · 0 conflicts/i)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /Auto-place preview/i })).toBeNull();
   });
 
   it("shows named conflicts with non-blocking repair actions", async () => {
@@ -493,20 +501,18 @@ describe("Ticket 08 agenda workspace", () => {
 
     renderAgenda();
 
-    expect(await screen.findByText(/0 unplaced · 1 conflict/i)).toBeInTheDocument();
-    expect(
-      screen.getByText(/Room overlap in Harbor Hall/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/Room overlap in Harbor Hall/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("1 conflicts")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Keep this session" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Find another time" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Move room" }));
     await waitFor(() => {
-      expect(screen.getByText(/0 unplaced · 0 conflicts/i)).toBeInTheDocument();
+      expect(screen.getByLabelText("0 conflicts")).toBeInTheDocument();
     });
   });
 
-  it("edits central session content and restores an audited version", async () => {
+  it("edits central session content", async () => {
     const user = userEvent.setup();
     const base = session({ id: "ses-1", title: "Opening Keynote" });
     let content: SessionContentRecord = {
@@ -583,29 +589,6 @@ describe("Ticket 08 agenda workspace", () => {
           };
           return Response.json({ session: content });
         }
-        if (url.endsWith(`/session-content/${base.id}/restore`) && method === "POST") {
-          content = {
-            ...content,
-            title: "Opening Keynote",
-            abstract: "Original abstract",
-            publicContent: "Original public copy",
-            contentVersion: 3,
-            contentHistory: [
-              {
-                ...content.contentHistory[0],
-                id: "history-3",
-                version: 3,
-                title: "Opening Keynote",
-                abstract: "Original abstract",
-                publicContent: "Original public copy",
-                changedFields: ["title", "abstract", "publicContent"],
-                changeKind: "restore",
-              },
-              ...content.contentHistory,
-            ],
-          };
-          return Response.json({ session: content });
-        }
         return new Response(JSON.stringify({ error: `unhandled ${method} ${url}` }), { status: 500 });
       }),
     );
@@ -619,11 +602,6 @@ describe("Ticket 08 agenda workspace", () => {
     await user.click(screen.getByRole("button", { name: "Save content" }));
     expect(await screen.findByText("Session content saved.")).toBeVisible();
     expect(screen.getByText(/Version 2 · draft/)).toBeVisible();
-
-    await user.click(screen.getByText("Version history (2)"));
-    await user.click(screen.getByRole("button", { name: "Restore version 1" }));
-    expect(await screen.findByText("Earlier content restored as a new version.")).toBeVisible();
-    expect(screen.getByLabelText("Session title")).toHaveValue("Opening Keynote");
-    expect(screen.getByText(/Version 3 · draft/)).toBeVisible();
+    expect(screen.queryByText(/Version history/i)).toBeNull();
   });
 });

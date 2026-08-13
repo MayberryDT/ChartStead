@@ -18,16 +18,20 @@ import {
   fetchAgenda,
   fetchSessionContentWorkspace,
   previewAgendaAutoPlace,
-  restoreSessionContent,
   updateSessionContent,
   updateSessionPlacement,
 } from "./api";
+import { AppSelect } from "./AppSelect";
 import { createClientId } from "./id";
+
+type AutoPlaceScope = "all" | "all-manual" | "selected" | "selected-manual";
 
 const SLOT_MINUTES = 30;
 const DAY_START_HOUR = 9;
 const DAY_END_HOUR = 18;
 const DEFAULT_DURATION_MS = 45 * 60 * 1000;
+const EMPTY_SESSIONS: OrganizerSession[] = [];
+const EMPTY_CONFLICTS: ScheduleConflict[] = [];
 
 function eachDay(startsOn: string, endsOn: string): string[] {
   const days: string[] = [];
@@ -111,6 +115,39 @@ function actionLabel(action: ScheduleConflict["actions"][number]): string {
   }
 }
 
+function placementSummary(session: OrganizerSession): string {
+  const room = session.roomName ?? (session.roomId ? "Room set" : null);
+  const time =
+    session.startsAt || session.endsAt
+      ? `${formatClock(session.startsAt)}${
+          session.endsAt ? `–${formatClock(session.endsAt)}` : ""
+        }`
+      : null;
+  const day = sessionDay(session);
+
+  if (session.placementStatus === "unplaced") {
+    return "Unplaced · room and time TBD";
+  }
+  if (session.placementStatus === "partial") {
+    const parts = [
+      room ?? "Room TBD",
+      time ?? "Time TBD",
+      day && !time ? dayLabel(day) : null,
+    ].filter(Boolean);
+    return `Partial · ${parts.join(" · ")}`;
+  }
+  return `${room ?? "Room TBD"} · ${time ?? "Time TBD"}${
+    day ? ` · ${dayLabel(day)}` : ""
+  }`;
+}
+
+function sessionHasConflict(
+  sessionId: string,
+  conflicts: ScheduleConflict[],
+): boolean {
+  return conflicts.some((conflict) => conflict.sessionIds.includes(sessionId));
+}
+
 export type AgendaChrome = {
   tools: ReactNode;
   actions: ReactNode;
@@ -150,11 +187,18 @@ export function AgendaWorkspace({
   );
   const [moveOpen, setMoveOpen] = useState(false);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const [dismissedConflictIds, setDismissedConflictIds] = useState<string[]>([]);
   const [autoPreview, setAutoPreview] = useState<AgendaAutoPlacePreview | null>(null);
-  const [autoMode, setAutoMode] = useState<"all" | "selected">("all");
-  const [autoIncludeManual, setAutoIncludeManual] = useState(false);
+  const [autoScope, setAutoScope] = useState<AutoPlaceScope>("all");
+  const [moveDay, setMoveDay] = useState(event.startsOn);
+  const [moveSlot, setMoveSlot] = useState("10:00");
+  const [moveRoomId, setMoveRoomId] = useState("__tbd__");
+  const [moveDuration, setMoveDuration] = useState("45");
+
+  function showToast(message: string) {
+    setToast(message);
+  }
 
   function contentSaved(session: SessionContentRecord, message: string) {
     queryClient.setQueryData(
@@ -170,7 +214,7 @@ export function AgendaWorkspace({
           : current,
     );
     void queryClient.invalidateQueries({ queryKey: ["agenda", event.id] });
-    setStatusMessage(message);
+    showToast(message);
   }
 
   const contentMutation = useMutation({
@@ -184,20 +228,7 @@ export function AgendaWorkspace({
     }) => updateSessionContent(event.id, input.sessionId, input),
     onSuccess: ({ session }) => contentSaved(session, "Session content saved."),
     onError: (error) => {
-      setStatusMessage(error instanceof ApiError ? error.message : "Unable to save session content.");
-      void contentQuery.refetch();
-    },
-  });
-
-  const restoreMutation = useMutation({
-    mutationFn: (input: {
-      sessionId: string;
-      expectedVersion: number;
-      restoreVersion: number;
-    }) => restoreSessionContent(event.id, input.sessionId, input),
-    onSuccess: ({ session }) => contentSaved(session, "Earlier content restored as a new version."),
-    onError: (error) => {
-      setStatusMessage(error instanceof ApiError ? error.message : "Unable to restore session content.");
+      showToast(error instanceof ApiError ? error.message : "Unable to save session content.");
       void contentQuery.refetch();
     },
   });
@@ -208,17 +239,20 @@ export function AgendaWorkspace({
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: ["agenda", event.id] });
       setSelectedId(result.session.id);
+      const placedDay = sessionDay(result.session);
+      const dayNote =
+        placedDay && placedDay !== selectedDay
+          ? ` on ${dayLabel(placedDay)}`
+          : "";
       const conflictCount = result.counts.conflicts;
-      setStatusMessage(
+      showToast(
         conflictCount > 0
-          ? `Saved with ${conflictCount} active conflict${conflictCount === 1 ? "" : "s"}.`
-          : "Placement saved.",
+          ? `Saved${dayNote} with ${conflictCount} active conflict${conflictCount === 1 ? "" : "s"}.`
+          : `Placement saved${dayNote}.`,
       );
     },
     onError: (error) => {
-      setStatusMessage(
-        error instanceof ApiError ? error.message : "Unable to save placement.",
-      );
+      showToast(error instanceof ApiError ? error.message : "Unable to save placement.");
     },
   });
 
@@ -235,7 +269,7 @@ export function AgendaWorkspace({
       });
     },
     onError: (error) => {
-      setStatusMessage(
+      showToast(
         error instanceof ApiError
           ? error.message
           : "Unable to open Program Publication Course Check.",
@@ -245,29 +279,31 @@ export function AgendaWorkspace({
 
   const previewAutoPlaceMutation = useMutation({
     mutationFn: (input: {
-      mode: "all" | "selected";
-      includeManual: boolean;
+      scope: AutoPlaceScope;
       selectedSessionId: string | null;
     }) => {
-      if (input.mode === "selected" && !input.selectedSessionId) {
+      const mode =
+        input.scope === "selected" || input.scope === "selected-manual"
+          ? "selected"
+          : "all";
+      const includeManual =
+        input.scope === "all-manual" || input.scope === "selected-manual";
+      if (mode === "selected" && !input.selectedSessionId) {
         throw new Error("Select a session before previewing a selected-session auto-place.");
       }
       return previewAgendaAutoPlace(event.id, {
         selectedSessionIds:
-          input.mode === "selected" && input.selectedSessionId
+          mode === "selected" && input.selectedSessionId
             ? [input.selectedSessionId]
             : undefined,
-        includeManual: input.includeManual,
+        includeManual,
       });
     },
     onSuccess: (preview) => {
       setAutoPreview(preview);
-      setStatusMessage(
-        `Auto-place preview ready: ${preview.proposals.length} proposed, ${preview.leftovers.length} left for manual placement.`,
-      );
     },
     onError: (error) => {
-      setStatusMessage(
+      showToast(
         error instanceof ApiError || error instanceof Error
           ? error.message
           : "Unable to preview auto-place.",
@@ -288,9 +324,9 @@ export function AgendaWorkspace({
       queryClient.setQueryData(["agenda", event.id], result.agenda);
       await queryClient.invalidateQueries({ queryKey: ["agenda", event.id] });
       setSelectedId(result.appliedSessionIds[0] ?? selectedId);
-      setStatusMessage(
+      showToast(
         result.idempotent
-          ? "Auto-place apply was already recorded; agenda is current."
+          ? "Auto-place already recorded; agenda is current."
           : `Auto-placed ${result.appliedSessionIds.length} session${
               result.appliedSessionIds.length === 1 ? "" : "s"
             }. ${result.agenda.counts.conflicts} conflict${
@@ -299,13 +335,19 @@ export function AgendaWorkspace({
       );
     },
     onError: (error) => {
-      setStatusMessage(
+      showToast(
         error instanceof ApiError || error instanceof Error
           ? error.message
           : "Unable to apply auto-place.",
       );
     },
   });
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 3200);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
 
 
   const slots = useMemo(() => timeSlots(), []);
@@ -316,7 +358,8 @@ export function AgendaWorkspace({
   );
 
   const agenda = agendaQuery.data;
-  const sessions = agenda?.sessions ?? [];
+  const sessions = agenda?.sessions ?? EMPTY_SESSIONS;
+  const conflicts = agenda?.conflicts ?? EMPTY_CONFLICTS;
   const selected =
     sessions.find((session) => session.id === selectedId) ??
     sessions.find((session) => session.placementStatus !== "placed") ??
@@ -326,7 +369,7 @@ export function AgendaWorkspace({
     (session) => session.id === selected?.id,
   );
 
-  const visibleConflicts = (agenda?.conflicts ?? []).filter(
+  const visibleConflicts = conflicts.filter(
     (conflict) => !dismissedConflictIds.includes(conflict.id),
   );
 
@@ -335,6 +378,39 @@ export function AgendaWorkspace({
     if (!session.startsAt || !session.endsAt) return false;
     return sessionDay(session) === selectedDay;
   });
+  const dayCountKey = useMemo(
+    () =>
+      days
+        .map((day) => {
+          const count = sessions.filter((session) => {
+            const sessionOnDay = sessionDay(session) === day;
+            return (
+              sessionOnDay &&
+              (session.placementStatus === "placed" ||
+                session.placementStatus === "partial")
+            );
+          }).length;
+          return `${day}:${count}`;
+        })
+        .join("|"),
+    [days, sessions],
+  );
+  const daySessionCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const part of dayCountKey.split("|")) {
+      if (!part) continue;
+      const [day, count] = part.split(":");
+      if (day) counts.set(day, Number(count) || 0);
+    }
+    return counts;
+  }, [dayCountKey]);
+  const selectedSessionDay = selected ? sessionDay(selected) : null;
+  const selectedOnOtherDay = Boolean(
+    selected &&
+      selectedSessionDay &&
+      selectedSessionDay !== selectedDay &&
+      selected.placementStatus !== "unplaced",
+  );
 
   function cellSessions(roomId: string, slot: string): OrganizerSession[] {
     return daySessions.filter((session) => {
@@ -363,7 +439,23 @@ export function AgendaWorkspace({
   }
 
   function selectSession(sessionId: string) {
+    const session = sessions.find((item) => item.id === sessionId);
     setSelectedId(sessionId);
+    setMoveOpen(true);
+    if (session) {
+      setMoveDay(sessionDay(session) ?? selectedDay);
+      setMoveSlot(sessionSlot(session) ?? "10:00");
+      setMoveRoomId(session.roomId ?? "__tbd__");
+      if (session.startsAt && session.endsAt) {
+        const minutes = Math.max(
+          15,
+          Math.round((Date.parse(session.endsAt) - Date.parse(session.startsAt)) / 60000),
+        );
+        setMoveDuration(String(minutes));
+      } else {
+        setMoveDuration("45");
+      }
+    }
     syncAgendaUrl({ selectedId: sessionId });
   }
 
@@ -415,17 +507,12 @@ export function AgendaWorkspace({
   function submitMove(eventSubmit: FormEvent<HTMLFormElement>) {
     eventSubmit.preventDefault();
     if (!selected) return;
-    const form = new FormData(eventSubmit.currentTarget);
-    const roomIdRaw = String(form.get("roomId") ?? "");
-    const day = String(form.get("day") ?? selectedDay);
-    const slot = String(form.get("slot") ?? "09:00");
-    const durationMinutes = Number(form.get("duration") ?? 45);
-    const startsAt = toIso(day, slot);
+    const startsAt = toIso(moveDay, moveSlot);
     const endsAt = new Date(
-      Date.parse(startsAt) + Math.max(15, durationMinutes) * 60 * 1000,
+      Date.parse(startsAt) + Math.max(15, Number(moveDuration) || 45) * 60 * 1000,
     ).toISOString();
     place(selected.id, {
-      roomId: roomIdRaw === "" || roomIdRaw === "__tbd__" ? null : roomIdRaw,
+      roomId: moveRoomId === "" || moveRoomId === "__tbd__" ? null : moveRoomId,
       startsAt,
       endsAt,
     });
@@ -460,11 +547,11 @@ export function AgendaWorkspace({
       setDismissedConflictIds((ids) =>
         ids.includes(conflict.id) ? ids : [...ids, conflict.id],
       );
-      setStatusMessage("Kept current placement. Conflict remains saved.");
+      showToast("Kept current placement. Conflict remains saved.");
       return;
     }
     if (action === "open_speaker_schedule") {
-      setStatusMessage(
+      showToast(
         conflict.speakerName
           ? `Showing sessions involving ${conflict.speakerName}.`
           : "Showing speaker schedule context.",
@@ -494,27 +581,82 @@ export function AgendaWorkspace({
     onChromeChange({
       tools: (
         <div className="topbar-tools-inner agenda-shell-tools">
-          <p className="agenda-counts" aria-live="polite">
-            <strong>
-              {counts.unplaced + counts.partial} unplaced · {counts.conflicts} conflict
-              {counts.conflicts === 1 ? "" : "s"}
-            </strong>
-            <span>
-              {counts.placed} placed · native day/room grid
+          <div className="agenda-shell-left">
+            <div className="agenda-day-tabs seg" role="tablist" aria-label="Event days">
+              {days.map((day) => {
+                const count = daySessionCounts.get(day) ?? 0;
+                const isSelected = day === selectedDay;
+                const hostsSelection = selectedSessionDay === day && !isSelected;
+                return (
+                  <button
+                    key={day}
+                    type="button"
+                    role="tab"
+                    aria-selected={isSelected}
+                    className={hostsSelection ? "has-selection-elsewhere" : undefined}
+                    onClick={() => selectDay(day)}
+                  >
+                    <span className="agenda-day-label">{dayLabel(day)}</span>
+                    <span className="agenda-day-count">{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="agenda-counts" aria-live="polite">
+            <span className="agenda-metric is-unplaced" aria-label={`${counts.unplaced + counts.partial} unplaced`}>
+              <strong>{counts.unplaced + counts.partial}</strong>
+              <span>unplaced</span>
             </span>
-          </p>
-          <div className="agenda-day-tabs seg" role="tablist" aria-label="Event days">
-            {days.map((day) => (
-              <button
-                key={day}
-                type="button"
-                role="tab"
-                aria-selected={day === selectedDay}
-                onClick={() => selectDay(day)}
-              >
-                {dayLabel(day)}
-              </button>
-            ))}
+            <span className="agenda-metric is-placed" aria-label={`${counts.placed} placed`}>
+              <strong>{counts.placed}</strong>
+              <span>placed</span>
+            </span>
+            <span
+              className={`agenda-metric is-conflicts${counts.conflicts > 0 ? " has-value" : ""}`}
+              aria-label={`${counts.conflicts} conflicts`}
+            >
+              <strong>{counts.conflicts}</strong>
+              <span>conflicts</span>
+            </span>
+          </div>
+          <div className="agenda-shell-right">
+            <div className="topbar-track agenda-auto-scope">
+              <AppSelect
+                label="Scope"
+                ariaLabel="Auto-place scope"
+                value={autoScope}
+                options={[
+                  { value: "all", label: "All unplaced" },
+                  {
+                    value: "all-manual",
+                    label: "All unplaced + manual/partial",
+                  },
+                  { value: "selected", label: "Selected only" },
+                  {
+                    value: "selected-manual",
+                    label: "Selected + overwrite manual",
+                  },
+                ]}
+                onValueChange={(value) => {
+                  setAutoScope(value as AutoPlaceScope);
+                  setAutoPreview(null);
+                }}
+              />
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={previewAutoPlaceMutation.isPending}
+              onClick={() => {
+                previewAutoPlaceMutation.mutate({
+                  scope: autoScope,
+                  selectedSessionId: selected?.id ?? null,
+                });
+              }}
+            >
+              {previewAutoPlaceMutation.isPending ? "Previewing…" : "Preview auto-place"}
+            </button>
           </div>
         </div>
       ),
@@ -523,24 +665,28 @@ export function AgendaWorkspace({
           type="button"
           className="btn btn-primary btn-sm"
           disabled={publishMutation.isPending}
-          onClick={() => {
-            setStatusMessage(null);
-            publishMutation.mutate();
-          }}
+          onClick={() => publishMutation.mutate()}
         >
           {publishMutation.isPending ? "Opening…" : "Publish program"}
         </button>
       ),
     });
   }, [
+    applyAutoPlaceMutation.isPending,
+    autoPreview,
+    autoScope,
     counts.conflicts,
     counts.partial,
     counts.placed,
     counts.unplaced,
+    dayCountKey,
     days,
     onChromeChange,
+    previewAutoPlaceMutation.isPending,
     publishMutation.isPending,
+    selected?.id,
     selectedDay,
+    selectedSessionDay,
   ]);
 
   useEffect(() => {
@@ -572,135 +718,110 @@ export function AgendaWorkspace({
 
   return (
     <div className="work agenda-work">
-
-
-      {statusMessage ? (
-        <p className="agenda-status" role="status">
-          {statusMessage}
-        </p>
+      {toast ? (
+        <div className="agenda-toast" role="status" aria-live="polite">
+          {toast}
+        </div>
       ) : null}
 
-      <section className="operations-panel agenda-auto-place" aria-label="Auto-place assistant">
-        <div className="panel-heading">
-          <div>
-            <p className="eyebrow">Scheduling assistant</p>
-            <h3>Auto-place preview</h3>
-          </div>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            disabled={previewAutoPlaceMutation.isPending}
-            onClick={() => {
-              setStatusMessage(null);
-              previewAutoPlaceMutation.mutate({
-                mode: autoMode,
-                includeManual: autoIncludeManual,
-                selectedSessionId: selected?.id ?? null,
-              });
-            }}
+      {autoPreview ? (
+        <div className="dialog-backdrop" aria-hidden="true" />
+      ) : null}
+      {autoPreview ? (
+        <div className="dialog-viewport">
+          <div
+            className="routing-dialog agenda-auto-place-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="agenda-auto-place-title"
           >
-            {previewAutoPlaceMutation.isPending ? "Previewing…" : "Preview auto-place"}
-          </button>
-        </div>
-        <div className="agenda-auto-place-controls">
-          <label>
-            Scope
-            <select
-              aria-label="Auto-place scope"
-              value={autoMode}
-              onChange={(change) => {
-                setAutoMode(change.currentTarget.value === "selected" ? "selected" : "all");
-                setAutoPreview(null);
-              }}
-            >
-              <option value="all">All eligible unplaced sessions</option>
-              <option value="selected">Selected session only</option>
-            </select>
-          </label>
-          <label className="agenda-auto-place-check">
-            <input
-              type="checkbox"
-              checked={autoIncludeManual}
-              onChange={(change) => {
-                setAutoIncludeManual(change.currentTarget.checked);
-                setAutoPreview(null);
-              }}
-            />
-            Include existing manual and partial placements
-          </label>
-        </div>
-        <p className="muted">
-          Preview first; apply uses the exact preview digest and agenda version so stale placements are rejected.
-        </p>
-        {autoPreview ? (
-          <div className="agenda-auto-place-preview">
-            <p>
-              <strong>
-                {autoPreview.proposals.length} proposed · {autoPreview.leftovers.length} leftover
-                {autoPreview.leftovers.length === 1 ? "" : "s"} · {autoPreview.conflicts.length} current conflict
-                {autoPreview.conflicts.length === 1 ? "" : "s"}
-              </strong>
-              <span> · agenda v{autoPreview.agendaVersion}</span>
-            </p>
-            {autoPreview.proposals.length > 0 ? (
-              <ul className="agenda-auto-place-list" aria-label="Proposed auto-place slots">
-                {autoPreview.proposals.map((proposal) => (
-                  <li key={proposal.sessionId}>
-                    <strong>{proposal.title}</strong> → {proposal.roomName},{" "}
-                    {formatClock(proposal.startsAt)}–{formatClock(proposal.endsAt)}
-                    <span className="muted"> · {proposal.reason}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="empty-state">No sessions can be placed by this preview.</p>
-            )}
-            {autoPreview.leftovers.length > 0 ? (
-              <ul className="agenda-auto-place-list" aria-label="Auto-place leftovers">
-                {autoPreview.leftovers.map((leftover) => (
-                  <li key={leftover.sessionId}>
-                    <strong>{leftover.title}</strong> remains {leftover.placementStatus}:{" "}
-                    {leftover.reason}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            {autoPreview.conflicts.length > 0 ? (
-              <ul className="agenda-auto-place-list" aria-label="Existing conflicts before auto-place">
-                {autoPreview.conflicts.map((conflict) => (
-                  <li key={conflict.id}>{conflict.summary}</li>
-                ))}
-              </ul>
-            ) : null}
-            <ul className="agenda-auto-place-list" aria-label="Auto-place assumptions">
-              {autoPreview.assumptions.map((assumption) => (
-                <li key={assumption}>{assumption}</li>
-              ))}
-              {autoPreview.manualPlacementPreserved.length > 0 ? (
-                <li>
-                  Preserved {autoPreview.manualPlacementPreserved.length} manually placed session
-                  {autoPreview.manualPlacementPreserved.length === 1 ? "" : "s"}.
-                </li>
+            <div className="routing-dialog-header">
+              <div>
+                <p className="eyebrow">Scheduling assistant</p>
+                <h2 id="agenda-auto-place-title">Auto-place preview</h2>
+                <p>
+                  {autoPreview.proposals.length} proposed · {autoPreview.leftovers.length} leftover
+                  {autoPreview.leftovers.length === 1 ? "" : "s"} · {autoPreview.conflicts.length}{" "}
+                  current conflict
+                  {autoPreview.conflicts.length === 1 ? "" : "s"} · agenda v
+                  {autoPreview.agendaVersion}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="dialog-close"
+                aria-label="Close auto-place preview"
+                onClick={() => setAutoPreview(null)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="agenda-auto-place-dialog-body">
+              {autoPreview.proposals.length > 0 ? (
+                <ul className="agenda-auto-place-list" aria-label="Proposed auto-place slots">
+                  {autoPreview.proposals.map((proposal) => (
+                    <li key={proposal.sessionId}>
+                      <strong>{proposal.title}</strong> → {proposal.roomName},{" "}
+                      {formatClock(proposal.startsAt)}–{formatClock(proposal.endsAt)}
+                      <span className="muted"> · {proposal.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="empty-state">No sessions can be placed by this preview.</p>
+              )}
+              {autoPreview.leftovers.length > 0 ? (
+                <ul className="agenda-auto-place-list" aria-label="Auto-place leftovers">
+                  {autoPreview.leftovers.map((leftover) => (
+                    <li key={leftover.sessionId}>
+                      <strong>{leftover.title}</strong> remains {leftover.placementStatus}:{" "}
+                      {leftover.reason}
+                    </li>
+                  ))}
+                </ul>
               ) : null}
-            </ul>
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              disabled={applyAutoPlaceMutation.isPending || autoPreview.proposals.length === 0}
-              onClick={() => applyAutoPlaceMutation.mutate(autoPreview)}
-            >
-              {applyAutoPlaceMutation.isPending ? "Applying…" : "Apply exact preview"}
-            </button>
+              <ul className="agenda-auto-place-list" aria-label="Auto-place assumptions">
+                {autoPreview.assumptions.map((assumption) => (
+                  <li key={assumption}>{assumption}</li>
+                ))}
+                {autoPreview.manualPlacementPreserved.length > 0 ? (
+                  <li>
+                    Preserved {autoPreview.manualPlacementPreserved.length} manually placed
+                    session
+                    {autoPreview.manualPlacementPreserved.length === 1 ? "" : "s"}.
+                  </li>
+                ) : null}
+              </ul>
+            </div>
+            <div className="agenda-auto-place-dialog-actions">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setAutoPreview(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={
+                  applyAutoPlaceMutation.isPending || autoPreview.proposals.length === 0
+                }
+                onClick={() => applyAutoPlaceMutation.mutate(autoPreview)}
+              >
+                {applyAutoPlaceMutation.isPending
+                  ? "Applying…"
+                  : `Apply ${autoPreview.proposals.length} placement${
+                      autoPreview.proposals.length === 1 ? "" : "s"
+                    }`}
+              </button>
+            </div>
           </div>
-        ) : null}
-      </section>
+        </div>
+      ) : null}
 
       <div className="agenda-layout">
-        <aside className="agenda-pool operations-panel" aria-label="Unplaced sessions">
-          <div className="panel-heading">
-            <h3>Unplaced pool</h3>
-            <span className="agenda-pool-count">{pool.length}</span>
-          </div>
+        <aside className="agenda-pool" aria-label="Unplaced sessions">
           {pool.length === 0 ? (
             <p className="empty-state padded">
               {sessions.length === 0 ? "No sessions yet." : "All sessions are fully placed."}
@@ -712,6 +833,8 @@ export function AgendaWorkspace({
                   <article
                     className={`agenda-session-card ${trackClass(session.trackId)} ${
                       selected?.id === session.id ? "is-selected" : ""
+                    } ${session.placementStatus === "partial" ? "is-partial" : ""} ${
+                      sessionHasConflict(session.id, conflicts) ? "has-conflict" : ""
                     }`}
                     draggable
                     onDragStart={(drag) => {
@@ -725,17 +848,7 @@ export function AgendaWorkspace({
                       {session.speakers.map((speaker) => speaker.name).join(", ") ||
                         "No speakers"}
                     </p>
-                    <p className="agenda-meta">
-                      {session.placementStatus === "unplaced"
-                        ? "Unplaced · room and time TBD"
-                        : `${session.roomName ?? "Room TBD"} · ${
-                            session.startsAt
-                              ? `${formatClock(session.startsAt)}${
-                                  session.endsAt ? `–${formatClock(session.endsAt)}` : ""
-                                }`
-                              : "Time TBD"
-                          }`}
-                    </p>
+                    <p className="agenda-meta">{placementSummary(session)}</p>
                   </article>
                 </li>
               ))}
@@ -744,18 +857,14 @@ export function AgendaWorkspace({
         </aside>
 
         <section
-          className="agenda-grid-wrap operations-panel"
+          className="agenda-grid-wrap"
           aria-label="Day and room grid"
           tabIndex={0}
         >
-          <div className="panel-heading">
-            <h3>{dayLabel(selectedDay)} · rooms</h3>
-            <span className="agenda-hint">Drag onto a slot, or select a session and use Move Session</span>
-          </div>
           <div
             className="agenda-grid"
             style={{
-              gridTemplateColumns: `72px repeat(${roomColumns.length}, minmax(140px, 1fr))`,
+              gridTemplateColumns: `56px repeat(${roomColumns.length}, minmax(168px, 1fr))`,
             }}
           >
             <div className="agenda-grid-corner" />
@@ -775,7 +884,7 @@ export function AgendaWorkspace({
                       key={key}
                       className={`agenda-grid-cell ${
                         dragOverKey === key ? "is-drop-target" : ""
-                      }`}
+                      } ${cell.length === 0 ? "is-empty" : ""}`}
                       data-drop-room={room.id}
                       data-drop-slot={slot}
                       onDragOver={(drag) => {
@@ -797,11 +906,7 @@ export function AgendaWorkspace({
                           className={`agenda-session-card compact ${trackClass(
                             session.trackId,
                           )} ${selected?.id === session.id ? "is-selected" : ""} ${
-                            (agenda?.conflicts ?? []).some((conflict) =>
-                              conflict.sessionIds.includes(session.id),
-                            )
-                              ? "has-conflict"
-                              : ""
+                            sessionHasConflict(session.id, conflicts) ? "has-conflict" : ""
                           }`}
                           draggable
                           onDragStart={(drag) => {
@@ -825,57 +930,66 @@ export function AgendaWorkspace({
           </div>
         </section>
 
-        <aside className="agenda-inspector operations-panel" aria-label="Session inspector">
-          <div className="panel-heading">
-            <h3>Session</h3>
-          </div>
+        <aside className="agenda-inspector" aria-label="Session inspector">
           {!selected ? (
-            <p className="empty-state padded">Select a session to inspect placement.</p>
+            <p className="empty-state padded">Select a session to place it.</p>
           ) : (
             <div className="agenda-inspector-body">
-              <h4>{selected.title}</h4>
-              <dl className="agenda-dl">
+              <header className="agenda-inspector-header">
+                <h3>{selected.title}</h3>
+                <p className="agenda-inspector-who">
+                  {selected.speakers.map((speaker) => speaker.name).join(", ") || "Speakers TBD"}
+                  {selected.trackName ? ` · ${selected.trackName}` : ""}
+                </p>
+              </header>
+
+              <dl className="inspector-meta agenda-dl">
                 <div>
-                  <dt>Speakers</dt>
-                  <dd>
-                    {selected.speakers.map((speaker) => speaker.name).join(", ") || "TBD"}
+                  <dt>Placement</dt>
+                  <dd
+                    className={`agenda-placement-status is-${selected.placementStatus}`}
+                  >
+                    {selected.placementStatus === "unplaced"
+                      ? "Unplaced"
+                      : selected.placementStatus === "partial"
+                        ? "Partial · TBD fields remain"
+                        : selectedOnOtherDay && selectedSessionDay
+                          ? `Placed · ${dayLabel(selectedSessionDay)}`
+                          : "Placed"}
                   </dd>
                 </div>
                 <div>
-                  <dt>Track</dt>
-                  <dd>{selected.trackName || selected.trackId || "TBD"}</dd>
-                </div>
-                <div>
                   <dt>Room</dt>
-                  <dd>{selected.roomName ?? "TBD"}</dd>
+                  <dd className={!selected.roomName ? "is-tbd" : undefined}>
+                    {selected.roomName ?? "TBD"}
+                  </dd>
                 </div>
                 <div>
                   <dt>Time</dt>
-                  <dd>
+                  <dd className={!selected.startsAt && !selected.endsAt ? "is-tbd" : undefined}>
                     {selected.startsAt || selected.endsAt
                       ? `${formatClock(selected.startsAt)} – ${formatClock(selected.endsAt)}`
                       : "TBD"}
                   </dd>
                 </div>
                 <div>
-                  <dt>Placement</dt>
-                  <dd className="agenda-placement-status">
-                    {selected.placementStatus === "unplaced"
-                      ? "Unplaced"
-                      : selected.placementStatus === "partial"
-                        ? "Partial · TBD fields remain"
-                        : "Placed"}
+                  <dt>Day</dt>
+                  <dd className={!selectedSessionDay ? "is-tbd" : undefined}>
+                    {selectedSessionDay ? dayLabel(selectedSessionDay) : "TBD"}
                   </dd>
                 </div>
               </dl>
-              <div className="agenda-inspector-actions">
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  onClick={() => setMoveOpen(true)}
-                >
-                  Move Session
-                </button>
+
+              <div className="agenda-inspector-actions agenda-inspector-primary">
+                {!moveOpen ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => setMoveOpen(true)}
+                  >
+                    Move Session
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
@@ -885,22 +999,100 @@ export function AgendaWorkspace({
                 </button>
               </div>
 
+              {moveOpen ? (
+                <form className="agenda-move-form" onSubmit={submitMove}>
+                  <div className="agenda-move-form-heading">
+                    <h4>Move Session</h4>
+                  </div>
+                  <div className="agenda-field">
+                    <span className="agenda-field-label">Day</span>
+                    <AppSelect
+                      label="Day"
+                      ariaLabel="Day"
+                      value={moveDay}
+                      options={days.map((day) => ({
+                        value: day,
+                        label: dayLabel(day),
+                      }))}
+                      onValueChange={setMoveDay}
+                    />
+                  </div>
+                  <div className="agenda-field">
+                    <span className="agenda-field-label">Start</span>
+                    <AppSelect
+                      label="Start"
+                      ariaLabel="Start"
+                      value={moveSlot}
+                      options={slots.map((slot) => ({ value: slot, label: slot }))}
+                      onValueChange={setMoveSlot}
+                    />
+                  </div>
+                  <div className="agenda-field">
+                    <span className="agenda-field-label">Room</span>
+                    <AppSelect
+                      label="Room"
+                      ariaLabel="Room"
+                      value={moveRoomId}
+                      options={[
+                        { value: "__tbd__", label: "TBD room" },
+                        ...rooms.map((room) => ({
+                          value: room.id,
+                          label: room.name,
+                        })),
+                      ]}
+                      onValueChange={setMoveRoomId}
+                    />
+                  </div>
+                  <div className="agenda-field">
+                    <span className="agenda-field-label">Duration</span>
+                    <AppSelect
+                      label="Duration"
+                      ariaLabel="Duration"
+                      value={moveDuration}
+                      options={["15", "30", "45", "60", "75", "90"].map((mins) => ({
+                        value: mins,
+                        label: `${mins} min`,
+                      }))}
+                      onValueChange={setMoveDuration}
+                    />
+                  </div>
+                  <div className="agenda-inspector-actions">
+                    <button type="submit" className="btn btn-primary btn-sm">
+                      Save placement
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setMoveOpen(false)}
+                    >
+                      Collapse
+                    </button>
+                  </div>
+                </form>
+              ) : null}
+
               {contentQuery.isPending ? (
                 <p className="muted">Loading content review…</p>
               ) : contentQuery.isError ? (
-                <p className="muted" role="alert">Unable to load content review.</p>
+                <p className="muted" role="alert">
+                  Unable to load content review.
+                </p>
               ) : selectedContent ? (
-                <section className="session-content-review" aria-labelledby="session-content-heading">
+                <section
+                  className="session-content-review"
+                  aria-labelledby="session-content-heading"
+                >
                   <div>
                     <p className="eyebrow">Content review</p>
-                    <h5 id="session-content-heading">Public session content</h5>
+                    <h4 id="session-content-heading">Public session content</h4>
                     <p className="muted">
-                      Version {selectedContent.contentVersion} · {selectedContent.contentStatus.replace("-", " ")}
+                      Version {selectedContent.contentVersion} ·{" "}
+                      {selectedContent.contentStatus.replace("-", " ")}
                     </p>
                   </div>
                   <form
                     key={`${selectedContent.id}:${selectedContent.contentVersion}`}
-                    className="agenda-move-form"
+                    className="agenda-content-form"
                     onSubmit={submitContent}
                   >
                     <label>
@@ -909,11 +1101,19 @@ export function AgendaWorkspace({
                     </label>
                     <label>
                       Abstract
-                      <textarea name="abstract" defaultValue={selectedContent.abstract} rows={4} />
+                      <textarea
+                        name="abstract"
+                        defaultValue={selectedContent.abstract}
+                        rows={4}
+                      />
                     </label>
                     <label>
                       Public content
-                      <textarea name="publicContent" defaultValue={selectedContent.publicContent} rows={4} />
+                      <textarea
+                        name="publicContent"
+                        defaultValue={selectedContent.publicContent}
+                        rows={4}
+                      />
                     </label>
                     <button
                       type="submit"
@@ -927,128 +1127,45 @@ export function AgendaWorkspace({
                     <button
                       type="button"
                       className="btn btn-secondary btn-sm"
-                      disabled={contentMutation.isPending || selectedContent.contentStatus === "needs-changes"}
-                      onClick={() => contentMutation.mutate({
-                        sessionId: selectedContent.id,
-                        expectedVersion: selectedContent.contentVersion,
-                        status: "needs-changes",
-                      })}
+                      disabled={
+                        contentMutation.isPending ||
+                        selectedContent.contentStatus === "needs-changes"
+                      }
+                      onClick={() =>
+                        contentMutation.mutate({
+                          sessionId: selectedContent.id,
+                          expectedVersion: selectedContent.contentVersion,
+                          status: "needs-changes",
+                        })
+                      }
                     >
                       Return for changes
                     </button>
                     <button
                       type="button"
                       className="btn btn-primary btn-sm"
-                      disabled={contentMutation.isPending || selectedContent.contentStatus === "approved"}
-                      onClick={() => contentMutation.mutate({
-                        sessionId: selectedContent.id,
-                        expectedVersion: selectedContent.contentVersion,
-                        status: "approved",
-                      })}
+                      disabled={
+                        contentMutation.isPending ||
+                        selectedContent.contentStatus === "approved"
+                      }
+                      onClick={() =>
+                        contentMutation.mutate({
+                          sessionId: selectedContent.id,
+                          expectedVersion: selectedContent.contentVersion,
+                          status: "approved",
+                        })
+                      }
                     >
                       Approve content
                     </button>
                   </div>
-                  <details className="session-content-history">
-                    <summary>Version history ({selectedContent.contentHistory.length})</summary>
-                    <ol>
-                      {selectedContent.contentHistory.map((entry) => (
-                        <li key={entry.id}>
-                          <div>
-                            <strong>Version {entry.version}</strong>
-                            <span>{entry.actorName} · {new Date(entry.createdAt).toLocaleString()}</span>
-                            <span>{entry.changedFields.join(", ") || "restored snapshot"}</span>
-                          </div>
-                          {entry.version < selectedContent.contentVersion ? (
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              disabled={restoreMutation.isPending}
-                              onClick={() => restoreMutation.mutate({
-                                sessionId: selectedContent.id,
-                                expectedVersion: selectedContent.contentVersion,
-                                restoreVersion: entry.version,
-                              })}
-                            >
-                              Restore version {entry.version}
-                            </button>
-                          ) : null}
-                        </li>
-                      ))}
-                    </ol>
-                  </details>
                 </section>
-              ) : null}
-
-              {moveOpen ? (
-                <form className="agenda-move-form" onSubmit={submitMove}>
-                  <h5>Move Session</h5>
-                  <label>
-                    Day
-                    <select name="day" defaultValue={sessionDay(selected) ?? selectedDay}>
-                      {days.map((day) => (
-                        <option key={day} value={day}>
-                          {dayLabel(day)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Start
-                    <select name="slot" defaultValue={sessionSlot(selected) ?? "10:00"}>
-                      {slots.map((slot) => (
-                        <option key={slot} value={slot}>
-                          {slot}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Room
-                    <select name="roomId" defaultValue={selected.roomId ?? "__tbd__"}>
-                      <option value="__tbd__">TBD room</option>
-                      {rooms.map((room) => (
-                        <option key={room.id} value={room.id}>
-                          {room.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Duration (minutes)
-                    <input
-                      name="duration"
-                      type="number"
-                      min={15}
-                      step={15}
-                      defaultValue={45}
-                    />
-                  </label>
-                  <div className="agenda-inspector-actions">
-                    <button type="submit" className="btn btn-primary btn-sm">
-                      Save placement
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => setMoveOpen(false)}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </form>
               ) : null}
             </div>
           )}
 
-          <div className="agenda-conflicts">
-            <div className="panel-heading">
-              <h3>Conflicts</h3>
-              <span>{visibleConflicts.length}</span>
-            </div>
-            {visibleConflicts.length === 0 ? (
-              <p className="empty-state padded">No active conflicts.</p>
-            ) : (
+          {visibleConflicts.length > 0 ? (
+            <div className="agenda-conflicts">
               <ul className="agenda-conflict-list">
                 {visibleConflicts.map((conflict) => (
                   <li key={conflict.id} className="agenda-conflict-card">
@@ -1068,8 +1185,8 @@ export function AgendaWorkspace({
                   </li>
                 ))}
               </ul>
-            )}
-          </div>
+            </div>
+          ) : null}
         </aside>
       </div>
     </div>
