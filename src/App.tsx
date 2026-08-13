@@ -1,35 +1,38 @@
 import { Button } from "@base-ui/react/button";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useState, type ReactNode } from "react";
 
-import markOnDarkUrl from "../design/assets/brand/chartstead-mark-on-dark.png";
 import markOnLightUrl from "../design/assets/brand/chartstead-mark-on-light.png";
 import type { EventListResponse, EventRecord } from "../shared/events";
-import { ApiError, fetchEvents } from "./api";
-import { AppSelect } from "./AppSelect";
+import { ApiError, createOrganizerForm, fetchEvents } from "./api";
 import { authClient } from "./auth-client";
-import { AgendaWorkspace } from "./AgendaWorkspace";
+import { AgendaWorkspace, type AgendaChrome } from "./AgendaWorkspace";
 import { OnboardingWorkspace } from "./OnboardingWorkspace";
-import { MessagesWorkspace } from "./MessagesWorkspace";
+import {
+  MessagesCommandBar,
+  MessagesWorkspace,
+  type MessagesChrome,
+} from "./MessagesWorkspace";
 import { SettingsWorkspace } from "./SettingsWorkspace";
 import { CreateEventDialog } from "./EventWorkspaceManagement";
 import {
+  SubmissionsCommandBar,
   SubmissionsWorkspace,
+  type BatchChrome,
+  type ReviewChrome,
   type ProposalQueueState,
+  type ProposalSort,
 } from "./SubmissionsWorkspace";
+import { FormsWorkspace } from "./FormsWorkspace";
+import {
+  CfpBuilderWorkspace,
+  type CfpBuilderChrome,
+} from "./CfpBuilderPage";
+import { EmbedManagerWorkspace } from "./EmbedManagerWorkspace";
+import { OrganizerShell, type NavItem } from "./OrganizerShell";
+import { OverviewWorkspace } from "./OverviewWorkspace";
 import "./styles.css";
-
-const navItems = [
-  "Overview",
-  "Submissions",
-  "Speakers",
-  "Agenda",
-  "Messages",
-  "Settings",
-] as const;
-
-type NavItem = (typeof navItems)[number];
 
 function formatDateRange(startsOn: string, endsOn: string) {
   const format = new Intl.DateTimeFormat("en-US", {
@@ -41,55 +44,6 @@ function formatDateRange(startsOn: string, endsOn: string) {
   return `${format.format(new Date(`${startsOn}T00:00:00Z`))} – ${format.format(
     new Date(`${endsOn}T00:00:00Z`),
   )}`;
-}
-
-function NavIcon({ item }: { item: NavItem }) {
-  const paths: Record<NavItem, React.ReactNode> = {
-    Overview: (
-      <>
-        <rect x="3" y="3" width="7" height="7" />
-        <rect x="14" y="3" width="7" height="7" />
-        <rect x="14" y="14" width="7" height="7" />
-        <rect x="3" y="14" width="7" height="7" />
-      </>
-    ),
-    Submissions: (
-      <>
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-        <path d="M14 2v6h6" />
-      </>
-    ),
-    Speakers: (
-      <>
-        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-        <circle cx="9" cy="7" r="4" />
-        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-      </>
-    ),
-    Agenda: (
-      <>
-        <rect x="3" y="4" width="18" height="18" rx="1" />
-        <path d="M16 2v4M8 2v4M3 10h18" />
-      </>
-    ),
-    Messages: (
-      <>
-        <path d="M4 4h16v16H4z" />
-        <path d="m22 6-10 7L2 6" />
-      </>
-    ),
-    Settings: (
-      <>
-        <circle cx="12" cy="12" r="3" />
-        <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2" />
-      </>
-    ),
-  };
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      {paths[item]}
-    </svg>
-  );
 }
 
 function LoadingShell() {
@@ -181,96 +135,18 @@ function SignIn() {
   );
 }
 
-function OverviewWorkspace({ event }: { event: EventRecord }) {
-  return (
-    <div className="workspace">
-      <section className="readiness" aria-labelledby="readiness-title">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Program readiness</p>
-            <h2 id="readiness-title">The working chart</h2>
-          </div>
-          <span className="status-indicator">Event workspace</span>
-        </div>
-        <div className="metric-strip">
-          <div aria-label={`${event.submissionCount} submissions`}>
-            <strong>{event.submissionCount}</strong>
-            <span>submissions</span>
-          </div>
-          <div>
-            <strong>{event.unreviewedCount}</strong>
-            <span>unreviewed</span>
-          </div>
-          <div aria-label={`${event.tracks.length} tracks`}>
-            <strong>{event.tracks.length}</strong>
-            <span>tracks</span>
-          </div>
-          <div aria-label={`${event.rooms.length} rooms`}>
-            <strong>{event.rooms.length}</strong>
-            <span>rooms</span>
-          </div>
-        </div>
-      </section>
-
-      <div className="operations-grid">
-        <section className="operations-panel" aria-labelledby="tracks-title">
-          <div className="panel-heading">
-            <h2 id="tracks-title">Tracks</h2>
-            <span>{event.tracks.length} active</span>
-          </div>
-          {event.tracks.length === 0 ? (
-            <p className="empty-state padded">No tracks configured yet.</p>
-          ) : (
-            <ul className="operation-list">
-              {event.tracks.map((track, index) => (
-              <li key={track.id}>
-                <span
-                  className={`track-line track-${index + 1}`}
-                  aria-hidden="true"
-                />
-                <strong>{track.name}</strong>
-                <span>{track.proposalCount} proposals</span>
-              </li>
-              ))}
-            </ul>
-          )}
-        </section>
-        <section className="operations-panel" aria-labelledby="rooms-title">
-          <div className="panel-heading">
-            <h2 id="rooms-title">Rooms</h2>
-            <span>{event.rooms.length} configured</span>
-          </div>
-          {event.rooms.length === 0 ? (
-            <p className="empty-state padded">No rooms configured yet.</p>
-          ) : (
-            <ul className="operation-list">
-              {event.rooms.map((room, index) => (
-              <li key={room.id}>
-                <span className="room-index">
-                  {String(index + 1).padStart(2, "0")}
-                </span>
-                <strong>{room.name}</strong>
-                <span>{room.readiness === "ready" ? "Ready" : "Pending"}</span>
-              </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      </div>
-    </div>
-  );
-}
-
 function EventDesk({
   data,
   initialNav = "Overview",
   initialEventId = null,
   initialProposalId = null,
-  initialQueue = { query: "", status: "all", track: "", sort: "newest" },
+  initialQueue = { query: "", status: "all", track: "", roundId: "", sort: "newest" },
   repairReturnTo = null,
   repairField = null,
+  initialAgendaDay = null,
   initialAgendaSessionIds = [],
   initialMessagePlanId = null,
+  initialFormId = null,
 }: {
   data: EventListResponse;
   initialNav?: NavItem;
@@ -279,8 +155,10 @@ function EventDesk({
   initialQueue?: ProposalQueueState;
   repairReturnTo?: string | null;
   repairField?: string | null;
+  initialAgendaDay?: string | null;
   initialAgendaSessionIds?: string[];
   initialMessagePlanId?: string | null;
+  initialFormId?: string | null;
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -297,6 +175,23 @@ function EventDesk({
   });
   const [activeNav, setActiveNav] = useState<NavItem>(initialNav);
   const [createEventOpen, setCreateEventOpen] = useState(false);
+  const [batchChrome, setBatchChrome] = useState<BatchChrome | null>(null);
+  const [reviewChrome, setReviewChrome] = useState<ReviewChrome | null>(null);
+  const [agendaChrome, setAgendaChrome] = useState<AgendaChrome | null>(null);
+  const [messagesChrome, setMessagesChrome] = useState<MessagesChrome | null>(null);
+  const [cfpBuilderChrome, setCfpBuilderChrome] = useState<CfpBuilderChrome | null>(null);
+  const [speakerChrome, setSpeakerChrome] = useState<ReactNode | null>(null);
+  const createForm = useMutation({
+    mutationFn: ({ eventId, name }: { eventId: string; name: string }) =>
+      createOrganizerForm(eventId, name),
+    onSuccess: async (form, vars) => {
+      await queryClient.invalidateQueries({ queryKey: ["forms", vars.eventId] });
+      void navigate({
+        to: "/e/$eventId/forms/$formId",
+        params: { eventId: vars.eventId, formId: form.id },
+      });
+    },
+  });
   const event =
     data.events.find((candidate) => candidate.id === selectedEventId) ?? data.events[0];
 
@@ -327,6 +222,14 @@ function EventDesk({
     return () => window.cancelAnimationFrame(frame);
   }, [initialProposalId]);
 
+  useEffect(() => {
+    if (activeNav !== "Agenda") setAgendaChrome(null);
+  }, [activeNav]);
+
+  useEffect(() => {
+    setCfpBuilderChrome(null);
+  }, [initialFormId]);
+
   if (!event) {
     return (
       <main className="sign-in-shell">
@@ -340,11 +243,21 @@ function EventDesk({
   function selectEvent(eventId: string) {
     localStorage.setItem("chartstead:event", eventId);
     setSelectedEventId(eventId);
+    setMessagesChrome(null);
+    setAgendaChrome(null);
+    setCfpBuilderChrome(null);
     if (activeNav === "Submissions") {
       void navigate({
         to: "/e/$eventId/submissions",
         params: { eventId },
         search: queueSearch(initialQueue),
+      });
+      return;
+    }
+    if (activeNav === "Forms") {
+      void navigate({
+        to: "/e/$eventId/forms",
+        params: { eventId },
       });
       return;
     }
@@ -360,16 +273,57 @@ function EventDesk({
         to: "/e/$eventId/messages",
         params: { eventId },
       });
+      return;
     }
+    if (activeNav === "Speakers") {
+      void navigate({
+        to: "/e/$eventId/speakers",
+        params: { eventId },
+      });
+      return;
+    }
+    if (activeNav === "Embeds") {
+      void navigate({
+        to: "/e/$eventId/embeds",
+        params: { eventId },
+      });
+      return;
+    }
+    if (activeNav === "Settings") {
+      void navigate({
+        to: "/e/$eventId/settings",
+        params: { eventId },
+      });
+      return;
+    }
+    void navigate({
+      to: "/e/$eventId",
+      params: { eventId },
+    });
   }
 
   function selectNav(item: NavItem) {
     setActiveNav(item);
+    if (item !== "Submissions") {
+      setBatchChrome(null);
+      setReviewChrome(null);
+    }
+    if (item !== "Agenda") setAgendaChrome(null);
+    if (item !== "Messages") setMessagesChrome(null);
+    if (item !== "Speakers") setSpeakerChrome(null);
+    if (item !== "Forms") setCfpBuilderChrome(null);
     if (item === "Submissions") {
       void navigate({
         to: "/e/$eventId/submissions",
         params: { eventId: event.id },
         search: queueSearch(initialQueue),
+      });
+      return;
+    }
+    if (item === "Forms") {
+      void navigate({
+        to: "/e/$eventId/forms",
+        params: { eventId: event.id },
       });
       return;
     }
@@ -388,10 +342,31 @@ function EventDesk({
       return;
     }
     if (item === "Speakers") {
+      void navigate({
+        to: "/e/$eventId/speakers",
+        params: { eventId: event.id },
+      });
+      return;
+    }
+    if (item === "Embeds") {
+      void navigate({
+        to: "/e/$eventId/embeds",
+        params: { eventId: event.id },
+      });
+      return;
+    }
+    if (item === "Settings") {
+      void navigate({
+        to: "/e/$eventId/settings",
+        params: { eventId: event.id },
+      });
       return;
     }
     if (item === "Overview") {
-      void navigate({ to: "/" });
+      void navigate({
+        to: "/e/$eventId",
+        params: { eventId: event.id },
+      });
     }
   }
 
@@ -429,31 +404,38 @@ function EventDesk({
   }
 
   const cfpHref = `/e/${event.id}/cfp`;
-  const formsHref = `/e/${event.id}/forms`;
   const topbarTitle =
     activeNav === "Submissions"
       ? "Submissions"
-      : activeNav === "Agenda"
-        ? "Agenda"
-        : activeNav === "Messages"
-          ? "Messages"
-          : activeNav === "Speakers"
-            ? "Speakers"
-            : activeNav === "Settings"
-              ? "Settings"
-              : event.name;
+      : activeNav === "Forms"
+        ? cfpBuilderChrome?.title ?? (initialFormId ? "Guided CFP builder" : "Forms")
+        : activeNav === "Agenda"
+          ? "Agenda"
+          : activeNav === "Messages"
+            ? "Speaker messages"
+            : activeNav === "Speakers"
+              ? "Speakers"
+              : activeNav === "Embeds"
+                ? "Embeds"
+                : activeNav === "Settings"
+                  ? "Settings"
+                  : event.name;
   const topbarMeta =
     activeNav === "Submissions"
-      ? `${event.submissionCount} total · ${event.unreviewedCount} unreviewed · track routing on`
-      : activeNav === "Agenda"
-        ? `${formatDateRange(event.startsOn, event.endsOn)} · day and room placement`
-        : activeNav === "Messages"
-          ? "Exact audiences, frozen drafts, and truthful delivery"
-          : activeNav === "Speakers"
-            ? "Directory, readiness, event participation, and assisted follow-up"
-            : activeNav === "Settings"
-              ? "Airtable sync status and API foundation"
-              : formatDateRange(event.startsOn, event.endsOn);
+      ? `${event.submissionCount} total · ${event.unreviewedCount} unreviewed`
+      : activeNav === "Forms"
+        ? cfpBuilderChrome?.meta ?? "CFP forms, publish, open and close"
+        : activeNav === "Agenda"
+          ? `${formatDateRange(event.startsOn, event.endsOn)} · day and room placement`
+          : activeNav === "Messages"
+            ? "Exact audiences, frozen drafts, and truthful delivery"
+            : activeNav === "Speakers"
+              ? "Directory, readiness, event participation, and assisted follow-up"
+              : activeNav === "Embeds"
+                ? "Five public widgets, saved snippets, feeds, and revision pins"
+                : activeNav === "Settings"
+                  ? "Event configuration, reviewers, policies, automation, and Airtable"
+                  : formatDateRange(event.startsOn, event.endsOn);
   const currentRole = data.principal.rolesByEvent?.[event.id] ?? data.principal.role;
 
   function updateEvent(updated: EventRecord) {
@@ -493,113 +475,88 @@ function EventDesk({
     setSelectedEventId(created.id);
     setActiveNav("Overview");
     setCreateEventOpen(false);
-    void navigate({ to: "/" });
+    void navigate({
+      to: "/e/$eventId",
+      params: { eventId: created.id },
+    });
   }
 
   return (
-    <div className="app">
-      <aside className="sidebar">
-        <a className="brand" href="/" aria-label="ChartStead home">
-          <img src={markOnDarkUrl} width="32" height="32" alt="" />
-          <span className="brand-text">
-            <span className="brand-name">ChartStead</span>
-            <span className="brand-desc">Conference Programming</span>
-          </span>
-        </a>
-        <nav className="nav" aria-label="Organizer">
-          {navItems.map((item) => (
-            <a
-              key={item}
-              href={
-                item === "Submissions"
-                  ? `/e/${event.id}/submissions`
-                  : item === "Agenda"
-                    ? `/e/${event.id}/agenda`
-                    : item === "Messages"
-                      ? `/e/${event.id}/messages`
-                      : item === "Overview"
-                        ? "/"
-                        : `#${item.toLowerCase()}`
-              }
-              aria-current={activeNav === item ? "page" : undefined}
-              onClick={(click) => {
-                if (item === "Settings") {
-                  click.preventDefault();
-                  setActiveNav(item);
-                  return;
-                }
-                click.preventDefault();
-                selectNav(item);
-              }}
-            >
-              <NavIcon item={item} />
-              <span>{item}</span>
-              {item === "Submissions" ? (
-                <span className="nav-count">{event.submissionCount}</span>
-              ) : null}
-            </a>
-          ))}
-        </nav>
-        <div className="event-switcher">
-          <AppSelect
-            label="Event"
-            value={event.id}
-            options={data.events.map((candidate) => ({
-              value: candidate.id,
-              label: candidate.name,
-            }))}
-            onValueChange={selectEvent}
-            variant="sidebar"
-          />
-          {currentRole === "admin" ? (
-            <button
-              type="button"
-              className="event-create-trigger"
-              onClick={() => setCreateEventOpen(true)}
-            >
-              <span aria-hidden="true">＋</span>
-              Create event
-            </button>
-          ) : null}
-        </div>
-      </aside>
-
-      <main className="main">
-        <header className="topbar">
-          <div>
-            <h1>{topbarTitle}</h1>
-            <p className="topbar-meta">{topbarMeta}</p>
-          </div>
-          <div className="topbar-spacer" />
-          <div className="topbar-actions">
-            {activeNav === "Submissions" || activeNav === "Overview" ? (
-              <>
-                {currentRole === "admin" ? (
-                  <a className="btn btn-secondary" href={formsHref}>
-                    Manage CFP forms
-                  </a>
-                ) : null}
-                <a className="btn btn-primary" href={cfpHref}>
-                  Open CFP form
-                </a>
-              </>
-            ) : null}
-            <div className="operator">
-              <span className="operator-avatar" aria-hidden="true">
-                {data.principal.displayName
-                  .split(" ")
-                  .map((part) => part[0])
-                  .join("")
-                  .slice(0, 2)}
-              </span>
-              <span>
-                <strong>{data.principal.displayName}</strong>
-                <small>{currentRole === "admin" ? "Event administrator" : "Track reviewer"}</small>
-              </span>
+    <>
+      <OrganizerShell
+        data={data}
+        event={event}
+        activeNav={activeNav}
+        title={topbarTitle}
+        meta={topbarMeta}
+        currentRole={currentRole}
+        onNavigate={selectNav}
+        onEventChange={selectEvent}
+        onCreateEvent={() => setCreateEventOpen(true)}
+        identity={
+          activeNav === "Submissions" ? null : (
+            <div className="topbar-identity" title={topbarMeta}>
+              <h1>{topbarTitle}</h1>
+              <p className="topbar-meta">{topbarMeta}</p>
             </div>
-          </div>
-        </header>
-
+          )
+        }
+        tools={
+          activeNav === "Submissions" ? (
+            <SubmissionsCommandBar
+              event={event}
+              principal={data.principal}
+              queue={initialQueue}
+              onQueueChange={changeQueue}
+              batch={batchChrome}
+              review={reviewChrome}
+            />
+          ) : activeNav === "Agenda" ? (
+            agendaChrome?.tools
+          ) : activeNav === "Messages" ? (
+            <MessagesCommandBar chrome={messagesChrome} />
+          ) : activeNav === "Speakers" ? (
+            speakerChrome
+          ) : null
+        }
+        actions={
+          activeNav === "Forms" ? (
+            initialFormId ? (
+              cfpBuilderChrome?.actions ?? (
+                <>
+                  <a className="btn btn-ghost btn-sm" href={`/e/${event.id}/forms`}>
+                    All forms
+                  </a>
+                  <a className="btn btn-secondary btn-sm" href={cfpHref}>
+                    Open CFP
+                  </a>
+                </>
+              )
+            ) : (
+              <>
+                <a className="btn btn-secondary btn-sm" href={cfpHref}>
+                  Open CFP
+                </a>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={createForm.isPending}
+                  onClick={() =>
+                    createForm.mutate({
+                      eventId: event.id,
+                      name: `CFP ${new Date().toLocaleDateString()}`,
+                    })
+                  }
+                >
+                  Create form
+                </button>
+              </>
+            )
+          ) : activeNav === "Agenda" ? (
+            agendaChrome?.actions
+          ) : null
+        }
+      >
         {repairReturnTo ? (
           <aside className="repair-return" aria-label="Course Check repair">
             <p>
@@ -622,15 +579,34 @@ function EventDesk({
             onCloseProposal={closeProposal}
             queue={initialQueue}
             onQueueChange={changeQueue}
-            cfpHref={cfpHref}
+            onBatchChromeChange={setBatchChrome}
+            onReviewChromeChange={setReviewChrome}
             focusSelectedRecord={Boolean(repairReturnTo)}
           />
+        ) : activeNav === "Forms" ? (
+          initialFormId ? (
+            <CfpBuilderWorkspace
+              eventId={event.id}
+              formId={initialFormId}
+              onChromeChange={setCfpBuilderChrome}
+            />
+          ) : (
+            <FormsWorkspace eventId={event.id} />
+          )
         ) : activeNav === "Agenda" ? (
-          <AgendaWorkspace event={event} initialSessionIds={initialAgendaSessionIds} />
+          <AgendaWorkspace
+            event={event}
+            initialDay={initialAgendaDay}
+            initialSessionIds={initialAgendaSessionIds}
+            onChromeChange={setAgendaChrome}
+          />
         ) : activeNav === "Overview" ? (
           <OverviewWorkspace event={event} />
         ) : activeNav === "Speakers" ? (
-          <OnboardingWorkspace eventId={event.id} />
+          <OnboardingWorkspace
+            eventId={event.id}
+            onShellToolsChange={setSpeakerChrome}
+          />
         ) : activeNav === "Messages" ? (
           <MessagesWorkspace
             eventId={event.id}
@@ -642,7 +618,10 @@ function EventDesk({
                 params: { eventId: event.id, planId },
               });
             }}
+            onChromeChange={setMessagesChrome}
           />
+        ) : activeNav === "Embeds" ? (
+          <EmbedManagerWorkspace event={event} />
         ) : activeNav === "Settings" ? (
           <SettingsWorkspace event={event} onEventUpdated={updateEvent} />
         ) : (
@@ -657,13 +636,13 @@ function EventDesk({
             </section>
           </div>
         )}
-      </main>
+      </OrganizerShell>
       <CreateEventDialog
         open={createEventOpen}
         onClose={() => setCreateEventOpen(false)}
         onCreated={eventCreated}
       />
-    </div>
+    </>
   );
 }
 
@@ -698,6 +677,32 @@ export function App() {
     );
   }
   return <EventDesk data={query.data} />;
+}
+
+export function OverviewPage() {
+  const query = useOrganizerData();
+  const params = useParams({ strict: false }) as { eventId?: string };
+
+  if (query.isPending) return <LoadingShell />;
+  if (query.error instanceof ApiError && query.error.status === 401) return <SignIn />;
+  if (query.isError) {
+    return (
+      <main className="sign-in-shell">
+        <section className="error-panel" role="alert">
+          <h1>ChartStead could not open the event overview.</h1>
+          <p>{query.error.message}</p>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <EventDesk
+      data={query.data}
+      initialNav="Overview"
+      initialEventId={params.eventId ?? null}
+    />
+  );
 }
 
 export function SubmissionsPage() {
@@ -763,10 +768,13 @@ export function AgendaPage() {
       data={query.data}
       initialNav="Agenda"
       initialEventId={params.eventId ?? null}
+      initialAgendaDay={typeof search.day === "string" ? search.day : null}
       initialAgendaSessionIds={
         typeof search.sessionIds === "string"
           ? search.sessionIds.split(",").filter(Boolean)
-          : []
+          : typeof search.session === "string"
+            ? [search.session]
+            : []
       }
     />
   );
@@ -803,21 +811,165 @@ export function MessagesPage() {
   );
 }
 
+export function FormsPage() {
+  const query = useOrganizerData();
+  const params = useParams({ strict: false }) as { eventId?: string };
+
+  if (query.isPending) return <LoadingShell />;
+  if (query.error instanceof ApiError && query.error.status === 401) return <SignIn />;
+  if (query.isError) {
+    return (
+      <main className="sign-in-shell">
+        <section className="error-panel" role="alert">
+          <h1>ChartStead could not open forms.</h1>
+          <p>{query.error.message}</p>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <EventDesk
+      data={query.data}
+      initialNav="Forms"
+      initialEventId={params.eventId ?? null}
+    />
+  );
+}
+
+export function CfpBuilderPage() {
+  const query = useOrganizerData();
+  const params = useParams({ strict: false }) as { eventId?: string; formId?: string };
+
+  if (query.isPending) return <LoadingShell />;
+  if (query.error instanceof ApiError && query.error.status === 401) return <SignIn />;
+  if (query.isError) {
+    return (
+      <main className="sign-in-shell">
+        <section className="error-panel" role="alert">
+          <h1>ChartStead could not open the CFP builder.</h1>
+          <p>{query.error.message}</p>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <EventDesk
+      data={query.data}
+      initialNav="Forms"
+      initialEventId={params.eventId ?? null}
+      initialFormId={params.formId ?? null}
+    />
+  );
+}
+
+export function SpeakersPage() {
+  const query = useOrganizerData();
+  const params = useParams({ strict: false }) as { eventId?: string };
+
+  if (query.isPending) return <LoadingShell />;
+  if (query.error instanceof ApiError && query.error.status === 401) return <SignIn />;
+  if (query.isError) {
+    return (
+      <main className="sign-in-shell">
+        <section className="error-panel" role="alert">
+          <h1>ChartStead could not open speakers.</h1>
+          <p>{query.error.message}</p>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <EventDesk
+      data={query.data}
+      initialNav="Speakers"
+      initialEventId={params.eventId ?? null}
+    />
+  );
+}
+
+
+export function EmbedsPage() {
+  const query = useOrganizerData();
+  const params = useParams({ strict: false }) as { eventId?: string };
+
+  if (query.isPending) return <LoadingShell />;
+  if (query.error instanceof ApiError && query.error.status === 401) return <SignIn />;
+  if (query.isError) {
+    return (
+      <main className="sign-in-shell">
+        <section className="error-panel" role="alert">
+          <h1>ChartStead could not open embeds.</h1>
+          <p>{query.error.message}</p>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <EventDesk
+      data={query.data}
+      initialNav="Embeds"
+      initialEventId={params.eventId ?? null}
+    />
+  );
+}
+export function SettingsPage() {
+  const query = useOrganizerData();
+  const params = useParams({ strict: false }) as { eventId?: string };
+
+  if (query.isPending) return <LoadingShell />;
+  if (query.error instanceof ApiError && query.error.status === 401) return <SignIn />;
+  if (query.isError) {
+    return (
+      <main className="sign-in-shell">
+        <section className="error-panel" role="alert">
+          <h1>ChartStead could not open settings.</h1>
+          <p>{query.error.message}</p>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <EventDesk
+      data={query.data}
+      initialNav="Settings"
+      initialEventId={params.eventId ?? null}
+    />
+  );
+}
+
+const PROPOSAL_SORTS: ProposalSort[] = [
+  "newest",
+  "oldest",
+  "title-asc",
+  "title-desc",
+  "track-asc",
+  "track-desc",
+  "status-asc",
+  "status-desc",
+  "speaker-asc",
+  "aggregate-asc",
+  "aggregate-desc",
+];
+
 function parseQueueSearch(search: Record<string, unknown>): ProposalQueueState {
   const status = ["unreviewed", "approve", "maybe", "deny", "all"].includes(
     String(search.status ?? ""),
   )
     ? (search.status as ProposalQueueState["status"])
     : "all";
-  const sort = ["newest", "oldest", "title-asc", "speaker-asc"].includes(
-    String(search.sort ?? ""),
-  )
-    ? (search.sort as ProposalQueueState["sort"])
+  const sort = PROPOSAL_SORTS.includes(String(search.sort ?? "") as ProposalSort)
+    ? (search.sort as ProposalSort)
     : "newest";
   return {
     query: typeof search.q === "string" ? search.q : "",
     status,
     track: typeof search.track === "string" ? search.track : "",
+    roundId: typeof search.roundId === "string" ? search.roundId : "",
     sort,
   };
 }
@@ -827,6 +979,7 @@ function queueSearch(queue: ProposalQueueState) {
     q: queue.query || undefined,
     status: queue.status === "all" ? undefined : queue.status,
     track: queue.track || undefined,
+    roundId: queue.roundId || undefined,
     sort: queue.sort === "newest" ? undefined : queue.sort,
   };
 }

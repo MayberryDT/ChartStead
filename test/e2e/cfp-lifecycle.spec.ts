@@ -1,9 +1,27 @@
 import { expect, test } from "@playwright/test";
 
+const eventId = "pacific-open-data-summit-2026";
+
+test("forms list and builder share organizer shell actions", async ({ page }) => {
+  await page.goto(`/e/${eventId}/forms`);
+  await expect(page.locator(".shell-toolbar")).toHaveCount(1);
+  await expect(page.locator(".builder-header")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Open CFP" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Create form" })).toHaveCount(1);
+
+  await page.getByRole("button", { name: "Create form" }).click();
+  await expect(page).toHaveURL(/\/e\/pacific-open-data-summit-2026\/forms\/[^/]+$/);
+  await expect(page.locator(".shell-toolbar")).toHaveCount(1);
+  await expect(page.locator(".builder-header")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "All forms" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open CFP" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Save draft" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Publish", exact: true })).toBeVisible();
+});
+
 test("organizer schedules, publishes, closes, and deliberately reopens a CFP", async ({
   page,
 }) => {
-  const eventId = "pacific-open-data-summit-2026";
   const name = `Lifecycle CFP ${Date.now().toString(36)}`;
   const created = await page.request.post(`/api/events/${eventId}/forms`, {
     data: { name },

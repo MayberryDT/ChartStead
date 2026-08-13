@@ -25,7 +25,15 @@ function session(
     day: "2026-10-07",
     calendarUid: `cal_${partial.id}`,
     calendarSequence: 0,
-    speakers: [{ id: "sp-1", name: "Ada Lovelace", role: "primary" }],
+    speakers: [
+      {
+        id: "sp-1",
+        name: "Ada Lovelace",
+        title: "Program Director",
+        company: "Analytical Engines",
+        role: "primary",
+      },
+    ],
     ...partial,
   };
 }
@@ -42,7 +50,7 @@ describe("public program helpers", () => {
         roomId: null,
         roomName: null,
         format: "workshop",
-        speakers: [{ id: "sp-2", name: "Grace", role: "primary" }],
+        speakers: [{ id: "sp-2", name: "Grace", title: "", company: "", role: "primary" }],
       }),
       session({
         id: "c",
@@ -72,6 +80,66 @@ describe("public program helpers", () => {
     expect(filterPublicSessions(sessions, { speakerId: "sp-2" }).map((s) => s.id)).toEqual([
       "b",
     ]);
+  });
+
+  it("matches title and speaker keywords and composes public facets", () => {
+    const sessions = [
+      session({
+        id: "a",
+        title: "Harbor data trusts",
+        trackId: "platform",
+        format: "keynote",
+        roomId: "harbor-hall",
+        speakers: [
+          {
+            id: "sp-1",
+            name: "Ada Lovelace",
+            title: "Program Director",
+            company: "Analytical Engines",
+            role: "primary",
+          },
+        ],
+      }),
+      session({
+        id: "b",
+        title: "Community maps",
+        trackId: "community",
+        format: "talk",
+        roomId: "compass-room",
+        speakers: [
+          {
+            id: "sp-2",
+            name: "Grace Hopper",
+            title: "Systems Lead",
+            company: "Compiler Works",
+            role: "primary",
+          },
+        ],
+      }),
+    ];
+
+    expect(filterPublicSessions(sessions, { query: "harbor data" }).map((s) => s.id)).toEqual([
+      "a",
+    ]);
+    expect(filterPublicSessions(sessions, { query: "grace hopper" }).map((s) => s.id)).toEqual([
+      "b",
+    ]);
+    expect(
+      filterPublicSessions(sessions, {
+        query: "ada",
+        trackId: "platform",
+        format: "keynote",
+        roomId: "harbor-hall",
+      }).map((s) => s.id),
+    ).toEqual(["a"]);
+    expect(
+      filterPublicSessions(sessions, {
+        query: "ada",
+        trackId: "community",
+        format: "keynote",
+        roomId: "harbor-hall",
+      }),
+    ).toEqual([]);
   });
 
   it("builds ICS with stable UID and sequence", () => {

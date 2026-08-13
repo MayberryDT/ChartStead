@@ -22,6 +22,7 @@ export default {
 
     for (const eventId of await listAllEventWorkspaceIds(env.AUTH_DB)) {
       const store = env.EVENT_STORE.getByName(eventId);
+      await store.processAutomaticOnboardingReminders();
       if (sender) {
         await flushEventOutbox({
           store,

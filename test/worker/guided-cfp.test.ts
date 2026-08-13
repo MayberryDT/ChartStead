@@ -6,6 +6,7 @@ import {
   canonicalizeCfpDefinition,
   createDefaultCfpDefinition,
   type CfpDefinitionV1,
+  setQuestionCondition,
   updateQuestion,
   updateSpeakerSettings,
   updateWelcome,
@@ -1646,6 +1647,10 @@ describe("guided CFP publishing and submitter follow-up", () => {
       title: "Intended audience",
       maxLength: 200,
     });
+    draft = setQuestionCondition(draft, "customAudience", {
+      fieldName: "trackId",
+      equals: "platform",
+    });
 
     const save = await demoApp.request(
       `https://chartstead.test/api/events/${eventId}/forms/${created.form.id}/draft`,
@@ -1758,12 +1763,65 @@ describe("guided CFP publishing and submitter follow-up", () => {
             ...baseAnswers,
             title: "Talk without workshop duration",
             sessionFormat: "talk",
+            workshopDuration: "stale value from a previous workshop selection",
           },
         }),
       },
       env,
     );
     expect(hiddenWorkshopDurationOmitted.status).toBe(201);
+    const hiddenProposal = await hiddenWorkshopDurationOmitted.json<{
+      proposal: { id: string };
+    }>();
+    const hiddenDetail = await demoApp.request(
+      `https://chartstead.test/api/events/${eventId}/organizer/proposals/${hiddenProposal.proposal.id}`,
+      undefined,
+      env,
+    );
+    expect(hiddenDetail.status).toBe(200);
+    const hiddenDetailBody = await hiddenDetail.json<{
+      proposal: { answers: SubmissionAnswers; workshopDuration: string };
+    }>();
+    expect(hiddenDetailBody.proposal.answers).not.toHaveProperty(
+      "workshopDuration",
+    );
+    expect(hiddenDetailBody.proposal.workshopDuration).toBe("");
+
+    const hiddenTrackAudience = await demoApp.request(
+      `https://chartstead.test/api/events/${eventId}/proposals`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "cf-connecting-ip": "203.0.113.207",
+        },
+        body: JSON.stringify({
+          formId,
+          formDefinitionVersion,
+          answers: {
+            ...baseAnswers,
+            title: "Track-hidden audience",
+            trackId: "program-ops",
+            customAudience: "stale value from the platform track",
+          },
+        }),
+      },
+      env,
+    );
+    expect(hiddenTrackAudience.status).toBe(201);
+    const hiddenTrackProposal = await hiddenTrackAudience.json<{
+      proposal: { id: string };
+    }>();
+    const hiddenTrackDetail = await demoApp.request(
+      `https://chartstead.test/api/events/${eventId}/organizer/proposals/${hiddenTrackProposal.proposal.id}`,
+      undefined,
+      env,
+    );
+    expect(hiddenTrackDetail.status).toBe(200);
+    const hiddenTrackBody = await hiddenTrackDetail.json<{
+      proposal: { answers: SubmissionAnswers };
+    }>();
+    expect(hiddenTrackBody.proposal.answers).not.toHaveProperty("customAudience");
 
     const wrongVersion = await demoApp.request(
       `https://chartstead.test/api/events/${eventId}/proposals`,

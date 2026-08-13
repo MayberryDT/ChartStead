@@ -22,4 +22,4 @@ Filed from Ticket 08 human QA (2026-08-11): drag/drop, counts, conflict persiste
 
 Same rule as Ticket 12: not solo agent-ready; polish is human-tandem.
 
-- 2026-08-12 — frontier-reconcile: Blockers satisfied; remains human-tandem only (not agent-ready).
+- 2026-08-13 — frontier-reconcile: Blockers satisfied; remains human-tandem only (not agent-ready).

@@ -246,7 +246,7 @@ export function EventConfigurationCard({
     <section className="settings-card event-configuration-card" aria-labelledby="event-configuration-heading">
       <div className="settings-card-header">
         <div>
-          <h3 id="event-configuration-heading">Event configuration</h3>
+          <h2 id="event-configuration-heading">Event configuration</h2>
           <p className="muted">
             Dates and timezone drive the workspace. Permanent identifiers keep links stable.
           </p>

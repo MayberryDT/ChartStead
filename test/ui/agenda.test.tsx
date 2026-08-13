@@ -16,6 +16,7 @@ import type {
   EventListResponse,
   OrganizerSession,
   ScheduleConflict,
+  SessionContentRecord,
 } from "../../shared/events";
 import { AgendaPage, App } from "../../src/App";
 
@@ -89,6 +90,7 @@ function agendaResponse(overrides?: Partial<AgendaWorkspaceResponse>): AgendaWor
     ...overrides?.counts,
   };
   return {
+    version: overrides?.version ?? 1,
     eventId,
     calendarIntents: [],
     ...overrides,
@@ -116,6 +118,13 @@ function renderAgenda(path = `/e/${eventId}/agenda`) {
     getParentRoute: () => rootRoute,
     path: "/e/$eventId/agenda",
     component: AgendaPage,
+    validateSearch: (
+      search: Record<string, unknown>,
+    ): { day?: string; session?: string; sessionIds?: string } => ({
+      day: typeof search.day === "string" ? search.day : undefined,
+      session: typeof search.session === "string" ? search.session : undefined,
+      sessionIds: typeof search.sessionIds === "string" ? search.sessionIds : undefined,
+    }),
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([indexRoute, agendaRoute]),
@@ -124,11 +133,14 @@ function renderAgenda(path = `/e/${eventId}/agenda`) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>,
-  );
+  return {
+    router,
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    ),
+  };
 }
 
 afterEach(() => {
@@ -161,6 +173,54 @@ describe("Ticket 08 agenda workspace", () => {
     expect(within(inspector).getByRole("heading", { name: "Platform Deep Dive" })).toBeVisible();
   });
 
+  it("uses the shared shell toolbar for direct Agenda navigation and day switching", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = requestUrl(input);
+        if (url.endsWith("/api/events") || url.endsWith("/api/events/")) {
+          return Response.json(eventsResponse);
+        }
+        if (url.endsWith(`/api/events/${eventId}/sessions`)) {
+          return Response.json(agendaResponse());
+        }
+        throw new Error(`Unexpected request ${url}`);
+      }),
+    );
+
+    const { container, router } = renderAgenda(
+      `/e/${eventId}/agenda?session=ses-2&day=2026-10-08`,
+    );
+
+    await screen.findByLabelText("Unplaced sessions");
+    const toolbars = container.querySelectorAll(".shell-toolbar");
+    expect(toolbars).toHaveLength(1);
+    const toolbar = toolbars[0] as HTMLElement;
+    expect(screen.queryByText("Schedule builder")).not.toBeInTheDocument();
+    expect(within(toolbar).getByText(/2 unplaced · 0 conflicts/i)).toBeVisible();
+    expect(within(toolbar).getByRole("button", { name: "Publish program" })).toBeVisible();
+    expect(
+      within(toolbar).getByRole("tab", { name: "Thu, Oct 8", selected: true }),
+    ).toBeVisible();
+    expect(
+      within(await screen.findByRole("complementary", { name: "Session inspector" })).getByRole(
+        "heading",
+        { name: "Platform Deep Dive" },
+      ),
+    ).toBeVisible();
+
+    await user.click(within(toolbar).getByRole("tab", { name: "Wed, Oct 7" }));
+
+    await waitFor(() => {
+      expect(
+        within(toolbar).getByRole("tab", { name: "Wed, Oct 7", selected: true }),
+      ).toBeVisible();
+    });
+    expect(router.state.location.search.day).toBeUndefined();
+    expect(router.state.location.search.sessionIds).toBe("ses-2");
+  });
+
   it("shows unplaced pool, live counts, TBD labels, and keyboard Move Session", async () => {
     const user = userEvent.setup();
     let agenda = agendaResponse();
@@ -183,7 +243,9 @@ describe("Ticket 08 agenda workspace", () => {
             roomId?: string | null;
             startsAt?: string | null;
             endsAt?: string | null;
+            expectedAgendaVersion?: number;
           };
+          expect(patch.expectedAgendaVersion).toBe(1);
           const updated = session({
             id: "ses-1",
             title: "Opening Keynote",
@@ -235,6 +297,122 @@ describe("Ticket 08 agenda workspace", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/Placement saved/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/1 unplaced · 0 conflicts/i)).toBeInTheDocument();
+  });
+
+  it("previews and applies an exact auto-place plan without optimistic drift", async () => {
+    const user = userEvent.setup();
+    let agenda = agendaResponse();
+    const placed = session({
+      id: "ses-1",
+      title: "Opening Keynote",
+      roomId: "harbor-hall",
+      roomName: "Harbor Hall",
+      startsAt: "2026-10-07T09:00:00.000Z",
+      endsAt: "2026-10-07T09:45:00.000Z",
+      placementStatus: "placed",
+    });
+    const preview = {
+      previewId: "agenda_preview_ui",
+      previewDigest: "digest-ui",
+      agendaVersion: 1,
+      selectedSessionIds: ["ses-1", "ses-2"],
+      includeManual: false,
+      proposals: [
+        {
+          sessionId: "ses-1",
+          title: "Opening Keynote",
+          roomId: "harbor-hall",
+          roomName: "Harbor Hall",
+          startsAt: "2026-10-07T09:00:00.000Z",
+          endsAt: "2026-10-07T09:45:00.000Z",
+          durationMinutes: 45,
+          reason: "First available conflict-free slot in the event window.",
+        },
+      ],
+      leftovers: [
+        {
+          sessionId: "ses-2",
+          title: "Platform Deep Dive",
+          placementStatus: "unplaced" as const,
+          reason: "No conflict-free 45-minute slot remains across the event days and ready rooms.",
+        },
+      ],
+      conflicts: [],
+      assumptions: ["Uses 45-minute sessions on 30-minute boundaries."],
+      manualPlacementPreserved: [],
+      createdAt: "2026-08-12T00:00:00.000Z",
+    };
+    const previewBodies: unknown[] = [];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = requestUrl(input);
+        const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+        if (url.endsWith("/api/events") || url.endsWith("/api/events/")) {
+          return Response.json(eventsResponse);
+        }
+        if (url.endsWith(`/api/events/${eventId}/agenda/auto-place/preview`) && method === "POST") {
+          previewBodies.push(JSON.parse(String(init?.body ?? "{}")));
+          return Response.json(preview, { status: 201 });
+        }
+        if (url.endsWith(`/api/events/${eventId}/agenda/auto-place/apply`) && method === "POST") {
+          const body = JSON.parse(String(init?.body ?? "{}")) as {
+            previewId: string;
+            previewDigest: string;
+            agendaVersion: number;
+          };
+          expect(body).toMatchObject({
+            previewId: preview.previewId,
+            previewDigest: preview.previewDigest,
+            agendaVersion: preview.agendaVersion,
+          });
+          agenda = agendaResponse({
+            version: 2,
+            sessions: [placed, agenda.sessions[1]],
+          });
+          return Response.json({
+            previewDigest: preview.previewDigest,
+            agendaVersion: 2,
+            appliedSessionIds: ["ses-1"],
+            unchangedSessionIds: [],
+            audit: {
+              id: "audit-1",
+              type: "auto_place.applied",
+              actorId: "admin-1",
+              actorName: "Ada Admin",
+              sessionIds: ["ses-1"],
+              summary: "Auto-placed 1 session(s); 1 left for manual placement.",
+              createdAt: "2026-08-12T00:00:01.000Z",
+            },
+            agenda,
+            idempotent: false,
+          });
+        }
+        if (url.includes(`/api/events/${eventId}/sessions`) && method === "GET") {
+          return Response.json(agenda);
+        }
+        return new Response(JSON.stringify({ error: `unhandled ${method} ${url}` }), {
+          status: 500,
+        });
+      }),
+    );
+
+    renderAgenda();
+
+    await user.click(await screen.findByRole("button", { name: "Preview auto-place" }));
+    expect(previewBodies).toEqual([{ includeManual: false }]);
+    expect(await screen.findByLabelText("Proposed auto-place slots")).toHaveTextContent(
+      "Opening Keynote",
+    );
+    expect(screen.getByLabelText("Auto-place leftovers")).toHaveTextContent("Platform Deep Dive");
+
+    await user.click(screen.getByRole("button", { name: "Apply exact preview" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Auto-placed 1 session/i)).toBeInTheDocument();
     });
     expect(screen.getByText(/1 unplaced · 0 conflicts/i)).toBeInTheDocument();
   });
@@ -326,5 +504,126 @@ describe("Ticket 08 agenda workspace", () => {
     await waitFor(() => {
       expect(screen.getByText(/0 unplaced · 0 conflicts/i)).toBeInTheDocument();
     });
+  });
+
+  it("edits central session content and restores an audited version", async () => {
+    const user = userEvent.setup();
+    const base = session({ id: "ses-1", title: "Opening Keynote" });
+    let content: SessionContentRecord = {
+      ...base,
+      abstract: "Original abstract",
+      publicContent: "Original public copy",
+      contentStatus: "draft",
+      contentVersion: 1,
+      contentUpdatedAt: "2026-08-01T00:00:00.000Z",
+      contentUpdatedBy: { id: "system", name: "Proposal acceptance" },
+      contentHistory: [
+        {
+          id: "history-1",
+          sessionId: base.id,
+          version: 1,
+          title: base.title,
+          abstract: "Original abstract",
+          publicContent: "Original public copy",
+          status: "draft",
+          changedFields: ["title", "abstract", "publicContent", "status"],
+          previous: null,
+          actorId: "system",
+          actorName: "Proposal acceptance",
+          createdAt: "2026-08-01T00:00:00.000Z",
+          changeKind: "initial",
+        },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = requestUrl(input);
+        const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+        if (url.endsWith("/api/events") || url.endsWith("/api/events/")) {
+          return Response.json(eventsResponse);
+        }
+        if (url.endsWith(`/api/events/${eventId}/sessions`) && method === "GET") {
+          return Response.json(agendaResponse({ sessions: [{ ...base, title: content.title }] }));
+        }
+        if (url.endsWith(`/api/events/${eventId}/session-content`) && method === "GET") {
+          return Response.json({ eventId, sessions: [content] });
+        }
+        if (url.endsWith(`/session-content/${base.id}`) && method === "PATCH") {
+          const body = JSON.parse(String(init?.body)) as {
+            title: string;
+            abstract: string;
+            publicContent: string;
+          };
+          content = {
+            ...content,
+            ...body,
+            contentVersion: 2,
+            contentHistory: [
+              {
+                ...content.contentHistory[0],
+                id: "history-2",
+                version: 2,
+                title: body.title,
+                abstract: body.abstract,
+                publicContent: body.publicContent,
+                changedFields: ["title", "abstract", "publicContent"],
+                previous: {
+                  title: content.title,
+                  abstract: content.abstract,
+                  publicContent: content.publicContent,
+                  status: content.contentStatus,
+                },
+                actorId: "admin-1",
+                actorName: "Ada Admin",
+                changeKind: "edit",
+              },
+              ...content.contentHistory,
+            ],
+          };
+          return Response.json({ session: content });
+        }
+        if (url.endsWith(`/session-content/${base.id}/restore`) && method === "POST") {
+          content = {
+            ...content,
+            title: "Opening Keynote",
+            abstract: "Original abstract",
+            publicContent: "Original public copy",
+            contentVersion: 3,
+            contentHistory: [
+              {
+                ...content.contentHistory[0],
+                id: "history-3",
+                version: 3,
+                title: "Opening Keynote",
+                abstract: "Original abstract",
+                publicContent: "Original public copy",
+                changedFields: ["title", "abstract", "publicContent"],
+                changeKind: "restore",
+              },
+              ...content.contentHistory,
+            ],
+          };
+          return Response.json({ session: content });
+        }
+        return new Response(JSON.stringify({ error: `unhandled ${method} ${url}` }), { status: 500 });
+      }),
+    );
+
+    renderAgenda();
+    expect(await screen.findByRole("heading", { name: "Public session content" })).toBeVisible();
+    await user.clear(screen.getByLabelText("Session title"));
+    await user.type(screen.getByLabelText("Session title"), "Revised keynote");
+    await user.clear(screen.getByLabelText("Abstract"));
+    await user.type(screen.getByLabelText("Abstract"), "Revised abstract");
+    await user.click(screen.getByRole("button", { name: "Save content" }));
+    expect(await screen.findByText("Session content saved.")).toBeVisible();
+    expect(screen.getByText(/Version 2 · draft/)).toBeVisible();
+
+    await user.click(screen.getByText("Version history (2)"));
+    await user.click(screen.getByRole("button", { name: "Restore version 1" }));
+    expect(await screen.findByText("Earlier content restored as a new version.")).toBeVisible();
+    expect(screen.getByLabelText("Session title")).toHaveValue("Opening Keynote");
+    expect(screen.getByText(/Version 3 · draft/)).toBeVisible();
   });
 });

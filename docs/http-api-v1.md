@@ -91,6 +91,8 @@ Review body (internal only — never sends email):
 
 Session placement patch accepts day/room/time fields and allows partial/`TBD` placement. Conflicts are warnings, not hard failures.
 
+Speaker responses keep `name`, `email`, and `biography` as the current reusable identity. Their separate `participation` object contains this event's preserved title, organization, role, workflow status, travel preferences, and logistics fields.
+
 ### Public program (member + public UI route)
 
 | Method | Path | Role |

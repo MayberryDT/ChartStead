@@ -3,6 +3,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import type { CourseCheckPlan } from "../../shared/course-check";
 import type {
+  AgendaAutoPlaceApplyResponse,
+  AgendaAutoPlacePreview,
   AgendaWorkspaceResponse,
   OrganizerPrincipal,
   OrganizerProposal,
@@ -117,6 +119,42 @@ async function placeSession(
     `https://chartstead.test/api/events/${eventId}/sessions/${sessionId}`,
     {
       method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    env,
+  );
+  return {
+    status: response.status,
+    payload: await response.json(),
+  };
+}
+
+async function previewAutoPlace(
+  body: Record<string, unknown>,
+): Promise<{ status: number; payload: AgendaAutoPlacePreview | { error: string; code?: string; currentVersion?: number } }> {
+  const response = await adminApp.request(
+    `https://chartstead.test/api/events/${eventId}/agenda/auto-place/preview`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    env,
+  );
+  return {
+    status: response.status,
+    payload: await response.json(),
+  };
+}
+
+async function applyAutoPlace(
+  body: Record<string, unknown>,
+): Promise<{ status: number; payload: AgendaAutoPlaceApplyResponse | { error: string; code?: string; currentVersion?: number } }> {
+  const response = await adminApp.request(
+    `https://chartstead.test/api/events/${eventId}/agenda/auto-place/apply`,
+    {
+      method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     },
@@ -364,6 +402,134 @@ describe("Ticket 08 fluid agenda", () => {
           intent.sessionId === session.id && intent.kind === "update",
       ),
     ).toBe(true);
+  });
+
+  it("rejects stale manual placement versions with an actionable reason", async () => {
+    const agenda = await getAgenda();
+    const session =
+      agenda.sessions.find((item) => item.placementStatus !== "placed") ??
+      agenda.sessions[0];
+    expect(session).toBeTruthy();
+
+    const stale = await placeSession(session.id, {
+      roomId: "harbor-hall",
+      expectedAgendaVersion: agenda.version + 1,
+    });
+    expect(stale.status).toBe(409);
+    expect(stale.payload).toMatchObject({
+      error: expect.stringContaining("agenda changed"),
+      code: "agenda_version_mismatch",
+      currentVersion: agenda.version,
+    });
+
+    const placed = await placeSession(session.id, {
+      roomId: "harbor-hall",
+      startsAt: "2026-10-08T11:00:00.000Z",
+      endsAt: "2026-10-08T11:45:00.000Z",
+      expectedAgendaVersion: agenda.version,
+    });
+    expect(placed.status).toBe(200);
+
+    const reloaded = await getAgenda();
+    const persisted = reloaded.sessions.find((item) => item.id === session.id);
+    expect(persisted).toMatchObject({
+      roomId: "harbor-hall",
+      startsAt: "2026-10-08T11:00:00.000Z",
+      endsAt: "2026-10-08T11:45:00.000Z",
+      placementStatus: "placed",
+    });
+    expect(reloaded.version).toBeGreaterThan(agenda.version);
+  });
+
+  it("previews, version-checks, applies, audits, and idempotently replays auto-place", async () => {
+    const proposals = await listProposals();
+    const candidates = proposals.filter((p) => p.programOutcome !== "accepted").slice(0, 2);
+    expect(candidates.length).toBeGreaterThanOrEqual(2);
+    await acceptProposal(candidates[0].id, `t18-auto-a-${candidates[0].id}`);
+    await acceptProposal(candidates[1].id, `t18-auto-b-${candidates[1].id}`);
+
+    let agenda = await getAgenda();
+    const targets = candidates.map((proposal) =>
+      agenda.sessions.find((session) => session.proposalId === proposal.id),
+    );
+    expect(targets.every(Boolean)).toBe(true);
+
+    const preview = await previewAutoPlace({
+      selectedSessionIds: targets.map((session) => session!.id),
+      includeManual: false,
+    });
+    expect(preview.status).toBe(201);
+    const previewBody = preview.payload as AgendaAutoPlacePreview;
+    expect(previewBody.agendaVersion).toBe(agenda.version);
+    expect(previewBody.proposals.length).toBeGreaterThan(0);
+    expect(previewBody.assumptions.length).toBeGreaterThan(0);
+    expect(previewBody.conflicts).toEqual(agenda.conflicts);
+
+    const staleMutation = await placeSession(previewBody.proposals[0].sessionId, {
+      roomId: "harbor-hall",
+      startsAt: "2026-10-08T12:00:00.000Z",
+      endsAt: "2026-10-08T12:45:00.000Z",
+      expectedAgendaVersion: previewBody.agendaVersion,
+    });
+    expect(staleMutation.status).toBe(200);
+
+    const staleApply = await applyAutoPlace({
+      previewId: previewBody.previewId,
+      previewDigest: previewBody.previewDigest,
+      agendaVersion: previewBody.agendaVersion,
+      idempotencyKey: "t18-auto-stale",
+    });
+    expect(staleApply.status).toBe(409);
+    expect(staleApply.payload).toMatchObject({
+      code: "agenda_version_mismatch",
+      error: expect.stringContaining("agenda changed"),
+    });
+
+    agenda = await getAgenda();
+    const fresh = await previewAutoPlace({});
+    expect(fresh.status).toBe(201);
+    const freshBody = fresh.payload as AgendaAutoPlacePreview;
+    expect(freshBody.agendaVersion).toBe(agenda.version);
+    expect(freshBody.proposals.length).toBeGreaterThan(0);
+    expect(
+      freshBody.proposals.some((proposal) => proposal.sessionId === previewBody.proposals[0].sessionId),
+    ).toBe(false);
+
+    const applied = await applyAutoPlace({
+      previewId: freshBody.previewId,
+      previewDigest: freshBody.previewDigest,
+      agendaVersion: freshBody.agendaVersion,
+      idempotencyKey: "t18-auto-apply",
+    });
+    expect(applied.status).toBe(200);
+    const appliedBody = applied.payload as AgendaAutoPlaceApplyResponse;
+    expect(appliedBody.appliedSessionIds.length).toBe(freshBody.proposals.length);
+    expect(appliedBody.audit).toMatchObject({
+      type: "auto_place.applied",
+      sessionIds: appliedBody.appliedSessionIds,
+    });
+    expect(appliedBody.agenda.version).toBeGreaterThan(freshBody.agendaVersion);
+
+    const replay = await applyAutoPlace({
+      previewId: freshBody.previewId,
+      previewDigest: freshBody.previewDigest,
+      agendaVersion: freshBody.agendaVersion,
+      idempotencyKey: "t18-auto-apply",
+    });
+    expect(replay.status).toBe(200);
+    expect(replay.payload).toMatchObject({
+      idempotent: true,
+      appliedSessionIds: appliedBody.appliedSessionIds,
+    });
+
+    const reloaded = await getAgenda();
+    expect(
+      appliedBody.appliedSessionIds.every((sessionId) => {
+        const session = reloaded.sessions.find((item) => item.id === sessionId);
+        return session?.placementStatus === "placed";
+      }),
+    ).toBe(true);
+    expect(reloaded.auditEvents?.some((event) => event.id === appliedBody.audit.id)).toBe(true);
   });
 
   it("forbids reviewer access to agenda mutations", async () => {

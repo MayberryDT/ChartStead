@@ -16,11 +16,13 @@ Issues and specs live as Markdown under `.scratch/`. The board is a live mirror 
 | --- | --- | --- |
 | Competition build | `.scratch/chartstead-competition-build/` | `Competition NN` |
 | Course Check | `.scratch/chartstead-course-check/` | `Course Check NN` |
+| Rubric completion | `.scratch/chartstead-rubric-completion/` | `Rubric NN` |
 
 Absolute main-checkout paths (board source of truth):
 
 - `/home/halla/ChartStead/.scratch/chartstead-competition-build/issues/`
 - `/home/halla/ChartStead/.scratch/chartstead-course-check/issues/`
+- `/home/halla/ChartStead/.scratch/chartstead-rubric-completion/issues/`
 
 ## Live board
 
@@ -53,7 +55,7 @@ Once a ticket is `in-progress`, advance only to `in-review` or `done` (or `block
 
 ## Blocking edges
 
-- Prefer **qualified** cross-track refs: `Competition 08`, `Course Check 03`.
+- Prefer **qualified** cross-track refs: `Competition 08`, `Course Check 03`, `Rubric 04`.
 - Same-track numeric refs (`02 — …`) resolve inside that track.
 - A ticket is unblocked when every listed blocker is `done` / `complete`.
 - **Human-tandem** tickets stay human-tandem even when blockers are done — they never auto-promote to `ready-for-agent`.
@@ -67,7 +69,7 @@ When you start, finish, or block a ticket:
 1. Update `**Status:**` on the **main checkout** issue path (and the worktree copy if you have one).
 2. Update the `- [ ]` / `- [x]` checklist to match real progress.
 3. Append a concise dated note under `## Comments`.
-4. **Re-scan both tracks (frontier maintenance).** For every non-human-tandem ticket still `blocked`, check whether every declared blocker is now `done`/`complete`. If yes, set that ticket to `ready-for-agent` and comment why. Partially satisfied blockers stay `blocked` (annotate which remain). Never finish a ticket leave-behind that leaves Open empty while the graph has free agent work.
+4. **Re-scan all tracks (frontier maintenance).** For every non-human-tandem ticket still `blocked`, check whether every declared blocker is now `done`/`complete`. If yes, set that ticket to `ready-for-agent` and comment why. Partially satisfied blockers stay `blocked` (annotate which remain). Never finish a ticket leave-behind that leaves Open empty while the graph has free agent work.
 5. Mechanical check (required on closeout):
 
 ```bash

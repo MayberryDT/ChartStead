@@ -34,6 +34,12 @@ const TRACKS = [
     dir: join(REPO_ROOT, ".scratch/chartstead-course-check/issues"),
     aliases: ["course check", "course-check", "cc"],
   },
+  {
+    id: "rubric-completion",
+    label: "Rubric",
+    dir: join(REPO_ROOT, ".scratch/chartstead-rubric-completion/issues"),
+    aliases: ["rubric", "rubric completion", "rubric-completion"],
+  },
 ];
 
 function parseFront(raw) {
@@ -104,7 +110,7 @@ function parseBlockers(blockedBy, defaultTrackId) {
 
   for (const part of parts) {
     const m = part.match(
-      /^(?:(Competition|Comp|Course Check|Course-Check|CC)\s+)?(\d+[a-z]?)\b/i,
+      /^(?:(Competition|Comp|Course Check|Course-Check|CC|Rubric|Rubric Completion|Rubric-Completion)\s+)?(\d+[a-z]?)\b/i,
     );
     if (!m) continue;
     const prefix = (m[1] || "").toLowerCase();
@@ -112,6 +118,7 @@ function parseBlockers(blockedBy, defaultTrackId) {
     let trackId = defaultTrackId;
     if (/^comp/.test(prefix)) trackId = "competition";
     if (/^course|^cc$/.test(prefix)) trackId = "course-check";
+    if (/^rubric/.test(prefix)) trackId = "rubric-completion";
     out.push({ trackId, num, raw: part });
   }
   return out;

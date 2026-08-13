@@ -1,16 +1,74 @@
 import type {
+  PublicEmbedFieldVisibility,
+  PublicEmbedTheme,
+  PublicEmbedWidget,
   PublicProgramFilters,
   PublicProgramSession,
   PublicProgramSpeaker,
+  SessionContentStatus,
 } from "./events";
 import { placementStatus } from "./schedule-conflicts";
+
+export const PUBLIC_EMBED_WIDGETS: PublicEmbedWidget[] = [
+  "sessions",
+  "speakers",
+  "agenda",
+  "itinerary",
+  "speaker-gallery",
+];
+
+export const PUBLIC_EMBED_THEMES: PublicEmbedTheme[] = ["light", "dark", "minimal"];
+
+export const DEFAULT_PUBLIC_EMBED_FIELDS: PublicEmbedFieldVisibility = {
+  title: true,
+  dateTime: true,
+  room: true,
+  track: true,
+  speakers: true,
+  description: true,
+  format: true,
+  headshots: true,
+  biography: true,
+};
+
+export function isPublicEmbedWidget(value: unknown): value is PublicEmbedWidget {
+  return typeof value === "string" && PUBLIC_EMBED_WIDGETS.includes(value as PublicEmbedWidget);
+}
+
+export function normalizePublicEmbedTheme(value: unknown): PublicEmbedTheme {
+  return typeof value === "string" && PUBLIC_EMBED_THEMES.includes(value as PublicEmbedTheme)
+    ? (value as PublicEmbedTheme)
+    : "light";
+}
+
+export function normalizePublicEmbedFields(
+  value: Partial<PublicEmbedFieldVisibility> | null | undefined,
+): PublicEmbedFieldVisibility {
+  return {
+    ...DEFAULT_PUBLIC_EMBED_FIELDS,
+    ...(value ?? {}),
+  };
+}
+
+export function normalizePublicProgramFilters(value: unknown): PublicProgramFilters {
+  const input = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  return {
+    query: typeof input.query === "string" && input.query.trim() ? input.query.trim() : undefined,
+    day: typeof input.day === "string" && input.day.trim() ? input.day.trim() : undefined,
+    trackId: typeof input.trackId === "string" && input.trackId.trim() ? input.trackId.trim() : undefined,
+    roomId: typeof input.roomId === "string" && input.roomId.trim() ? input.roomId.trim() : undefined,
+    format: typeof input.format === "string" && input.format.trim() ? input.format.trim() : undefined,
+    speakerId: typeof input.speakerId === "string" && input.speakerId.trim() ? input.speakerId.trim() : undefined,
+  };
+}
 
 export type PublishabilityReason =
   | "unplaced"
   | "missing_title"
   | "missing_description"
   | "missing_speaker"
-  | "private";
+  | "private"
+  | "content_not_approved";
 
 export interface PublishabilityResult {
   publishable: boolean;
@@ -22,12 +80,21 @@ export interface PublishabilityResult {
 export function assessSessionPublishability(
   session: Pick<
     PublicProgramSession,
-    "title" | "description" | "roomId" | "startsAt" | "endsAt" | "speakers"
-  > & { private?: boolean },
+    | "title"
+    | "description"
+    | "roomId"
+    | "startsAt"
+    | "endsAt"
+    | "speakers"
+    | "contentStatus"
+  > & { private?: boolean; contentStatus?: SessionContentStatus },
 ): PublishabilityResult {
   const placement = placementStatus(session);
   const reasons: PublishabilityReason[] = [];
   if (session.private) reasons.push("private");
+  if (session.contentStatus && session.contentStatus !== "approved") {
+    reasons.push("content_not_approved");
+  }
   if (placement === "unplaced") reasons.push("unplaced");
   if (!session.title.trim()) reasons.push("missing_title");
   if (!session.description.trim()) reasons.push("missing_description");
@@ -44,9 +111,14 @@ export function assessSessionPublishability(
 export function selectValidPublicSubset(
   sessions: PublicProgramSession[],
   speakers: PublicProgramSpeaker[],
+  contentStatuses?: Readonly<Record<string, SessionContentStatus>>,
 ): { sessions: PublicProgramSession[]; speakers: PublicProgramSpeaker[] } {
   const included = sessions.filter(
-    (session) => assessSessionPublishability(session).publishable,
+    (session) =>
+      assessSessionPublishability({
+        ...session,
+        contentStatus: contentStatuses ? contentStatuses[session.id] : undefined,
+      }).publishable,
   );
   const ids = new Set(included.map((session) => session.id));
   return {
@@ -75,7 +147,13 @@ export function sessionPublicFingerprint(
     calendarUid: session.calendarUid,
     calendarSequence: session.calendarSequence,
     speakers: session.speakers
-      .map((speaker) => ({ id: speaker.id, name: speaker.name, role: speaker.role }))
+      .map((speaker) => ({
+        id: speaker.id,
+        name: speaker.name,
+        title: speaker.title,
+        company: speaker.company,
+        role: speaker.role,
+      }))
       .sort((a, b) => a.id.localeCompare(b.id)),
   };
 }
@@ -83,12 +161,33 @@ export function sessionPublicFingerprint(
 export function filterPublicSessions(
   sessions: PublicProgramSession[],
   filters: PublicProgramFilters,
+  timeZone = "UTC",
 ): PublicProgramSession[] {
+  const queryTokens = (filters.query ?? "")
+    .trim()
+    .toLocaleLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+
   return sessions.filter((session) => {
+    if (queryTokens.length > 0) {
+      const searchable = [
+        session.title,
+        ...session.speakers.flatMap((speaker) => [
+          speaker.name,
+          speaker.title,
+          speaker.company,
+        ]),
+      ]
+        .join(" ")
+        .toLocaleLowerCase();
+      if (!queryTokens.every((token) => searchable.includes(token))) return false;
+    }
     if (filters.day) {
+      const sessionDay = publicProgramDay(session.startsAt, session.day, timeZone);
       if (filters.day === "tbd") {
-        if (session.day !== null) return false;
-      } else if (session.day !== filters.day) {
+        if (sessionDay !== null) return false;
+      } else if (sessionDay !== filters.day) {
         return false;
       }
     }
@@ -120,6 +219,75 @@ export function filterPublicSpeakers(
   );
 }
 
+export type PublicProgramDay = {
+  day: string;
+  sessions: PublicProgramSession[];
+};
+
+/** Resolve a scheduled session to the event's calendar day. */
+export function publicProgramDay(
+  startsAt: string | null,
+  fallbackDay: string | null,
+  timeZone = "UTC",
+): string | null {
+  if (fallbackDay) return fallbackDay;
+  if (!startsAt) return fallbackDay;
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date(startsAt));
+    const values = new Map(parts.map((part) => [part.type, part.value]));
+    const year = values.get("year");
+    const month = values.get("month");
+    const day = values.get("day");
+    return year && month && day ? `${year}-${month}-${day}` : fallbackDay;
+  } catch {
+    return fallbackDay;
+  }
+}
+
+function comparePublicSessions(
+  a: PublicProgramSession,
+  b: PublicProgramSession,
+): number {
+  if (a.startsAt && b.startsAt) {
+    const time = a.startsAt.localeCompare(b.startsAt);
+    if (time !== 0) return time;
+  } else if (a.startsAt) {
+    return -1;
+  } else if (b.startsAt) {
+    return 1;
+  }
+  const title = a.title.localeCompare(b.title);
+  return title !== 0 ? title : a.id.localeCompare(b.id);
+}
+
+/** Group the published program into chronological day sections, with TBD last. */
+export function groupPublicSessionsByDay(
+  sessions: PublicProgramSession[],
+  timeZone = "UTC",
+): PublicProgramDay[] {
+  const groups = new Map<string, PublicProgramSession[]>();
+  for (const session of sessions) {
+    const day = publicProgramDay(session.startsAt, session.day, timeZone) ?? "tbd";
+    const group = groups.get(day);
+    if (group) group.push(session);
+    else groups.set(day, [session]);
+  }
+
+  return Array.from(groups, ([day, groupedSessions]) => ({
+    day,
+    sessions: groupedSessions.sort(comparePublicSessions),
+  })).sort((a, b) => {
+    if (a.day === "tbd") return 1;
+    if (b.day === "tbd") return -1;
+    return a.day.localeCompare(b.day);
+  });
+}
+
 function pad(value: number): string {
   return String(value).padStart(2, "0");
 }
@@ -136,12 +304,12 @@ export function toIcsUtc(iso: string): string {
 function icsEscape(value: string): string {
   return value
     .replace(/\\/g, "\\\\")
-    .replace(/\n/g, "\\n")
+    .replace(/\r\n|\r|\n/g, "\\n")
     .replace(/,/g, "\\,")
     .replace(/;/g, "\\;");
 }
 
-export function buildSessionIcs(input: {
+export interface SessionIcsInput {
   uid: string;
   sequence: number;
   title: string;
@@ -150,17 +318,13 @@ export function buildSessionIcs(input: {
   startsAt: string | null;
   endsAt: string | null;
   eventName: string;
-}): string {
-  const now = toIcsUtc(new Date().toISOString());
+}
+
+function buildSessionIcsLines(input: SessionIcsInput, dtStamp: string): string[] {
   const lines = [
-    "BEGIN:VCALENDAR",
-    "VERSION:2.0",
-    "PRODID:-//ChartStead//Public Program//EN",
-    "CALSCALE:GREGORIAN",
-    "METHOD:PUBLISH",
     "BEGIN:VEVENT",
     `UID:${input.uid}`,
-    `DTSTAMP:${now}`,
+    `DTSTAMP:${dtStamp}`,
     `SEQUENCE:${Math.max(0, input.sequence)}`,
     `SUMMARY:${icsEscape(input.title)}`,
   ];
@@ -182,8 +346,36 @@ export function buildSessionIcs(input: {
 
   lines.push(`CATEGORIES:${icsEscape(input.eventName)}`);
   lines.push("END:VEVENT");
-  lines.push("END:VCALENDAR");
+  return lines;
+}
+
+export function buildCombinedIcs(inputs: SessionIcsInput[]): string {
+  const now = toIcsUtc(new Date().toISOString());
+  const orderedInputs = [...inputs].sort((a, b) => {
+    if (a.startsAt && b.startsAt) {
+      const time = a.startsAt.localeCompare(b.startsAt);
+      if (time !== 0) return time;
+    } else if (a.startsAt) {
+      return -1;
+    } else if (b.startsAt) {
+      return 1;
+    }
+    return a.uid.localeCompare(b.uid);
+  });
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//ChartStead//Public Program//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    ...orderedInputs.flatMap((input) => buildSessionIcsLines(input, now)),
+    "END:VCALENDAR",
+  ];
   return `${lines.join("\r\n")}\r\n`;
+}
+
+export function buildSessionIcs(input: SessionIcsInput): string {
+  return buildCombinedIcs([input]);
 }
 
 export interface CalendarAddTargets {

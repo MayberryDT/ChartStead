@@ -7,13 +7,14 @@ Start with [DESIGN.md](DESIGN.md). It is the canonical design-system specificati
 Locked visual implementation lives in **[source-of-truth/](source-of-truth/)**.
 
 - Written system: [DESIGN.md](DESIGN.md)
+- Cross-screen organizer contract: [ORGANIZER-DESK-CHROME.md](ORGANIZER-DESK-CHROME.md)
 - **Visual truth:** [source-of-truth/organizer-submissions.html](source-of-truth/organizer-submissions.html) — Harbor Master Desk shell + submissions master-detail
 - Exploration only (not canonical): [prototypes/](prototypes/)
 - Mood / hierarchy only: [references/marketing/](references/marketing/)
 
-When app UI and the source-of-truth HTML disagree, match the HTML (or revise the HTML deliberately first). See [source-of-truth/README.md](source-of-truth/README.md).
+When app UI and the source-of-truth HTML disagree, match the HTML and the organizer contract (or revise them deliberately first). See [source-of-truth/README.md](source-of-truth/README.md).
 
-The HTML is the visual truth, while product behavior remains governed by [context.md](../context.md), the [competition build plan](../context/BUILD-PLAN.md), and the behavioral contract in [source-of-truth/README.md](source-of-truth/README.md). Do not infer missing workflow behavior from a static screen alone.
+The HTML is the visual truth for the reference surface, while cross-screen shell behavior is governed by [ORGANIZER-DESK-CHROME.md](ORGANIZER-DESK-CHROME.md). Product behavior remains governed by [context.md](../context.md), the [competition build plan](../context/BUILD-PLAN.md), and the behavioral contract in [source-of-truth/README.md](source-of-truth/README.md). Do not infer missing workflow behavior from a static screen alone.
 
 ## Brand assets
 

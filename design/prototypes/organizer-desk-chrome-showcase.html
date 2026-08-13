@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ChartStead — Organizer Desk Chrome Showcase</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --ink: #081d3a;
+        --ink-soft: #526071;
+        --muted: #6d7a89;
+        --blue: #2f5d98;
+        --blue-dark: #173b70;
+        --harbor: #e8f0f8;
+        --harbor-border: #c5d4e6;
+        --line: #d7dee7;
+        --line-strong: #aebac8;
+        --paper: #fff;
+        --fog: #f3f5f7;
+        --selection: #eaf2fb;
+        --green: #087a4d;
+        --green-bg: #e9f8f1;
+        --amber: #8a4d09;
+        --amber-bg: #fff4e5;
+        --red: #8a1c13;
+        --red-bg: #fdecea;
+        --radius: 3px;
+        --shadow: 0 18px 48px rgba(8, 29, 58, 0.12);
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: #dfe8f1;
+        font: 14px/1.45 Inter, system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      button, input { font: inherit; }
+      button { cursor: pointer; }
+      :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+      .page {
+        width: min(1420px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 30px 0 48px;
+      }
+      .intro {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 20px;
+      }
+      .eyebrow {
+        margin: 0 0 8px;
+        color: var(--blue-dark);
+        font: 600 11px/1.2 "JetBrains Mono", monospace;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+      }
+      h1, h2, h3, p { margin-top: 0; }
+      h1 {
+        max-width: 760px;
+        margin-bottom: 8px;
+        font-size: clamp(30px, 4vw, 54px);
+        line-height: 1.02;
+        letter-spacing: -.045em;
+      }
+      .intro-copy { max-width: 720px; margin-bottom: 0; color: var(--ink-soft); font-size: 16px; }
+      .stamp {
+        flex: 0 0 auto;
+        padding: 10px 12px;
+        border: 1px solid var(--harbor-border);
+        background: rgba(255, 255, 255, .6);
+        color: var(--blue-dark);
+        font: 600 11px/1.35 "JetBrains Mono", monospace;
+        text-transform: uppercase;
+        letter-spacing: .05em;
+      }
+
+      .desk {
+        display: grid;
+        grid-template-columns: 214px minmax(0, 1fr);
+        min-height: 650px;
+        overflow: hidden;
+        border: 1px solid rgba(8, 29, 58, .2);
+        background: var(--paper);
+        box-shadow: var(--shadow);
+      }
+      .rail {
+        display: flex;
+        flex-direction: column;
+        padding: 15px 10px 12px;
+        color: #fff;
+        background: var(--ink);
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 2px 8px 22px;
+        border-bottom: 1px solid rgba(255, 255, 255, .1);
+      }
+      .mark {
+        display: grid;
+        width: 30px;
+        height: 30px;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, .28);
+        color: #fff;
+        font: 600 12px "JetBrains Mono", monospace;
+      }
+      .brand strong { display: block; font-size: 14px; letter-spacing: -.02em; }
+      .brand small { display: block; margin-top: 1px; color: rgba(255, 255, 255, .55); font-size: 10px; }
+      .nav { display: grid; gap: 3px; padding-top: 14px; }
+      .nav button {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-height: 38px;
+        padding: 0 10px;
+        border: 0;
+        border-left: 2px solid transparent;
+        color: rgba(255, 255, 255, .68);
+        background: transparent;
+        text-align: left;
+        font-weight: 600;
+      }
+      .nav button:hover { color: #fff; background: rgba(255, 255, 255, .06); }
+      .nav button.active { border-left-color: #22b573; color: #fff; background: var(--blue-dark); }
+      .nav .count { margin-left: auto; color: rgba(255, 255, 255, .62); font: 500 11px "JetBrains Mono", monospace; }
+      .account {
+        margin-top: auto;
+        padding: 11px 10px;
+        border: 1px solid rgba(255, 255, 255, .11);
+        background: rgba(255, 255, 255, .04);
+      }
+      .account strong, .account small { display: block; }
+      .account strong { font-size: 12px; }
+      .account small { margin-top: 3px; color: rgba(255, 255, 255, .55); font-size: 10px; }
+      .event {
+        margin-top: 9px;
+        padding: 10px;
+        border: 1px solid rgba(255, 255, 255, .14);
+        color: #fff;
+        background: rgba(255, 255, 255, .05);
+        text-align: left;
+      }
+      .event small { display: block; color: rgba(255, 255, 255, .48); font: 600 9px "JetBrains Mono", monospace; letter-spacing: .1em; text-transform: uppercase; }
+      .event strong { display: block; margin-top: 4px; font-size: 11px; line-height: 1.3; }
+
+      .main { min-width: 0; display: grid; grid-template-rows: auto 1fr; background: var(--fog); }
+      .shell-toolbar {
+        display: flex;
+        align-items: center;
+        min-height: 64px;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--harbor-border);
+        background: var(--harbor);
+      }
+      .toolbar-inner { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; }
+      .search {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: min(280px, 30vw);
+        min-width: 170px;
+        height: 34px;
+        padding: 0 10px;
+        border: 1px solid #b7c9de;
+        border-radius: var(--radius);
+        background: rgba(255, 255, 255, .76);
+        color: var(--muted);
+      }
+      .search input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 12px; }
+      .seg { display: flex; border: 1px solid #b7c9de; border-radius: var(--radius); background: rgba(255, 255, 255, .76); }
+      .seg button, .select, .action {
+        height: 34px;
+        padding: 0 10px;
+        border: 0;
+        border-right: 1px solid #d7e1ec;
+        background: transparent;
+        color: var(--ink-soft);
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .seg button:last-child { border-right: 0; }
+      .seg button.active { color: #fff; background: var(--ink); }
+      .select { border: 1px solid #b7c9de; border-radius: var(--radius); background: rgba(255, 255, 255, .76); }
+      .grow { flex: 1; }
+      .batch {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding-left: 10px;
+        border-left: 1px solid #b7c9de;
+        white-space: nowrap;
+      }
+      .batch-idle { opacity: .55; }
+      .batch strong { min-width: 80px; text-align: right; font-size: 11px; }
+      .action { border: 1px solid #aebdce; border-radius: var(--radius); background: rgba(255, 255, 255, .68); }
+      .action.primary { border-color: var(--blue); color: #fff; background: var(--blue); }
+      .action:disabled { cursor: default; color: var(--muted); background: #edf1f5; }
+
+      .content { min-width: 0; padding: 20px; overflow: auto; }
+      .content-head { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 15px; }
+      .content h2 { margin-bottom: 3px; font-size: 23px; letter-spacing: -.03em; }
+      .meta { margin-bottom: 0; color: var(--ink-soft); font-size: 12px; }
+      .rule-note { color: var(--blue-dark); font: 600 10px "JetBrains Mono", monospace; letter-spacing: .06em; text-transform: uppercase; }
+      .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 330px; min-height: 425px; border: 1px solid var(--line); background: var(--paper); }
+      .queue { min-width: 0; overflow: auto; }
+      table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+      th { height: 38px; padding: 0 10px; border-bottom: 1px solid var(--line); color: var(--ink-soft); background: var(--fog); font: 600 10px "JetBrains Mono", monospace; letter-spacing: .06em; text-align: left; text-transform: uppercase; }
+      td { height: 58px; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; font-size: 12px; }
+      tr:hover td, tr.selected td { background: var(--selection); }
+      .check { width: 16px; height: 16px; accent-color: var(--blue); vertical-align: middle; }
+      .sort { border: 0; padding: 0; color: inherit; background: transparent; font: inherit; letter-spacing: inherit; text-transform: inherit; }
+      .talk { display: block; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+      .sub { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+      .avatar { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; color: var(--blue-dark); background: #dce9f5; font: 600 10px "JetBrains Mono", monospace; }
+      .status { display: inline-block; padding: 4px 6px; border: 1px solid; border-radius: 2px; font-size: 10px; font-weight: 700; }
+      .status.open { color: var(--blue-dark); border-color: #b7cde5; background: var(--selection); }
+      .status.maybe { color: var(--amber); border-color: #f0d4a8; background: var(--amber-bg); }
+      .status.accept { color: var(--green); border-color: #b7e5cf; background: var(--green-bg); }
+      .inspector { display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--paper); }
+      .inspector-head { padding: 15px 16px 12px; border-bottom: 1px solid var(--line); }
+      .kicker { color: var(--muted); font: 600 10px "JetBrains Mono", monospace; letter-spacing: .08em; }
+      .inspector h3 { margin: 7px 0 4px; font-size: 16px; line-height: 1.25; letter-spacing: -.02em; }
+      .who { color: var(--ink-soft); font-size: 11px; }
+      .panels { display: grid; gap: 8px; padding: 12px 16px; }
+      .panel { padding: 10px; border: 1px solid var(--line); background: var(--fog); }
+      .panel strong { display: block; margin-bottom: 4px; color: var(--muted); font: 600 10px "JetBrains Mono", monospace; letter-spacing: .06em; text-transform: uppercase; }
+      .panel p { margin: 0; color: var(--ink-soft); font-size: 11px; }
+      .decisions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: auto; padding: 12px 16px; border-top: 1px solid var(--line); }
+      .decision { height: 34px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: #fff; color: var(--ink-soft); font-size: 11px; font-weight: 700; }
+      .decision.accept { border-color: #b7e5cf; color: var(--green); background: var(--green-bg); }
+      .decision.maybe { border-color: #f0d4a8; color: var(--amber); background: var(--amber-bg); }
+      .decision.deny { border-color: #e5b8b2; color: var(--red); background: var(--red-bg); }
+
+      .below { display: grid; grid-template-columns: 1.2fr .8fr; gap: 14px; margin-top: 14px; }
+      .card { padding: 16px; border: 1px solid var(--line); background: rgba(255, 255, 255, .72); }
+      .card h3 { margin-bottom: 11px; font-size: 13px; letter-spacing: -.01em; }
+      .contract { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+      .contract-item { padding: 10px; border-left: 3px solid var(--blue); background: var(--paper); }
+      .contract-item strong { display: block; margin-bottom: 3px; font-size: 11px; }
+      .contract-item span { display: block; color: var(--ink-soft); font-size: 11px; }
+      .ownership { width: 100%; border-collapse: collapse; }
+      .ownership td { height: auto; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 11px; }
+      .ownership td:last-child { color: var(--blue-dark); font-weight: 600; text-align: right; }
+      .lane { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 14px; }
+      .lane-card { min-height: 92px; padding: 11px; border: 1px solid var(--line); background: rgba(255, 255, 255, .72); }
+      .lane-card b { display: block; margin-bottom: 7px; color: var(--blue-dark); font: 600 10px "JetBrains Mono", monospace; }
+      .lane-card span { color: var(--ink-soft); font-size: 11px; }
+      .footer-note { margin: 16px 0 0; color: var(--ink-soft); font-size: 11px; }
+
+      @media (max-width: 1060px) {
+        .desk { grid-template-columns: 72px minmax(0, 1fr); }
+        .rail { padding-inline: 8px; }
+        .brand { justify-content: center; padding-inline: 0; }
+        .brand > div, .nav button span:not(.count), .account, .event { display: none; }
+        .nav button { justify-content: center; padding-inline: 0; }
+        .workspace { grid-template-columns: minmax(0, 1fr) 290px; }
+      }
+      @media (max-width: 820px) {
+        .page { width: min(100% - 20px, 620px); padding-top: 18px; }
+        .intro { display: block; }
+        .stamp { display: inline-block; margin-top: 15px; }
+        .desk { display: block; min-height: 0; }
+        .rail { display: none; }
+        .main { min-height: 720px; }
+        .shell-toolbar { overflow-x: auto; }
+        .toolbar-inner { width: max-content; }
+        .content { padding: 14px; }
+        .workspace { grid-template-columns: 1fr; }
+        .inspector { border-top: 1px solid var(--line); border-left: 0; }
+        .below, .lane { grid-template-columns: 1fr 1fr; }
+      }
+      @media (max-width: 540px) {
+        .below, .lane, .contract { grid-template-columns: 1fr; }
+        .content-head { display: block; }
+        .rule-note { display: block; margin-top: 10px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header class="intro">
+        <div>
+          <p class="eyebrow">ChartStead / preflight showcase</p>
+          <h1>One organizer desk. Clearer work surfaces.</h1>
+          <p class="intro-copy">A quick visual check of the chrome contract now locked for agent-led polish. The Submissions desk is the reference; the other organizer surfaces inherit its frame without becoming copies of its table.</p>
+        </div>
+        <div class="stamp">Reference revision<br />2026-08-12 · Ticket 27</div>
+      </header>
+
+      <section class="desk" aria-label="Organizer desk preview">
+        <aside class="rail">
+          <div class="brand"><span class="mark">CS</span><div><strong>ChartStead</strong><small>Conference programming</small></div></div>
+          <nav class="nav" aria-label="Preview navigation">
+            <button type="button"><span>◌</span><span>Overview</span></button>
+            <button type="button" class="active"><span>▤</span><span>Submissions</span><span class="count">47</span></button>
+            <button type="button"><span>□</span><span>Forms</span></button>
+            <button type="button"><span>⌗</span><span>Agenda</span></button>
+            <button type="button"><span>✉</span><span>Messages</span></button>
+            <button type="button"><span>♙</span><span>Speakers</span></button>
+            <button type="button"><span>⚙</span><span>Settings</span></button>
+          </nav>
+          <div class="account"><strong>Alex Morgan</strong><small>Event administrator</small></div>
+          <button class="event" type="button"><small>Event</small><strong>Pacific Open Data Summit 2026</strong></button>
+        </aside>
+
+        <div class="main">
+          <header class="shell-toolbar">
+            <div class="toolbar-inner">
+              <label class="search"><span aria-hidden="true">⌕</span><input aria-label="Search title, speaker, or ID" placeholder="Search title, speaker, or ID" /></label>
+              <div class="seg" aria-label="Status filter">
+                <button class="active" type="button">All</button><button type="button">Unreviewed</button><button type="button">Approve</button><button type="button">Maybe</button><button type="button">Deny</button>
+              </div>
+              <button class="select" type="button">All tracks ▾</button>
+              <span class="grow"></span>
+              <div class="batch batch-idle" aria-label="Batch actions">
+                <strong>None selected</strong><button class="action primary" type="button" disabled>Accept batch</button><button class="action" type="button" disabled>Decline</button><button class="action" type="button" disabled>Clear</button>
+              </div>
+            </div>
+          </header>
+
+          <section class="content">
+            <div class="content-head">
+              <div><h2>Submissions</h2><p class="meta">47 total · 18 unreviewed · track routing on</p></div>
+              <span class="rule-note">Shell + queue reference</span>
+            </div>
+            <div class="workspace">
+              <div class="queue">
+                <table aria-label="Preview submissions queue">
+                  <colgroup><col style="width: 38px" /><col style="width: 44px" /><col /><col style="width: 150px" /><col style="width: 106px" /><col style="width: 92px" /></colgroup>
+                  <thead><tr><th><input class="check" type="checkbox" aria-label="Select all" /></th><th></th><th><button class="sort" type="button">Talk ↕</button></th><th><button class="sort" type="button">Track ↕</button></th><th><button class="sort" type="button">Status ↕</button></th><th><button class="sort" type="button">Submitted ↕</button></th></tr></thead>
+                  <tbody>
+                    <tr class="selected"><td><input class="check" type="checkbox" aria-label="Select submission" /></td><td><span class="avatar">MC</span></td><td><span class="talk">Rethinking Edge Caching for Multi-Region APIs</span><span class="sub">Maya Chen · Platform</span></td><td>Platform</td><td><span class="status open">Unreviewed</span></td><td>Aug 2</td></tr>
+                    <tr><td><input class="check" type="checkbox" aria-label="Select submission" /></td><td><span class="avatar">JL</span></td><td><span class="talk">Designing Accessible Data Tables at Scale</span><span class="sub">Jordan Lee · Design Systems</span></td><td>Design Systems</td><td><span class="status maybe">Maybe</span></td><td>Jul 28</td></tr>
+                    <tr><td><input class="check" type="checkbox" aria-label="Select submission" /></td><td><span class="avatar">PN</span></td><td><span class="talk">From CFP Chaos to Scheduled Program</span><span class="sub">Priya Nair · Program Ops</span></td><td>Program Ops</td><td><span class="status accept">Approve</span></td><td>Jul 21</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <aside class="inspector" aria-label="Preview inspector">
+                <div class="inspector-head"><span class="kicker">SUB-1042</span><h3>Rethinking Edge Caching for Multi-Region APIs</h3><span class="who">Maya Chen · Platform · 45 min</span></div>
+                <div class="panels"><div class="panel"><strong>Submission body</strong><p>A practical playbook for cache invalidation across regions without stampedes.</p></div><div class="panel"><strong>Committee note</strong><p>Check overlap with SUB-1108 before accepting both Platform slots.</p></div><div class="panel"><strong>Internal note</strong><p>Private operator context stays visually separate from public material.</p></div></div>
+                <div class="decisions"><button class="decision accept" type="button">Approve</button><button class="decision maybe" type="button">Maybe</button><button class="decision deny" type="button">Deny</button></div>
+              </aside>
+            </div>
+
+            <div class="below">
+              <section class="card"><h3>Contract now shared by every organizer tab</h3><div class="contract"><div class="contract-item"><strong>One shell toolbar</strong><span>Blue frame, white work surface, no nested command bars.</span></div><div class="contract-item"><strong>One home per action</strong><span>Forms owns CFP, Settings owns reviewers, queues own batch work.</span></div><div class="contract-item"><strong>Stable operational objects</strong><span>Rows, sort headers, select-all, readable status, useful hit targets.</span></div><div class="contract-item"><strong>Snappy local work</strong><span>Filter and sort cached queues without wiping the table.</span></div></div></section>
+              <section class="card"><h3>Action ownership</h3><table class="ownership"><tr><td>Account + event</td><td>Sidebar rail</td></tr><tr><td>Workspace tools</td><td>Shell toolbar</td></tr><tr><td>Open CFP</td><td>Forms</td></tr><tr><td>Reviewer routing</td><td>Settings</td></tr><tr><td>Proposal decisions</td><td>Inspector</td></tr></table></section>
+            </div>
+
+            <section class="lane" aria-label="Agent lane preview">
+              <div class="lane-card"><b>28 · FOUNDATION</b><span>Shared shell baseline across organizer routes.</span></div>
+              <div class="lane-card"><b>29 · AGENDA</b><span>Move day and room tools into the shell contract.</span></div>
+              <div class="lane-card"><b>30 · FORMS</b><span>Forms list and CFP builder baseline polish.</span></div>
+              <div class="lane-card"><b>31 · SPEAKERS</b><span>Directory and onboarding desk baseline.</span></div>
+              <div class="lane-card"><b>32 · MESSAGES</b><span>List/detail and delivery workspace chrome.</span></div>
+              <div class="lane-card"><b>33 · SETTINGS</b><span>Settings shell and section rhythm.</span></div>
+              <div class="lane-card"><b>34 · VERIFY</b><span>Route parity, responsive states, and no nested bars.</span></div>
+            </section>
+            <p class="footer-note">This page is a review showcase, not a second source of truth. The canonical contract is <code>design/ORGANIZER-DESK-CHROME.md</code>; the canonical visual reference is <code>design/source-of-truth/organizer-submissions.html</code>.</p>
+          </section>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

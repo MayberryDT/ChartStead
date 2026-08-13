@@ -7,13 +7,14 @@ import type {
   ProposalValidationError,
   PublishedCfpForm,
   SubmissionAnswers,
+  SubmitterProposalDraft,
 } from "../shared/events";
 import { ApiError } from "./api";
 import { registerUppyAssetQuestion } from "./UppyAssetQuestion";
 
 registerUppyAssetQuestion();
 
-export type CfpRuntimeMode = "public" | "preview" | "edit";
+export type CfpRuntimeMode = "public" | "preview" | "edit" | "draft";
 
 interface CfpRuntimeProps {
   eventId: string;
@@ -27,6 +28,13 @@ interface CfpRuntimeProps {
     form: PublishedCfpForm,
   ) => Promise<{ id: string }>;
   onSubmitted?: (proposalId: string) => void;
+  onSaveDraft?: (
+    answers: SubmissionAnswers,
+    form: PublishedCfpForm,
+  ) => Promise<SubmitterProposalDraft>;
+  onDraftSaved?: (draft: SubmitterProposalDraft) => void;
+  draftUpdatedAt?: string | null;
+  saveDraftText?: string;
 }
 
 function applyFieldError(
@@ -82,6 +90,10 @@ export function CfpRuntime({
   completeText,
   onSubmit,
   onSubmitted,
+  onSaveDraft,
+  onDraftSaved,
+  draftUpdatedAt,
+  saveDraftText = "Save draft",
 }: CfpRuntimeProps) {
   const surveyJson = form.definition?.runtime?.survey;
   const [survey] = useState(() => {
@@ -89,14 +101,23 @@ export function CfpRuntime({
       throw new Error("Published form is missing a SurveyJS runtime definition.");
     }
     const model = new Model(surveyJson);
+    // Conditional answers are ephemeral: once a question is hidden, its value
+    // must not reappear when the condition becomes true again or reach storage.
+    model.clearInvisibleValues = "onHidden";
     if (initialAnswers) {
       model.data = initialAnswers;
+      for (const question of model.getAllQuestions()) {
+        if (!question.isVisible) question.clearValue();
+      }
     }
     if (completeText) {
       model.completeText = completeText;
     }
     if (mode === "edit") {
       model.completedHtml = "<p>Your proposal was updated.</p>";
+    }
+    if (mode === "draft") {
+      model.showCompleteButton = false;
     }
     return model;
   });
@@ -122,13 +143,45 @@ export function CfpRuntime({
     survey.setVariable("mode", mode);
   }, [eventId, form.definitionVersion, form.id, mode, survey]);
 
+  const [draftStatus, setDraftStatus] = useState<
+    | { tone: "idle"; message: string | null }
+    | { tone: "saving"; message: string }
+    | { tone: "saved"; message: string }
+    | { tone: "error"; message: string }
+  >({ tone: "idle", message: null });
+
+  async function saveDraft() {
+    if (!onSaveDraft) return;
+    setDraftStatus({ tone: "saving", message: "Saving draft…" });
+    try {
+      const draft = await onSaveDraft(survey.data as SubmissionAnswers, form);
+      setDraftStatus({
+        tone: "saved",
+        message: `Draft saved ${new Date(draft.updatedAt).toLocaleTimeString()}.`,
+      });
+      onDraftSaved?.(draft);
+    } catch (error) {
+      setDraftStatus({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Unable to save draft.",
+      });
+    }
+  }
+
   useEffect(() => {
-    if (mode === "preview" || !onSubmit) {
+    if (mode === "draft") {
+      survey.showCompleteButton = false;
+    }
+    if (mode === "preview" || mode === "draft" || !onSubmit) {
       survey.mode = mode === "preview" ? "display" : "edit";
       if (mode === "preview") {
         // Preview stays interactive for conditions/speakers, but does not complete.
         survey.mode = "edit";
         survey.showCompleteButton = true;
+      }
+      if (mode === "draft") {
+        survey.mode = "edit";
+        survey.showCompleteButton = false;
       }
     }
 
@@ -188,6 +241,14 @@ export function CfpRuntime({
     };
   }, [eventId, form, mode, onSubmit, onSubmitted, survey]);
 
+  useEffect(() => {
+    if (!draftUpdatedAt) return;
+    setDraftStatus({
+      tone: "saved",
+      message: `Draft saved ${new Date(draftUpdatedAt).toLocaleTimeString()}.`,
+    });
+  }, [draftUpdatedAt]);
+
   const meta = useMemo(
     () => ({
       formId: form.id,
@@ -205,6 +266,27 @@ export function CfpRuntime({
       data-cfp-mode={meta.mode}
       style={{ ["--cfp-accent" as string]: themeAccent }}
     >
+      {onSaveDraft ? (
+        <div className="cfp-draft-actions">
+          <button
+            className="secondary-action"
+            type="button"
+            disabled={draftStatus.tone === "saving"}
+            onClick={() => void saveDraft()}
+          >
+            {draftStatus.tone === "saving" ? "Saving…" : saveDraftText}
+          </button>
+          {draftStatus.message ? (
+            <p
+              className="form-message"
+              data-tone={draftStatus.tone === "error" ? "error" : "success"}
+              role={draftStatus.tone === "error" ? "alert" : "status"}
+            >
+              {draftStatus.message}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       <Survey model={survey} />
     </div>
   );

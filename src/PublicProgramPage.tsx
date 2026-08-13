@@ -1,19 +1,85 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useParams, useSearch } from "@tanstack/react-router";
+import { Link, useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 
+import type { PublicEmbedWidget, PublicProgramFilters } from "../shared/events";
+import { isPublicEmbedWidget } from "../shared/public-program";
 import markOnLightUrl from "../design/assets/brand/chartstead-mark-on-light.png";
-import { ApiError, fetchPublicProgram } from "./api";
+import { ApiError, fetchPublicEmbed, fetchPublicProgram } from "./api";
 import { PublicProgramRenderer } from "./PublicProgramRenderer";
 
-export function PublicProgramPage({ mode = "page" }: { mode?: "page" | "embed" }) {
-  const { eventId } = useParams({
-    from: mode === "embed" ? "/e/$eventId/program/embed" : "/e/$eventId/program",
-  });
-  const search = useSearch({
-    from: mode === "embed" ? "/e/$eventId/program/embed" : "/e/$eventId/program",
-  });
+type ProgramSurface = PublicEmbedWidget | "program";
+
+function parseProgramFilters(search: Record<string, unknown>): PublicProgramFilters {
+  return {
+    query: typeof search.query === "string" ? search.query : undefined,
+    day: typeof search.day === "string" ? search.day : undefined,
+    trackId: typeof search.trackId === "string" ? search.trackId : undefined,
+    roomId: typeof search.roomId === "string" ? search.roomId : undefined,
+    format: typeof search.format === "string" ? search.format : undefined,
+    speakerId: typeof search.speakerId === "string" ? search.speakerId : undefined,
+  };
+}
+
+function programSearch(
+  revisionId: string | undefined,
+  filters: PublicProgramFilters,
+  selectedSessionId: string | null,
+  widget?: ProgramSurface,
+) {
+  return {
+    revision: revisionId,
+    widget: widget && widget !== "program" ? widget : undefined,
+    query: filters.query,
+    day: filters.day,
+    trackId: filters.trackId,
+    roomId: filters.roomId,
+    format: filters.format,
+    speakerId: filters.speakerId,
+    session: selectedSessionId ?? undefined,
+  };
+}
+
+export function PublicProgramPage({
+  mode = "page",
+  widget,
+}: {
+  mode?: "page" | "embed";
+  widget?: ProgramSurface;
+}) {
+  const params = useParams({ strict: false }) as { eventId?: string };
+  const eventId = params.eventId ?? "";
+  const search = useRouterState({ select: (state) => state.location.search }) as Record<
+    string,
+    unknown
+  >;
   const revisionId =
     typeof search.revision === "string" ? search.revision : undefined;
+  const searchWidget = isPublicEmbedWidget(search.widget) ? search.widget : undefined;
+  const surface = widget ?? searchWidget ?? "program";
+  const navigate = useNavigate();
+  const filters = parseProgramFilters(search);
+  const selectedSessionId =
+    typeof search.session === "string" ? search.session : null;
+
+  const updateProgramSearch = (
+    nextFilters: PublicProgramFilters,
+    nextSessionId: string | null,
+  ) => {
+    const nextSearch = programSearch(revisionId, nextFilters, nextSessionId, surface);
+    if (mode === "embed") {
+      void navigate({
+        to: "/e/$eventId/program/embed",
+        params: { eventId },
+        search: nextSearch,
+      });
+      return;
+    }
+    void navigate({
+      to: "/e/$eventId/program",
+      params: { eventId },
+      search: nextSearch,
+    });
+  };
 
   const program = useQuery({
     queryKey: ["public-program", eventId, revisionId ?? "current"],
@@ -51,7 +117,15 @@ export function PublicProgramPage({ mode = "page" }: { mode?: "page" | "embed" }
           <img src={markOnLightUrl} width="40" height="40" alt="" />
         </div>
       ) : null}
-      <PublicProgramRenderer data={program.data} mode={mode} />
+      <PublicProgramRenderer
+        data={program.data}
+        mode={mode}
+        widget={surface}
+        filters={filters}
+        onFiltersChange={(nextFilters) => updateProgramSearch(nextFilters, null)}
+        selectedSessionId={selectedSessionId}
+        onSelectSession={(sessionId) => updateProgramSearch(filters, sessionId)}
+      />
       <footer className="program-footer">
         <p>Powered by ChartStead</p>
         {mode === "page" ? (
@@ -59,7 +133,7 @@ export function PublicProgramPage({ mode = "page" }: { mode?: "page" | "embed" }
             <Link
               to="/e/$eventId/program/embed"
               params={{ eventId }}
-              search={{ revision: revisionId }}
+              search={programSearch(revisionId, filters, selectedSessionId, surface)}
             >
               Embed view
             </Link>
@@ -72,4 +146,77 @@ export function PublicProgramPage({ mode = "page" }: { mode?: "page" | "embed" }
 
 export function PublicProgramEmbedPage() {
   return <PublicProgramPage mode="embed" />;
+}
+
+export function PublicSessionsPage() {
+  return <PublicProgramPage widget="sessions" />;
+}
+
+export function PublicSpeakersPage() {
+  return <PublicProgramPage widget="speakers" />;
+}
+
+export function PublicAgendaPage() {
+  return <PublicProgramPage widget="agenda" />;
+}
+
+export function PublicItineraryPage() {
+  return <PublicProgramPage widget="itinerary" />;
+}
+
+export function PublicSpeakerGalleryPage() {
+  return <PublicProgramPage widget="speaker-gallery" />;
+}
+
+export function PublicManagedEmbedPage() {
+  const params = useParams({ strict: false }) as { eventId?: string; embedId?: string };
+  const eventId = params.eventId ?? "";
+  const embedId = params.embedId ?? "";
+  const embed = useQuery({
+    queryKey: ["public-embed", eventId, embedId],
+    queryFn: () => fetchPublicEmbed(eventId, embedId),
+  });
+
+  if (embed.isPending) {
+    return (
+      <main className="program-shell mode-embed" aria-busy="true">
+        <p>Loading public embed…</p>
+      </main>
+    );
+  }
+
+  if (embed.isError) {
+    return (
+      <main className="program-shell mode-embed">
+        <section className="error-panel" role="alert">
+          <h1>Embed unavailable</h1>
+          <p>
+            {embed.error instanceof ApiError
+              ? embed.error.message
+              : "Unable to load the public embed."}
+          </p>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <main className="program-shell mode-embed managed-embed-shell">
+      <PublicProgramRenderer
+        data={embed.data.program}
+        mode="embed"
+        widget={embed.data.config.widget}
+        theme={embed.data.config.theme}
+        fieldVisibility={embed.data.config.fields}
+      />
+      <footer className="program-footer">
+        <p>Powered by ChartStead</p>
+        {embed.data.config.revisionId ? (
+          <p>Revision-pinned embed</p>
+        ) : (
+          <p>Updates with the current published revision</p>
+        )}
+      </footer>
+    </main>
+  );
 }

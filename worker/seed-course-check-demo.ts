@@ -226,6 +226,9 @@ export function buildCourseCheckDemoProposals(
       reviewVersion: 0,
       submittedAt: `2026-08-${String((index % 10) + 1).padStart(2, "0")}T15:00:00.000Z`,
       confirmationEmailStatus: null,
+      scorecardAggregate: null,
+      reviewerRecusal: null,
+      reviewerRecusals: [],
     } satisfies OrganizerProposal;
   });
 }

@@ -465,6 +465,9 @@ export interface CommunicationRecipient {
   deliverability: RecipientDeliverability;
   selected: boolean;
   priorCommunications: PriorCommunicationEvidence[];
+  /** Set only for personalized speaker-portal invitation plans. */
+  portalUrl?: string | null;
+  portalTokenId?: string | null;
 }
 
 export interface CommunicationRecipientGroup {
@@ -528,6 +531,8 @@ export interface CommunicationPlanBody {
   actionType: "communication";
   source: CommunicationPlanSource;
   purpose: CommunicationPurpose;
+  /** Invitation plans carry one scoped portal link per selected speaker. */
+  portalInvitation?: boolean;
   templateKind: CommunicationTemplateKind;
   subject: string;
   bodyText: string;

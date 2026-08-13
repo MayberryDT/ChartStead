@@ -24,7 +24,7 @@ test("organizer can add, search, filter, and correct an event speaker", async ({
   await expect(page.getByRole("button", { name: new RegExp(name) })).toBeVisible();
   await expect(page.getByText(/1(?: of \d+)? speakers?/)).toBeVisible();
   await page
-    .getByRole("combobox", { name: "Readiness filter" })
+    .getByRole("combobox", { name: "Directory filter" })
     .selectOption("ready");
   await expect(page.getByRole("button", { name: new RegExp(name) })).toBeVisible();
 

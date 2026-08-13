@@ -168,9 +168,10 @@ test("competition spine: CFP through public program with Airtable unconfigured",
 
   await page.goto(`/e/${eventId}/submissions`);
   await page.getByRole("navigation", { name: "Organizer" }).getByText("Settings").click();
-  await expect(page.getByRole("heading", { name: "Settings", level: 2 })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible({
     timeout: 15_000,
   });
+  await expect(page.getByRole("heading", { name: "Event configuration", level: 2 })).toBeVisible();
   await expect(page.getByText(/Airtable sync|Not connected|Airtable/i).first()).toBeVisible();
 });
 

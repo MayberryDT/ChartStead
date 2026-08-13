@@ -61,7 +61,15 @@ function programResponse(
         day: "2026-10-07",
         calendarUid: "cal_ses-1",
         calendarSequence: 0,
-        speakers: [{ id: "sp-1", name: "Ada Lovelace", role: "primary" }],
+         speakers: [
+           {
+             id: "sp-1",
+             name: "Ada Lovelace",
+             title: "Program Director",
+             company: "Analytical Engines",
+             role: "primary",
+           },
+         ],
       },
       {
         id: "ses-2",
@@ -78,7 +86,15 @@ function programResponse(
         day: null,
         calendarUid: "cal_ses-2",
         calendarSequence: 0,
-        speakers: [{ id: "sp-2", name: "Grace Hopper", role: "primary" }],
+         speakers: [
+           {
+             id: "sp-2",
+             name: "Grace Hopper",
+             title: "Systems Lead",
+             company: "Compiler Works",
+             role: "primary",
+           },
+         ],
       },
     ],
     speakers: [
@@ -86,6 +102,9 @@ function programResponse(
         id: "sp-1",
         name: "Ada Lovelace",
         biography: "Analytical engines for organizers.",
+        title: "Program Director",
+        company: "Analytical Engines",
+        socialLinks: { linkedin: "", x: "", github: "", website: "https://ada.example.test" },
         headshotAssetId: null,
         sessionIds: ["ses-1"],
       },
@@ -93,6 +112,8 @@ function programResponse(
         id: "sp-2",
         name: "Grace Hopper",
         biography: "Debugging the schedule.",
+        title: "Systems Lead",
+        company: "Compiler Works",
         headshotAssetId: null,
         sessionIds: ["ses-2"],
       },
@@ -126,14 +147,175 @@ describe("PublicProgramRenderer", () => {
 
     expect(within(schedule()).getByText("Opening Keynote")).toBeInTheDocument();
     expect(within(schedule()).getByText("Community Circle")).toBeInTheDocument();
-    expect(within(speakers()).getByText("Ada Lovelace")).toBeInTheDocument();
-    expect(within(speakers()).getByText("Grace Hopper")).toBeInTheDocument();
+    expect(within(speakers()).getAllByText("Ada Lovelace").length).toBeGreaterThan(0);
+    expect(within(speakers()).getAllByText("Grace Hopper").length).toBeGreaterThan(0);
 
     await user.selectOptions(screen.getByLabelText("Track"), "platform");
     expect(within(schedule()).getByText("Opening Keynote")).toBeInTheDocument();
     expect(within(schedule()).queryByText("Community Circle")).not.toBeInTheDocument();
-    expect(within(speakers()).getByText("Ada Lovelace")).toBeInTheDocument();
+    expect(within(speakers()).getAllByText("Ada Lovelace").length).toBeGreaterThan(0);
     expect(within(speakers()).queryByText("Grace Hopper")).not.toBeInTheDocument();
+  });
+
+  it("renders the complete card anatomy and expands one description without losing state", async () => {
+    const user = userEvent.setup();
+    const longDescription = Array.from(
+      { length: 3 },
+      () => "A public program description that remains useful when the card is expanded.",
+    ).join(" ");
+    render(
+      <PublicProgramRenderer
+        data={programResponse({
+          sessions: [
+            { ...programResponse().sessions[0]!, description: longDescription },
+            programResponse().sessions[1]!,
+          ],
+        })}
+      />,
+    );
+
+    const card = screen.getByTestId("public-session-card-ses-1");
+    expect(within(card).getByRole("heading", { name: "Opening Keynote" })).toBeInTheDocument();
+    expect(within(card).getByText(/Oct 7.*3:00 PM.*3:45 PM/i)).toBeInTheDocument();
+    expect(within(card).getByText("Harbor Hall")).toBeInTheDocument();
+    expect(within(card).getByText("Ada Lovelace")).toBeInTheDocument();
+    expect(within(card).getByText("Program Director · Analytical Engines")).toBeInTheDocument();
+    expect(within(card).getByText("keynote")).toBeInTheDocument();
+    expect(within(card).getByText("Platform")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Track"), "platform");
+    await user.type(screen.getByRole("searchbox", { name: "Search sessions or speakers" }), "Ada");
+    await user.click(within(card).getByRole("button", { name: "Opening Keynote" }));
+    const expand = within(card).getByRole("button", { name: "Show more" });
+    await user.click(expand);
+
+    expect(expand).toHaveAttribute("aria-expanded", "true");
+    expect(within(card).getByText(longDescription)).toBeInTheDocument();
+    expect(screen.getByLabelText("Track")).toHaveValue("platform");
+    expect(screen.getByRole("searchbox", { name: "Search sessions or speakers" })).toHaveValue(
+      "Ada",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("1 of 2 sessions");
+    expect(screen.getByRole("button", { name: "Opening Keynote" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    await user.click(expand);
+    expect(expand).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("searches titles and speakers, composes track/format/location facets, and counts results", async () => {
+    const user = userEvent.setup();
+    render(<PublicProgramRenderer data={programResponse()} />);
+
+    const search = screen.getByRole("searchbox", { name: "Search sessions or speakers" });
+    await user.type(search, "Grace Hopper");
+    expect(screen.getByTestId("public-session-card-ses-2")).toBeInTheDocument();
+    expect(screen.queryByTestId("public-session-card-ses-1")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("1 of 2 sessions");
+
+    await user.selectOptions(screen.getByLabelText("Track"), "community");
+    await user.selectOptions(screen.getByLabelText("Format"), "talk");
+    await user.selectOptions(screen.getByLabelText("Location"), "tbd");
+    expect(screen.getByTestId("public-session-card-ses-2")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("1 of 2 sessions");
+
+    await user.selectOptions(screen.getByLabelText("Track"), "platform");
+    expect(screen.getByText("No sessions match these filters.")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("0 of 2 sessions");
+  });
+
+  it("orders speaker directory and gallery by surname and opens public-safe speaker details", async () => {
+    const user = userEvent.setup();
+    const longBiography = Array.from(
+      { length: 5 },
+      () => "Analytical engines for organizers need public context and careful biography controls.",
+    ).join(" ");
+    render(
+      <PublicProgramRenderer
+        data={programResponse({
+          speakers: [
+            { ...programResponse().speakers[0]!, biography: longBiography },
+            programResponse().speakers[1]!,
+          ],
+        })}
+      />,
+    );
+
+    const directory = screen.getByRole("heading", { name: "Speakers List" }).closest("section");
+    const gallery = screen.getByRole("heading", { name: "Speaker Gallery" }).closest("section");
+    expect(directory).toBeTruthy();
+    expect(gallery).toBeTruthy();
+
+    const directoryButtons = within(directory as HTMLElement).getAllByRole("button");
+    expect(directoryButtons.map((button) => button.textContent)).toEqual([
+      expect.stringContaining("Grace Hopper"),
+      expect.stringContaining("Ada Lovelace"),
+    ]);
+    const galleryButtons = within(gallery as HTMLElement).getAllByRole("button");
+    expect(galleryButtons.map((button) => button.textContent)).toEqual([
+      expect.stringContaining("Grace Hopper"),
+      expect.stringContaining("Ada Lovelace"),
+    ]);
+
+    await user.click(within(directory as HTMLElement).getByRole("button", { name: /Ada Lovelace/i }));
+    const detail = screen.getByRole("article", { name: "Ada Lovelace" });
+    expect(within(detail).getByText("Program Director · Analytical Engines")).toBeInTheDocument();
+    expect(within(detail).getByText(/Analytical engines for organizers need public context/)).toBeInTheDocument();
+    const expandBiography = within(detail).getByRole("button", { name: "Show full biography" });
+    expect(expandBiography).toHaveAttribute("aria-expanded", "false");
+    await user.click(expandBiography);
+    expect(expandBiography).toHaveAttribute("aria-expanded", "true");
+    expect(within(detail).getByText(longBiography)).toBeInTheDocument();
+    expect(within(detail).getByRole("link", { name: "Website" })).toHaveAttribute(
+      "href",
+      "https://ada.example.test",
+    );
+    const sessionButton = within(detail).getByRole("button", { name: /Opening Keynote/i });
+    expect(sessionButton).toHaveTextContent(/Oct 7.*3:00 PM.*Harbor Hall/i);
+  });
+
+  it("narrows list and gallery by speaker search, handles missing profile data, and closes without clearing state", async () => {
+    const user = userEvent.setup();
+    const payload = programResponse({
+      speakers: [
+        programResponse().speakers[0]!,
+        {
+          ...programResponse().speakers[1]!,
+          title: "",
+          company: "",
+          biography: "",
+        },
+      ],
+    });
+    const { container } = render(<PublicProgramRenderer data={payload} />);
+
+    const search = screen.getByRole("searchbox", { name: "Search sessions or speakers" });
+    await user.type(search, "Grace");
+    expect(screen.getByRole("status")).toHaveTextContent("1 speaker");
+
+    const directory = screen.getByRole("heading", { name: "Speakers List" }).closest("section");
+    const gallery = screen.getByRole("heading", { name: "Speaker Gallery" }).closest("section");
+    expect(within(directory as HTMLElement).getByText("Grace Hopper")).toBeInTheDocument();
+    expect(within(directory as HTMLElement).queryByText("Ada Lovelace")).not.toBeInTheDocument();
+    expect(within(gallery as HTMLElement).getByText("Grace Hopper")).toBeInTheDocument();
+    expect(within(gallery as HTMLElement).queryByText("Ada Lovelace")).not.toBeInTheDocument();
+    expect(container.querySelector(".program-speaker-gallery-card .program-speaker-avatar"))
+      .toHaveTextContent("GH");
+
+    await user.click(within(gallery as HTMLElement).getByRole("button", { name: /Grace Hopper/i }));
+    const detail = screen.getByRole("article", { name: "Grace Hopper" });
+    expect(within(detail).getAllByText("Professional details pending").length).toBeGreaterThan(0);
+    expect(within(detail).getByText("Biography pending.")).toBeInTheDocument();
+    expect(within(detail).getByRole("button", { name: /Community Circle/i })).toHaveTextContent(
+      /Date TBD.*Location pending/i,
+    );
+
+    await user.click(within(detail).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("article", { name: "Grace Hopper" })).not.toBeInTheDocument();
+    expect(search).toHaveValue("Grace");
+    expect(within(gallery as HTMLElement).getByText("Grace Hopper")).toBeInTheDocument();
   });
 
   it("shows session detail with TBD/pending and a calendar chooser", async () => {
@@ -155,6 +337,11 @@ describe("PublicProgramRenderer", () => {
     expect(detail).toBeTruthy();
     expect(within(detail as HTMLElement).getByText("TBD")).toBeInTheDocument();
     expect(within(detail as HTMLElement).getByText("Location pending")).toBeInTheDocument();
+    expect(
+      within(schedule as HTMLElement)
+        .getByTestId("public-session-card-ses-2")
+        .getAttribute("aria-labelledby"),
+    ).toBe("session-title-ses-2");
 
     await user.click(
       within(detail as HTMLElement).getByRole("button", { name: /Add to calendar/i }),
@@ -228,6 +415,13 @@ describe("Public program routes", () => {
       component: PublicProgramPage,
       validateSearch: (search: Record<string, unknown>) => ({
         revision: typeof search.revision === "string" ? search.revision : undefined,
+        query: typeof search.query === "string" ? search.query : undefined,
+        day: typeof search.day === "string" ? search.day : undefined,
+        trackId: typeof search.trackId === "string" ? search.trackId : undefined,
+        roomId: typeof search.roomId === "string" ? search.roomId : undefined,
+        format: typeof search.format === "string" ? search.format : undefined,
+        speakerId: typeof search.speakerId === "string" ? search.speakerId : undefined,
+        session: typeof search.session === "string" ? search.session : undefined,
       }),
     });
     const embedRoute = createRoute({
@@ -236,6 +430,13 @@ describe("Public program routes", () => {
       component: PublicProgramEmbedPage,
       validateSearch: (search: Record<string, unknown>) => ({
         revision: typeof search.revision === "string" ? search.revision : undefined,
+        query: typeof search.query === "string" ? search.query : undefined,
+        day: typeof search.day === "string" ? search.day : undefined,
+        trackId: typeof search.trackId === "string" ? search.trackId : undefined,
+        roomId: typeof search.roomId === "string" ? search.roomId : undefined,
+        format: typeof search.format === "string" ? search.format : undefined,
+        speakerId: typeof search.speakerId === "string" ? search.speakerId : undefined,
+        session: typeof search.session === "string" ? search.session : undefined,
       }),
     });
     const router = createRouter({
@@ -250,6 +451,7 @@ describe("Public program routes", () => {
   }
 
   it("renders full page and embed from the same public payload", async () => {
+    const user = userEvent.setup();
     const payload = programResponse();
     vi.stubGlobal(
       "fetch",
@@ -271,6 +473,11 @@ describe("Public program routes", () => {
 
     renderAt(`/e/${eventId}/program/embed`);
     expect(await screen.findByRole("heading", { name: payload.event.name })).toBeInTheDocument();
+    await user.type(screen.getByRole("searchbox", { name: "Search sessions or speakers" }), "Grace");
+    expect(screen.getByRole("searchbox", { name: "Search sessions or speakers" })).toHaveValue(
+      "Grace",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("1 speaker");
     expect(screen.getByTestId("public-program-renderer")).toHaveClass("mode-embed");
     expect(screen.queryByRole("link", { name: /Embed view/i })).not.toBeInTheDocument();
   });
@@ -284,5 +491,8 @@ describe("Public program routes", () => {
     expect(container.querySelector(".program-detail")).toBeTruthy();
     expect(container.querySelector(".program-speakers")).toBeTruthy();
     expect(container.querySelector(".program-filters")).toBeTruthy();
+    expect(container.querySelector(".program-speaker-surfaces")).toBeTruthy();
+    expect(container.querySelector(".program-speaker-directory")).toBeTruthy();
+    expect(container.querySelector(".program-speaker-gallery")).toBeTruthy();
   });
 });

@@ -38,6 +38,11 @@ const TRACKS = [
     title: "Course Check",
     dir: join(REPO_ROOT, ".scratch/chartstead-course-check/issues"),
   },
+  {
+    id: "rubric-completion",
+    title: "Rubric completion",
+    dir: join(REPO_ROOT, ".scratch/chartstead-rubric-completion/issues"),
+  },
 ];
 
 // Order is display order left→right. Matching is explicit (not first-match

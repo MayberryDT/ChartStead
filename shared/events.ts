@@ -93,6 +93,8 @@ export interface CoSpeakerInput {
   name: string;
   email: string;
   biography: string;
+  /** Submission-time role context, for example “co-speaker” or a custom CFP role answer. */
+  role?: string;
 }
 
 export interface ProposalInput {
@@ -113,6 +115,15 @@ export interface ProposalSubmissionRequest {
   formId: string;
   formDefinitionVersion: number;
   answers: SubmissionAnswers;
+  /** Optional authenticated draft to consume exactly once during final submission. */
+  draftId?: string;
+}
+
+export interface ProposalDraftSaveRequest {
+  formId: string;
+  formDefinitionVersion: number;
+  answers: SubmissionAnswers;
+  expectedUpdatedAt?: string;
 }
 
 export interface ProposalEditRequest {
@@ -135,6 +146,49 @@ export interface PublicProposal {
   submittedAt: string;
 }
 
+export type SubmitterProposalStatus =
+  | "submitted"
+  | "under_review"
+  | "accepted"
+  | "rejected";
+
+export interface SubmitterProposal {
+  id: string;
+  eventId: string;
+  title: string;
+  trackId: string;
+  trackName: string;
+  speakerName: string;
+  submittedAt: string;
+  status: SubmitterProposalStatus;
+  claimed: boolean;
+  claimable: boolean;
+}
+
+export interface SubmitterProposalDraft {
+  id: string;
+  eventId: string;
+  title: string;
+  formId: string;
+  formName: string;
+  formDefinitionVersion: number;
+  latestFormDefinitionVersion: number | null;
+  formVersionStale: boolean;
+  lifecycle: CfpPublicLifecycle;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SubmitterDashboardResponse {
+  user: {
+    id: string;
+    name: string;
+    email: string;
+  };
+  proposals: SubmitterProposal[];
+  drafts: SubmitterProposalDraft[];
+}
+
 export interface OrganizerProposal extends PublicProposal {
   formId: string;
   formDefinitionVersion: number;
@@ -154,10 +208,29 @@ export interface OrganizerProposal extends PublicProposal {
   privateNote: string;
   reviewVersion: number;
   confirmationEmailStatus: OutboxDeliveryStatus | null;
+  /** Aggregate for the currently selected scorecard round, when requested. */
+  scorecardAggregate: ScorecardAggregate | null;
+  /** Present for the current reviewer/round only; null for normal reviewer work. */
+  reviewerRecusal: ProposalReviewerRecusal | null;
+  /** Organizer-only visibility for reassignment; reviewer responses only include their own recusal. */
+  reviewerRecusals: ProposalReviewerRecusal[];
+
 }
+export interface ProposalReviewerRecusal {
+  id: string;
+  proposalId: string;
+  roundId: string;
+  reviewerId: string;
+  reviewerName: string;
+  /** Private to organizers and the recusing reviewer. */
+  reason: string;
+  createdAt: string;
+}
+
 
 export type ProposalAuditEventType =
   | "proposal.review.changed"
+  | "proposal.review.recused"
   | "course_check.decision.applied"
   | "course_check.communication.drafts_created"
   | "course_check.communication.send_started"
@@ -168,6 +241,7 @@ export type ProposalAuditEventType =
 export interface ProposalAuditEvent {
   id: string;
   proposalId: string;
+  roundId?: string | null;
   type: ProposalAuditEventType;
   actorId: string;
   actorName: string;
@@ -180,6 +254,213 @@ export interface ProposalAuditEvent {
 export interface ProposalReviewResponse {
   proposal: OrganizerProposal;
   auditEvents: ProposalAuditEvent[];
+  scorecard: ProposalScorecardReviewProjection | null;
+}
+
+export type ScorecardCriterionType = "numeric" | "dropdown" | "text";
+export type ScorecardCriterionValue = string | number | null;
+
+export interface ScorecardDropdownOption {
+  id: string;
+  label: string;
+  score: number | null;
+}
+
+export interface EvaluationScorecardCriterion {
+  id: string;
+  type: ScorecardCriterionType;
+  label: string;
+  guidance: string;
+  required: boolean;
+  weight: number | null;
+  maxScore: number | null;
+  options: ScorecardDropdownOption[];
+}
+
+export interface EvaluationScorecard {
+  criteria: EvaluationScorecardCriterion[];
+  calculationDescription: string;
+}
+
+export interface ScorecardAggregate {
+  roundId: string;
+  scorecardRef: string;
+  responseCount: number;
+  completedResponseCount: number;
+  aggregateScore: number | null;
+  calculatedAt: string | null;
+}
+
+export interface ProposalScorecardReviewProjection {
+  round: EvaluationRound | null;
+  reviewerResponse: ReviewEvidence | null;
+  reviews: ReviewEvidence[];
+  aggregate: ScorecardAggregate | null;
+  calculationDescription: string | null;
+}
+
+export type ReviewCompletionStatus = "not_started" | "incomplete" | "complete";
+
+export interface ReviewCriterionResult {
+  id: string;
+  label: string;
+  value: number;
+  maxScore: number;
+  weight: number;
+  weightedScore: number;
+}
+
+export interface ReviewEvidence {
+  proposalId: string;
+  roundId: string | null;
+  reviewerId: string;
+  reviewerName: string;
+  recommendation: ProposalStatus;
+  completionStatus: ReviewCompletionStatus;
+  aggregateScore: number | null;
+  criteria: ReviewCriterionResult[];
+  completedAt: string | null;
+  updatedAt: string;
+  values: Record<string, ScorecardCriterionValue>;
+}
+
+export interface ReviewResultsCriterion {
+  id: string;
+  label: string;
+  maxScore: number;
+  weight: number;
+  type: ScorecardCriterionType;
+  guidance: string;
+  required: boolean;
+  options: ScorecardDropdownOption[];
+}
+
+export interface ReviewResultsSpeaker {
+  name: string;
+  email: string;
+  role: string;
+}
+
+export interface ReviewResultsSubmission {
+  proposalId: string;
+  title: string;
+  trackId: string;
+  trackName: string;
+  submittedAt: string;
+  speakers: ReviewResultsSpeaker[];
+  recommendation: ProposalStatus;
+  completionStatus: ReviewCompletionStatus;
+  completedReviewCount: number;
+  totalReviewCount: number;
+  aggregateScore: number | null;
+  criteria: ReviewCriterionResult[];
+  reviews: ReviewEvidence[];
+}
+
+export interface ReviewResultsResponse {
+  eventId: string;
+  generatedAt: string;
+  criteria: ReviewResultsCriterion[];
+  submissions: ReviewResultsSubmission[];
+}
+
+export type ReviewReminderDeliveryState =
+  | "queued"
+  | "sent"
+  | "failed"
+  | "retryable";
+
+export interface ReviewProgressRoundSummary {
+  roundId: string | null;
+  roundName: string;
+  roundState: EvaluationRoundState | "shared";
+  startsOn: string | null;
+  endsOn: string | null;
+  assignedCount: number;
+  completedCount: number;
+  outstandingCount: number;
+  recusedCount: number;
+  percentComplete: number;
+  overdueReviewerCount: number;
+}
+
+export interface ReviewProgressAssignmentRef {
+  proposalId: string;
+  title: string;
+  trackId: string;
+  trackName: string;
+}
+
+export interface ReviewProgressReviewer {
+  reviewerId: string;
+  reviewerName: string;
+  email: string;
+  trackIds: string[];
+  assignedCount: number;
+  completedCount: number;
+  outstandingCount: number;
+  recusedCount: number;
+  percentComplete: number;
+  overdue: boolean;
+  lastCompletedAt: string | null;
+  lastReminderAt: string | null;
+  outstandingAssignments: ReviewProgressAssignmentRef[];
+}
+
+export interface ReviewReminderHistoryEntry {
+  id: string;
+  roundId: string | null;
+  reviewerId: string;
+  reviewerName: string;
+  toEmail: string;
+  pendingCount: number;
+  outboxId: string | null;
+  status: ReviewReminderDeliveryState;
+  actorName: string;
+  createdAt: string;
+}
+
+export interface ReviewProgressResponse {
+  eventId: string;
+  generatedAt: string;
+  round: ReviewProgressRoundSummary;
+  reviewers: ReviewProgressReviewer[];
+  incompleteReviewers: ReviewProgressReviewer[];
+  overdueReviewers: ReviewProgressReviewer[];
+  history: ReviewReminderHistoryEntry[];
+}
+
+export interface ReviewProgressReminderDraft {
+  reviewerId: string;
+  reviewerName: string;
+  toEmail: string;
+  subject: string;
+  bodyText: string;
+  pendingCount: number;
+  pendingProposalIds: string[];
+}
+
+export interface ReviewProgressReminderPreview {
+  eventId: string;
+  roundId: string | null;
+  generatedAt: string;
+  drafts: ReviewProgressReminderDraft[];
+}
+
+export interface ReviewProgressReminderResult {
+  reviewerId: string;
+  toEmail: string;
+  outboxId: string;
+  status: ReviewReminderDeliveryState;
+  error: string | null;
+}
+
+export interface ReviewProgressReminderSendResult {
+  eventId: string;
+  roundId: string | null;
+  idempotencyKey: string;
+  results: ReviewProgressReminderResult[];
+  history: ReviewReminderHistoryEntry[];
 }
 
 export interface ReviewerAssignment {
@@ -217,6 +498,82 @@ export interface ReviewerRoutingResponse {
   invitations: ReviewerInvitation[];
 }
 
+export type EvaluationRoundState = "draft" | "open" | "closed";
+export type EvaluationAnonymization = "none" | "blind";
+
+/** Optional event-scoped review configuration. Omitted plans use the shared track queue. */
+export interface EvaluationRoundAssignment {
+  roundId: string;
+  proposalId: string;
+  reviewerId: string;
+  createdAt: string;
+}
+
+export interface EvaluationRoundAssignmentSummary {
+  reviewerId: string;
+  proposalIds: string[];
+  count: number;
+}
+
+export interface EvaluationRoundDistributionPreview {
+  roundId: string;
+  trackIds: string[];
+  reviewerIds: string[];
+  maxAssignmentsPerReviewer: number | null;
+  totalCandidates: number;
+  assignments: EvaluationRoundAssignmentSummary[];
+  unassignedProposalIds: string[];
+}
+
+export interface EvaluationRound {
+  id: string;
+  name: string;
+  order: number;
+  state: EvaluationRoundState;
+  startsOn: string;
+  endsOn: string;
+  scorecardRef: string;
+  scorecard: EvaluationScorecard;
+  anonymization: EvaluationAnonymization;
+  /** Compatibility/readability alias for clients that prefer a boolean setting. */
+  anonymized: boolean;
+  reviewerPool: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EvaluationPlan {
+  eventId: string;
+  enabled: boolean;
+  version: number;
+  rounds: EvaluationRound[];
+  updatedAt: string;
+}
+
+export type EvaluationRoundAccessReason =
+  | "allowed"
+  | "plan_disabled"
+  | "round_not_found"
+  | "reviewer_not_assigned"
+  | "round_not_open"
+  | "outside_date_window";
+
+export interface EvaluationRoundAccess {
+  allowed: boolean;
+  reason: EvaluationRoundAccessReason;
+  round: EvaluationRound | null;
+}
+
+export interface EvaluationPlanAuditEvent {
+  id: string;
+  roundId: string | null;
+  action: string;
+  actorId: string;
+  actorName: string;
+  detail: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface ReviewerInvitationPreview {
   eventId: string;
   eventName: string;
@@ -234,7 +591,8 @@ export type OutboxDeliveryStatus =
 export type OutboxMessageKind =
   | "submission_confirmation"
   | "onboarding_reminder"
-  | "reviewer_invitation";
+  | "reviewer_invitation"
+  | "reviewer_reminder";
 
 export interface OutboxMessage {
   id: string;
@@ -255,11 +613,47 @@ export type OnboardingTaskStatus = "open" | "completed";
 
 export type OnboardingCompletionRequirement = "manual" | "file" | "ack";
 
-export interface OnboardingTaskAsset {
+export type OnboardingDeliverableCommentAuthorRole = "organizer" | "speaker";
+
+export interface OnboardingDeliverableComment {
+  id: string;
   assetId: string;
+  body: string;
+  author: {
+    id: string;
+    name: string;
+    role: OnboardingDeliverableCommentAuthorRole;
+  };
+  createdAt: string;
+}
+
+export interface OnboardingTaskAssetVersion {
+  assetId: string;
+  version: number;
+  isLatest: boolean;
   fileName: string;
   mime: string;
   size: number;
+  uploadedAt: string | null;
+  comments: OnboardingDeliverableComment[];
+}
+
+export interface OnboardingTaskAsset {
+  assetId: string;
+  version: number;
+  isLatest: boolean;
+  versions: OnboardingTaskAssetVersion[];
+  comments: OnboardingDeliverableComment[];
+  fileName: string;
+  mime: string;
+  size: number;
+  uploadedAt: string | null;
+}
+
+export interface OnboardingFileConstraints {
+  maxBytes: number;
+  acceptMimeTypes: string[];
+  acceptExtensions: string[];
 }
 
 export interface PortalOnboardingTask {
@@ -271,9 +665,15 @@ export interface PortalOnboardingTask {
   dueAt: string | null;
   instructions: string;
   completionRequirement: OnboardingCompletionRequirement | string;
+  fileConstraints: OnboardingFileConstraints | null;
   readinessFlag: string | null;
   asset: OnboardingTaskAsset | null;
   completedAt: string | null;
+}
+
+export interface OnboardingTaskBatchResult {
+  idempotencyKey: string;
+  tasks: PortalOnboardingTask[];
 }
 
 export type ReminderDraftStatus =
@@ -302,10 +702,66 @@ export interface OnboardingReminderDraft {
   sentAt: string | null;
 }
 
+export interface OnboardingReminderRecipientResult {
+  speakerId: string;
+  speakerName: string;
+  email: string;
+  status:
+    | "prepared"
+    | "queued"
+    | "sent"
+    | "failed"
+    | "retry_scheduled"
+    | "skipped";
+  reason: string;
+  taskIds: string[];
+  taskSummaries: Array<{
+    taskId: string;
+    title: string;
+    dueAt: string | null;
+  }>;
+  draftId: string | null;
+  outboxId: string | null;
+  lastError: string | null;
+}
+
+export interface OnboardingBulkReminderResult {
+  idempotencyKey: string;
+  mode: "draft" | "send";
+  processedAt: string;
+  counts: {
+    selected: number;
+    prepared: number;
+    queued: number;
+    sent: number;
+    failed: number;
+    retryScheduled: number;
+    skipped: number;
+  };
+  recipients: OnboardingReminderRecipientResult[];
+}
+
+export interface OnboardingReminderAutomationPolicy {
+  enabled: boolean;
+  mode: "draft" | "send";
+  dueWindowDays: number;
+  suppressWithinHours: number;
+  unattendedSendAuthorized: boolean;
+  updatedAt: string | null;
+  updatedById: string | null;
+  updatedByName: string | null;
+}
+
+export interface OnboardingAutomaticReminderResult extends OnboardingBulkReminderResult {
+  policy: OnboardingReminderAutomationPolicy;
+}
+
+
 export interface OnboardingHistoryEntry {
   id: string;
   speakerId: string;
   taskId: string | null;
+  assetId: string | null;
   type: string;
   summary: string;
   actorId: string;
@@ -313,22 +769,106 @@ export interface OnboardingHistoryEntry {
   createdAt: string;
 }
 
+/** Organizer-controlled event workflow; this never changes the reusable speaker identity. */
+export type SpeakerWorkflowStatus =
+  | "invited"
+  | "confirmed"
+  | "preparing"
+  | "ready"
+  | "withdrawn";
+
+export interface OrganizerTaskAttachment {
+  assetId: string;
+  version: number;
+  isLatest: boolean;
+  versions: OnboardingTaskAssetVersion[];
+  comments: OnboardingDeliverableComment[];
+  fileName: string;
+  mime: string;
+  size: number;
+  uploadedAt: string;
+  previewable: boolean;
+  fileType: string;
+  dueState: FilesLibraryDueState;
+  uploader: {
+    id: string;
+    name: string;
+    email: string;
+  };
+  task: {
+    id: string;
+    title: string;
+    status: OnboardingTaskStatus | string;
+    dueAt: string | null;
+    completedAt: string | null;
+  };
+  speaker: {
+    id: string;
+    name: string;
+    email: string;
+  };
+  session: {
+    id: string;
+    title: string;
+    format: string;
+    roomId: string | null;
+    startsAt: string | null;
+    endsAt: string | null;
+  } | null;
+}
+
+export type FilesLibraryDueState = "on-time" | "late" | "no-due-date";
+
+export interface FilesLibraryItem extends OrganizerTaskAttachment {
+  currentVersion: number;
+  versionCount: number;
+  safeExportPath: string;
+}
+
+export interface FilesLibraryResponse {
+  eventId: string;
+  generatedAt: string;
+  files: FilesLibraryItem[];
+  filters: {
+    speakers: Array<{ id: string; name: string }>;
+    sessions: Array<{ id: string; title: string }>;
+    taskStatuses: string[];
+    fileTypes: string[];
+    dueStates: FilesLibraryDueState[];
+  };
+}
+
+export interface FilesLibraryExportRequest {
+  assetIds?: string[];
+  sessionIds?: string[];
+}
+
 export interface OnboardingBoardSpeaker {
   speakerId: string;
   name: string;
   email: string;
   biography: string;
+  socialLinks?: SpeakerSocialLinks;
+  headshotAssetId?: string | null;
+  headshotFileName?: string | null;
   participationId: string;
   titleSnapshot: string;
   organizationSnapshot: string;
   proposalId: string | null;
   proposalTitle: string | null;
   role: string;
+  /** Event participation state, independent of onboarding task readiness. */
+  workflowStatus: SpeakerWorkflowStatus;
+  /** Event-specific travel needs supplied or recorded for this event. */
+  travelPreferences: string;
+  /** Organizer-defined event logistics fields such as arrival time or hotel nights. */
+  logistics: Record<string, string>;
   openTaskCount: number;
   overdueCount: number;
   nextDueAt: string | null;
   daysUntilNextDue: number | null;
   readinessFlags: string[];
+  taskAttachments?: OrganizerTaskAttachment[];
   missingWork: Array<{
     taskId: string;
     title: string;
@@ -352,11 +892,19 @@ export interface SpeakerDirectoryCreateInput {
   name: string;
   email: string;
   biography?: string;
+  socialLinks?: SpeakerSocialLinks;
   titleSnapshot: string;
   organizationSnapshot: string;
   role?: string;
   reuseSpeakerId?: string;
   createNewIdentity?: boolean;
+}
+
+export interface SpeakerSocialLinks {
+  linkedin: string;
+  x: string;
+  github: string;
+  website: string;
 }
 
 export interface SpeakerDirectoryMutation {
@@ -511,6 +1059,15 @@ export interface SubmitterEditSession {
   };
 }
 
+export interface SubmitterDraftSession {
+  eventId: string;
+  event: CfpFormResponse["event"];
+  draft: SubmitterProposalDraft;
+  form: PublishedCfpForm;
+  lifecycle: CfpPublicLifecycle;
+  answers: SubmissionAnswers;
+}
+
 /** Speaker-facing delivery status — independent of proposal/program outcome. */
 export type PortalMessageStatus =
   | "draft"
@@ -551,6 +1108,7 @@ export interface SpeakerPortalSession {
     name: string;
     email: string;
     biography: string;
+    socialLinks?: SpeakerSocialLinks;
     headshotAssetId: string | null;
     headshotFileName: string | null;
   };
@@ -584,6 +1142,29 @@ export interface SpeakerPortalSession {
 
 export type SessionPlacementStatus = "unplaced" | "partial" | "placed";
 
+export type SessionContentStatus = "draft" | "needs-changes" | "approved";
+
+export type SessionContentField = "title" | "abstract" | "publicContent" | "status";
+
+export interface SessionContentSnapshot {
+  title: string;
+  abstract: string;
+  publicContent: string;
+  status: SessionContentStatus;
+}
+
+export interface SessionContentHistoryEntry extends SessionContentSnapshot {
+  id: string;
+  sessionId: string;
+  version: number;
+  changedFields: SessionContentField[];
+  previous: SessionContentSnapshot | null;
+  actorId: string;
+  actorName: string;
+  createdAt: string;
+  changeKind: "initial" | "edit" | "status" | "restore";
+}
+
 export type ScheduleConflictKind = "speaker_double_book" | "room_overlap";
 
 export type ScheduleConflictAction =
@@ -604,6 +1185,13 @@ export interface OrganizerSession {
   proposalId: string | null;
   courseCheckPlanId: string;
   title: string;
+  /** Current organizer-owned content snapshot. Optional for older API consumers. */
+  abstract?: string;
+  publicContent?: string;
+  contentStatus?: SessionContentStatus;
+  contentVersion?: number;
+  contentUpdatedAt?: string;
+  contentUpdatedBy?: { id: string; name: string } | null;
   format: string;
   trackId: string;
   trackName: string;
@@ -617,6 +1205,33 @@ export interface OrganizerSession {
   calendarSequence: number;
   calendarInviteRecorded: boolean;
   createdAt: string;
+}
+
+export interface SessionContentRecord extends OrganizerSession {
+  abstract: string;
+  publicContent: string;
+  contentStatus: SessionContentStatus;
+  contentVersion: number;
+  contentUpdatedAt: string;
+  contentUpdatedBy: { id: string; name: string } | null;
+  contentHistory: SessionContentHistoryEntry[];
+}
+
+export interface SessionContentWorkspaceResponse {
+  eventId: string;
+  sessions: SessionContentRecord[];
+}
+
+export interface SessionContentPatch {
+  expectedVersion: number;
+  title?: string;
+  abstract?: string;
+  publicContent?: string;
+  status?: SessionContentStatus;
+}
+
+export interface SessionContentMutationResponse {
+  session: SessionContentRecord;
 }
 
 export interface ScheduleConflict {
@@ -649,6 +1264,7 @@ export interface CalendarIntentRecord {
 
 export interface AgendaWorkspaceResponse {
   eventId: string;
+  version: number;
   sessions: OrganizerSession[];
   unplacedSessions: OrganizerSession[];
   conflicts: ScheduleConflict[];
@@ -659,12 +1275,26 @@ export interface AgendaWorkspaceResponse {
     conflicts: number;
   };
   calendarIntents: CalendarIntentRecord[];
+  auditEvents?: AgendaAuditEvent[];
+}
+
+export type AgendaAuditEventType = "manual_placement" | "auto_place.applied";
+
+export interface AgendaAuditEvent {
+  id: string;
+  type: AgendaAuditEventType;
+  actorId: string;
+  actorName: string;
+  sessionIds: string[];
+  summary: string;
+  createdAt: string;
 }
 
 export interface SessionPlacementPatch {
   roomId?: string | null;
   startsAt?: string | null;
   endsAt?: string | null;
+  expectedAgendaVersion?: number;
 }
 
 export interface SessionPlacementResponse {
@@ -674,12 +1304,58 @@ export interface SessionPlacementResponse {
   calendarIntentsCreated: CalendarIntentRecord[];
 }
 
+export interface AgendaAutoPlaceProposal {
+  sessionId: string;
+  title: string;
+  roomId: string;
+  roomName: string;
+  startsAt: string;
+  endsAt: string;
+  durationMinutes: number;
+  reason: string;
+}
+
+export interface AgendaAutoPlaceLeftover {
+  sessionId: string;
+  title: string;
+  placementStatus: SessionPlacementStatus;
+  reason: string;
+}
+
+export interface AgendaAutoPlacePreview {
+  previewId: string;
+  previewDigest: string;
+  agendaVersion: number;
+  selectedSessionIds: string[];
+  includeManual: boolean;
+  proposals: AgendaAutoPlaceProposal[];
+  leftovers: AgendaAutoPlaceLeftover[];
+  conflicts: ScheduleConflict[];
+  assumptions: string[];
+  manualPlacementPreserved: string[];
+  createdAt: string;
+}
+
+export interface AgendaAutoPlaceApplyResponse {
+  previewDigest: string;
+  agendaVersion: number;
+  appliedSessionIds: string[];
+  unchangedSessionIds: string[];
+  audit: AgendaAuditEvent;
+  agenda: AgendaWorkspaceResponse;
+  idempotent: boolean;
+}
+
 /** Public-safe speaker card for the program renderer. Never includes email or tasks. */
 export interface PublicProgramSpeaker {
   id: string;
   name: string;
+  title?: string;
+  company?: string;
   biography: string;
+  socialLinks?: SpeakerSocialLinks;
   headshotAssetId: string | null;
+  headshotUrl?: string | null;
   sessionIds: string[];
 }
 
@@ -688,6 +1364,8 @@ export interface PublicProgramSession {
   id: string;
   title: string;
   description: string;
+  /** Internal working-snapshot field; public responses strip it. */
+  contentStatus?: SessionContentStatus;
   format: string;
   trackId: string;
   trackName: string;
@@ -702,6 +1380,8 @@ export interface PublicProgramSession {
   speakers: Array<{
     id: string;
     name: string;
+    title?: string;
+    company?: string;
     role: string;
   }>;
 }
@@ -718,6 +1398,7 @@ export interface PublicProgramEventSlice {
   name: string;
   startsOn: string;
   endsOn: string;
+  timezone?: string;
   themeAccent: string;
   tracks: Array<{ id: string; name: string }>;
   rooms: Array<{ id: string; name: string; readiness: "ready" | "pending" }>;
@@ -732,11 +1413,59 @@ export interface PublicProgramResponse {
 }
 
 export interface PublicProgramFilters {
+  query?: string;
   day?: string;
   trackId?: string;
   roomId?: string;
   format?: string;
   speakerId?: string;
+}
+
+export type PublicEmbedWidget =
+  | "sessions"
+  | "speakers"
+  | "agenda"
+  | "itinerary"
+  | "speaker-gallery";
+
+export type PublicEmbedTheme = "light" | "dark" | "minimal";
+
+export interface PublicEmbedFieldVisibility {
+  title: boolean;
+  dateTime: boolean;
+  room: boolean;
+  track: boolean;
+  speakers: boolean;
+  description: boolean;
+  format: boolean;
+  headshots: boolean;
+  biography: boolean;
+}
+
+export interface PublicEmbedConfigInput {
+  name: string;
+  widget: PublicEmbedWidget;
+  theme: PublicEmbedTheme;
+  filters: PublicProgramFilters;
+  fields: PublicEmbedFieldVisibility;
+  revisionId?: string | null;
+  disabled?: boolean;
+}
+
+export interface PublicEmbedConfig extends PublicEmbedConfigInput {
+  id: string;
+  eventId: string;
+  createdAt: string;
+  updatedAt: string;
+  publicUrl: string;
+  embedCode: string;
+  feedUrl: string;
+  disabled: boolean;
+}
+
+export interface PublicEmbedResolveResponse {
+  config: PublicEmbedConfig;
+  program: PublicProgramResponse;
 }
 
 export interface AssetUploadStartRequest {

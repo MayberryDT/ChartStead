@@ -5,6 +5,7 @@ import type {
   OrganizerCfpFormSummary,
   OrganizerPrincipal,
   OrganizerProposal,
+  ProposalAuditEvent,
   ProposalStatus,
   SessionPlacementPatch,
 } from "../../shared/events";
@@ -35,6 +36,7 @@ import {
   assignedTrackIds,
   canAccessEvent,
   canReviewProposal,
+  eventRole,
   isEventAdmin,
   scopeEventForPrincipal,
 } from "../authz";
@@ -47,6 +49,10 @@ import {
   loadEventWorkspace,
 } from "../event-catalog";
 import type { EventRecord } from "../../shared/events";
+import {
+  anonymizeEvaluationProposal,
+  evaluationRoundAccessError,
+} from "../evaluation-plans";
 
 export type PrincipalResolver = (
   request: Request,
@@ -226,11 +232,56 @@ export function createV1App(options: V1AppOptions = {}) {
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
     await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const plan = await store.getEvaluationPlan();
+    const roundId = c.req.query("roundId") ?? "";
+    let round = null;
+    if (plan?.enabled && eventRole(principal, eventId) !== "admin") {
+      if (!roundId) {
+        return c.json(
+          { error: "Select an assigned evaluation round.", code: "reviewer_not_assigned" },
+          403,
+        );
+      }
+      const access = await store.getEvaluationRoundAccess(roundId, principal.id);
+      if (!access.allowed) {
+        const error = evaluationRoundAccessError(access);
+        return c.json(error.body, error.status);
+      }
+      round = access.round;
+    }
     const tracks = assignedTrackIds(principal, eventId);
-    const proposals = (await c.env.EVENT_STORE.getByName(eventId).listProposals({
+    const proposalIds = round
+      ? await store.listEvaluationRoundProposalIds(round.id, principal.id)
+      : undefined;
+    const proposals = (await store.listProposals({
       trackIds: tracks ?? undefined,
+      proposalIds,
     })) as OrganizerProposal[];
-    return c.json({ submissions: proposals });
+    const projected = await Promise.all(
+      proposals.map(async (proposal) => {
+        if (eventRole(principal, eventId) === "admin") {
+          return {
+            ...proposal,
+            reviewerRecusals: await store.listProposalReviewRecusals(proposal.id),
+          };
+        }
+        const recusal = round
+          ? await store.getReviewerRecusal({
+              proposalId: proposal.id,
+              roundId: round.id,
+              reviewerId: principal.id,
+            })
+          : null;
+        const withRecusal = { ...proposal, reviewerRecusal: recusal, reviewerRecusals: [] };
+        return round?.anonymization === "blind"
+          ? anonymizeEvaluationProposal(withRecusal)
+          : withRecusal;
+      }),
+    );
+    return c.json({
+      submissions: projected,
+    });
   });
 
   app.get("/events/:eventId/submissions/:submissionId", async (c) => {
@@ -242,13 +293,58 @@ export function createV1App(options: V1AppOptions = {}) {
     const seed = findSeed(eventId);
     if (!seed) return c.json({ error: "Event not found" }, 404);
     await loadEvent(c.env, seed);
-    const proposal = (await c.env.EVENT_STORE.getByName(eventId).getProposal(
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const proposal = (await store.getProposal(
       c.req.param("submissionId"),
     )) as OrganizerProposal | null;
     if (!proposal || !canReviewProposal(principal, eventId, proposal)) {
       return c.json({ error: "Submission not found" }, 404);
     }
-    return c.json({ submission: proposal });
+    const plan = await store.getEvaluationPlan();
+    const roundId = c.req.query("roundId") ?? "";
+    let round = null;
+    if (plan?.enabled && eventRole(principal, eventId) !== "admin") {
+      if (!roundId) {
+        return c.json(
+          { error: "Select an assigned evaluation round.", code: "reviewer_not_assigned" },
+          403,
+        );
+      }
+      const access = await store.getEvaluationRoundAccess(roundId, principal.id);
+      if (!access.allowed) {
+        const error = evaluationRoundAccessError(access);
+        return c.json(error.body, error.status);
+      }
+      if (
+        !(await store.listEvaluationRoundProposalIds(roundId, principal.id)).includes(
+          proposal.id,
+        )
+      ) {
+        return c.json({ error: "Submission not found" }, 404);
+      }
+      round = access.round;
+    }
+    const isAdmin = eventRole(principal, eventId) === "admin";
+    const reviewerRecusal =
+      !isAdmin && round
+        ? await store.getReviewerRecusal({
+            proposalId: proposal.id,
+            roundId: round.id,
+            reviewerId: principal.id,
+          })
+        : null;
+    return c.json({
+      submission: isAdmin
+        ? {
+            ...proposal,
+            reviewerRecusals: await store.listProposalReviewRecusals(proposal.id),
+          }
+        : {
+            ...(round?.anonymization === "blind" ? anonymizeEvaluationProposal(proposal) : proposal),
+            reviewerRecusal,
+            reviewerRecusals: [],
+          },
+    });
   });
 
   app.patch("/events/:eventId/submissions/:submissionId/review", async (c) => {
@@ -271,6 +367,7 @@ export function createV1App(options: V1AppOptions = {}) {
       status?: ProposalStatus;
       committeeNote?: string;
       expectedVersion?: number;
+      roundId?: string;
     };
     if (
       body.status !== undefined &&
@@ -285,6 +382,48 @@ export function createV1App(options: V1AppOptions = {}) {
       return c.json({ error: "A review change is required" }, 400);
     }
 
+    const plan = await store.getEvaluationPlan();
+    let roundId: string | undefined;
+    let round = null;
+    if (plan?.enabled && eventRole(principal, eventId) !== "admin") {
+      if (!body.roundId) {
+        return c.json(
+          { error: "Select an assigned evaluation round.", code: "reviewer_not_assigned" },
+          403,
+        );
+      }
+      const access = await store.getEvaluationRoundAccess(body.roundId, principal.id);
+      if (!access.allowed) {
+        const error = evaluationRoundAccessError(access);
+        return c.json(error.body, error.status);
+      }
+      roundId = access.round?.id;
+      round = access.round;
+      if (roundId) {
+        if (
+          !(await store.listEvaluationRoundProposalIds(roundId, principal.id)).includes(
+            submissionId,
+          )
+        ) {
+          return c.json({ error: "Submission not found" }, 404);
+        }
+        const recusal = await store.getReviewerRecusal({
+          proposalId: submissionId,
+          roundId,
+          reviewerId: principal.id,
+        });
+        if (recusal) {
+          return c.json(
+            {
+              error: "You have recused yourself from this review assignment.",
+              code: "reviewer_recused",
+            },
+            409,
+          );
+        }
+      }
+    }
+
     try {
       const proposal = await store.updateProposalReview({
         proposalId: submissionId,
@@ -296,6 +435,7 @@ export function createV1App(options: V1AppOptions = {}) {
         expectedVersion: body.expectedVersion ?? existing.reviewVersion,
         actorId: principal.id,
         actorName: principal.displayName,
+        roundId,
       });
       if (!proposal) {
         return c.json(
@@ -306,12 +446,92 @@ export function createV1App(options: V1AppOptions = {}) {
           409,
         );
       }
-      const auditEvents = await store.listProposalAuditEvents(submissionId);
-      return c.json({ submission: proposal, auditEvents });
+      const isAdmin = eventRole(principal, eventId) === "admin";
+      const auditEvents = (await store.listProposalAuditEvents(submissionId)).filter(
+        (audit: ProposalAuditEvent) => isAdmin || audit.actorId === principal.id,
+      );
+      return c.json({
+        submission:
+          !isAdmin && round?.anonymization === "blind"
+            ? anonymizeEvaluationProposal(proposal)
+            : isAdmin
+              ? {
+                  ...proposal,
+                  reviewerRecusals: await store.listProposalReviewRecusals(submissionId),
+                }
+              : proposal,
+        auditEvents,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Review failed.";
       return c.json({ error: message }, 400);
     }
+  });
+
+  app.post("/events/:eventId/submissions/:submissionId/recusal", async (c) => {
+    const principal = await resolveV1Principal(c.req.raw, c.env, options);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (eventRole(principal, eventId) === "admin") {
+      return c.json({ error: "Reviewer access required.", code: "reviewer_not_assigned" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const submissionId = c.req.param("submissionId");
+    const proposal = (await store.getProposal(submissionId)) as OrganizerProposal | null;
+    if (!proposal || !canReviewProposal(principal, eventId, proposal)) {
+      return c.json({ error: "Submission not found" }, 404);
+    }
+    const body = (await c.req.json().catch(() => null)) as {
+      roundId?: unknown;
+      reason?: unknown;
+    } | null;
+    if (!body || typeof body.roundId !== "string" || !body.roundId) {
+      return c.json(
+        { error: "Select an assigned evaluation round.", code: "reviewer_not_assigned" },
+        403,
+      );
+    }
+    if (body.reason !== undefined && typeof body.reason !== "string") {
+      return c.json({ error: "Recusal reason must be text." }, 400);
+    }
+    if (typeof body.reason === "string" && body.reason.length > 2000) {
+      return c.json({ error: "Recusal reason must be 2000 characters or fewer." }, 400);
+    }
+    const access = await store.getEvaluationRoundAccess(body.roundId, principal.id);
+    if (!access.allowed) {
+      const error = evaluationRoundAccessError(access);
+      return c.json(error.body, error.status);
+    }
+    if (
+      !(await store.listEvaluationRoundProposalIds(access.round!.id, principal.id)).includes(
+        submissionId,
+      )
+    ) {
+      return c.json({ error: "Submission not found" }, 404);
+    }
+    const recusal = await store.recuseProposalReview({
+      proposalId: submissionId,
+      roundId: access.round!.id,
+      reviewerId: principal.id,
+      reviewerName: principal.displayName,
+      reason: body.reason,
+    });
+    const current = (await store.getProposal(submissionId)) as OrganizerProposal;
+    return c.json({
+      submission: {
+        ...(access.round!.anonymization === "blind" ? anonymizeEvaluationProposal(current) : current),
+        reviewerRecusal: recusal,
+        reviewerRecusals: [],
+      },
+      auditEvents: (await store.listProposalAuditEvents(submissionId)).filter(
+        (audit: ProposalAuditEvent) => audit.actorId === principal.id,
+      ),
+    });
   });
 
   app.get("/events/:eventId/speakers", async (c) => {

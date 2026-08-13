@@ -6,6 +6,7 @@ import type {
   ProposalInput,
   ProposalValidationError,
   PublicProposal,
+  SubmitterProposal,
 } from "../shared/events";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -26,6 +27,7 @@ function normalizeCoSpeakers(value: unknown): CoSpeakerInput[] {
       name: readString(record, "name"),
       email: readString(record, "email"),
       biography: readString(record, "biography"),
+      role: readString(record, "role") || "co-speaker",
     };
   });
 }
@@ -49,6 +51,7 @@ function normalizeSpeakersPanel(source: Record<string, unknown>): {
       email: readString(record, "email") || readString(record, "speakerEmail"),
       biography:
         readString(record, "biography") || readString(record, "bio"),
+      role: readString(record, "role") || "co-speaker",
     };
   });
   const [primary, ...rest] = panels;
@@ -209,5 +212,30 @@ export function toSubmitterProposal(
     speakerName: proposal.speakerName,
     submittedAt: proposal.submittedAt,
     speakerEmail: proposal.speakerEmail,
+  };
+}
+
+export function toSubmitterDashboardProposal(
+  proposal: OrganizerProposal,
+  ownership: { claimed: boolean; claimable: boolean },
+): SubmitterProposal {
+  const status = proposal.programOutcome
+    ? proposal.programOutcome === "accepted"
+      ? "accepted"
+      : "rejected"
+    : proposal.status === "unreviewed"
+      ? "submitted"
+      : "under_review";
+
+  return {
+    id: proposal.id,
+    eventId: proposal.eventId,
+    title: proposal.title,
+    trackId: proposal.trackId,
+    trackName: proposal.trackName,
+    speakerName: proposal.speakerName,
+    submittedAt: proposal.submittedAt,
+    status,
+    ...ownership,
   };
 }

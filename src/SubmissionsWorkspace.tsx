@@ -1,6 +1,5 @@
-import { Dialog } from "@base-ui/react/dialog";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   PointerEvent as ReactPointerEvent,
@@ -14,33 +13,81 @@ import type {
   EventRecord,
   OrganizerPrincipal,
   OrganizerProposal,
+  EvaluationRoundAssignment,
+  EvaluationRoundDistributionPreview,
   ProposalAuditEvent,
+  ProposalScorecardReviewProjection,
+  ScorecardCriterionValue,
   ProposalReviewResponse,
+  ReviewProgressReminderDraft,
+  ReviewResultsResponse,
   ProposalStatus,
   SubmissionAnswers,
 } from "../shared/events";
 import { auditEventLabel } from "../shared/portal-lifecycle";
 import {
   createDecisionCourseCheck,
+  distributeEvaluationRoundAssignments,
+  fetchEvaluationPlan,
+  fetchEvaluationRoundAssignments,
   fetchOrganizerProposal,
+  fetchReviewResults,
+  fetchReviewProgress,
   fetchProposals,
   fetchReviewerAssignments,
   grantReviewerTracks,
+  previewReviewReminders,
+  previewEvaluationRoundDistribution,
   retryReviewerInvitation,
+  retryReviewReminder,
   revokeReviewerInvitation,
   revokeReviewerAccess,
+  setEvaluationRoundAssignment,
   updateReviewerTracks,
+  sendReviewReminders,
+  recuseProposalReview,
   updateProposalReview,
+  reviewResultsCsvUrl,
 } from "./api";
 import { AppSelect } from "./AppSelect";
 import { createClientId } from "./id";
+
+export type ProposalSort =
+  | "newest"
+  | "oldest"
+  | "title-asc"
+  | "title-desc"
+  | "track-asc"
+  | "track-desc"
+  | "status-asc"
+  | "status-desc"
+  | "speaker-asc"
+  | "aggregate-asc"
+  | "aggregate-desc";
 
 export interface ProposalQueueState {
   query: string;
   status: ProposalStatus | "all";
   track: string;
-  sort: "newest" | "oldest" | "title-asc" | "speaker-asc";
+  roundId: string;
+  sort: ProposalSort;
 }
+
+export type BatchChrome = {
+  selectedCount: number;
+  selectableCount: number;
+  allVisibleSelected: boolean;
+  batchMessage: string | null;
+  isPending: boolean;
+  onAccept: () => void;
+  onDecline: () => void;
+  onClear: () => void;
+};
+
+export type ReviewChrome = {
+  open: boolean;
+  onOpen: () => void;
+};
 
 function initials(name: string) {
   return name
@@ -55,6 +102,7 @@ function trackClass(trackId: string) {
   if (trackId.includes("program")) return "track-program";
   if (trackId.includes("design")) return "track-design";
   if (trackId.includes("community")) return "track-community";
+  if (trackId.includes("course")) return "track-course";
   return "track-platform";
 }
 
@@ -89,6 +137,7 @@ function proposalHref(
   if (queue.query) params.set("q", queue.query);
   if (queue.status !== "all") params.set("status", queue.status);
   if (queue.track) params.set("track", queue.track);
+  if (queue.roundId) params.set("roundId", queue.roundId);
   if (queue.sort !== "newest") params.set("sort", queue.sort);
   const suffix = params.size > 0 ? `?${params}` : "";
   return `/e/${eventId}/submissions/${proposalId}${suffix}`;
@@ -96,6 +145,47 @@ function proposalHref(
 
 function decisionBatchStorageKey(eventId: string) {
   return `chartstead:decision-batch:${eventId}`;
+}
+
+type QueueCol = "talk" | "track" | "status" | "score" | "submitted";
+
+const QUEUE_COL_DEFAULTS: Record<QueueCol, number> = {
+  talk: 280,
+  track: 148,
+  status: 124,
+  score: 108,
+  submitted: 118,
+};
+
+const QUEUE_COL_MIN: Record<QueueCol, number> = {
+  talk: 180,
+  track: 128,
+  status: 112,
+  score: 96,
+  submitted: 108,
+};
+
+// v2: Talk is fixed+resizable; Submitted absorbs leftover (resize direction stays correct).
+const QUEUE_COL_STORAGE = "chartstead:submission-cols:v2";
+
+function loadQueueColWidths(): Record<QueueCol, number> {
+  try {
+    const raw = localStorage.getItem(QUEUE_COL_STORAGE);
+    if (!raw) return { ...QUEUE_COL_DEFAULTS };
+    const parsed = JSON.parse(raw) as Partial<Record<QueueCol, number>>;
+    return {
+      talk: Math.max(QUEUE_COL_MIN.talk, Number(parsed.talk) || QUEUE_COL_DEFAULTS.talk),
+      track: Math.max(QUEUE_COL_MIN.track, Number(parsed.track) || QUEUE_COL_DEFAULTS.track),
+      status: Math.max(QUEUE_COL_MIN.status, Number(parsed.status) || QUEUE_COL_DEFAULTS.status),
+      score: Math.max(QUEUE_COL_MIN.score, Number(parsed.score) || QUEUE_COL_DEFAULTS.score),
+      submitted: Math.max(
+        QUEUE_COL_MIN.submitted,
+        Number(parsed.submitted) || QUEUE_COL_DEFAULTS.submitted,
+      ),
+    };
+  } catch {
+    return { ...QUEUE_COL_DEFAULTS };
+  }
 }
 
 function restoredDecisionBatch(eventId: string) {
@@ -113,6 +203,281 @@ function restoredDecisionBatch(eventId: string) {
   }
 }
 
+/** Shared shell toolbar slot for Submissions: queue filters and batch actions. */
+export function SubmissionsCommandBar({
+  event,
+  principal,
+  queue,
+  onQueueChange,
+  batch,
+  review,
+}: {
+  event: EventRecord;
+  principal: OrganizerPrincipal;
+  queue: ProposalQueueState;
+  onQueueChange: (next: ProposalQueueState) => void;
+  batch?: BatchChrome | null;
+  review?: ReviewChrome | null;
+}) {
+  const [search, setSearch] = useState(queue.query);
+  const selectedCount = batch?.selectedCount ?? 0;
+  const batchDisabled = !batch || selectedCount === 0 || batch.isPending;
+  const currentRole = principal.rolesByEvent?.[event.id] ?? principal.role;
+  const planQuery = useQuery({
+    queryKey: ["evaluation-plan", event.id],
+    queryFn: () => fetchEvaluationPlan(event.id),
+  });
+  const rounds = planQuery.data?.plan?.rounds ?? [];
+
+  useEffect(() => setSearch(queue.query), [queue.query]);
+  useEffect(() => {
+    if (search === queue.query) return;
+    const handle = window.setTimeout(
+      () => onQueueChange({ ...queue, query: search }),
+      150,
+    );
+    return () => window.clearTimeout(handle);
+  }, [onQueueChange, queue, search]);
+  useEffect(() => {
+    if (queue.roundId || rounds.length === 0 || currentRole === "admin") return;
+    onQueueChange({ ...queue, roundId: rounds[0]!.id });
+  }, [currentRole, onQueueChange, queue, rounds]);
+
+  function setQueue(patch: Partial<ProposalQueueState>) {
+    onQueueChange({ ...queue, ...patch });
+  }
+
+  return (
+    <div className="topbar-tools-inner">
+      <label className="field search-field topbar-search">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.5-3.5" />
+        </svg>
+        <input
+          type="search"
+          value={search}
+          onChange={(change) => setSearch(change.target.value)}
+          placeholder="Search title, speaker, or ID…"
+          aria-label="Search title, speaker, or ID"
+          autoComplete="off"
+        />
+      </label>
+      <div className="seg" role="group" aria-label="Status filter">
+        {(["all", "unreviewed", "approve", "maybe", "deny"] as const).map((status) => (
+          <button
+            key={status}
+            type="button"
+            aria-pressed={queue.status === status}
+            onClick={() => setQueue({ status })}
+          >
+            {status === "all" ? "All" : statusLabel(status)}
+          </button>
+        ))}
+      </div>
+      <div className="topbar-track">
+        <AppSelect
+          label="Track"
+          ariaLabel="Track filter"
+          value={queue.track}
+          options={[
+            { value: "", label: "All tracks" },
+            ...event.tracks.map((track) => ({ value: track.id, label: track.name })),
+          ]}
+          onValueChange={(track) => setQueue({ track })}
+        />
+      </div>
+      {rounds.length > 0 ? (
+        <div className="topbar-track">
+          <AppSelect
+            label="Round"
+            ariaLabel="Evaluation round"
+            value={queue.roundId}
+            options={[
+              ...(currentRole === "admin" ? [{ value: "", label: "All rounds" }] : []),
+              ...rounds.map((round) => ({ value: round.id, label: round.name })),
+            ]}
+            onValueChange={(roundId) => setQueue({ roundId })}
+          />
+        </div>
+      ) : null}
+      {review ? (
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          aria-pressed={review.open}
+          onClick={review.onOpen}
+        >
+          Review
+        </button>
+      ) : null}
+      {batch ? (
+        <>
+          <span className="topbar-tools-spacer" aria-hidden="true" />
+          <div
+            className={`topbar-batch${selectedCount === 0 ? " topbar-batch-idle" : ""}`}
+            role="region"
+            aria-label="Batch final decisions"
+          >
+            <strong className="topbar-batch-count">
+              {selectedCount === 0 ? "None selected" : `${selectedCount} selected`}
+            </strong>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={batchDisabled}
+              onClick={() => batch.onAccept()}
+            >
+              Accept batch
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={batchDisabled}
+              onClick={() => batch.onDecline()}
+            >
+              Decline batch
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={selectedCount === 0}
+              onClick={() => batch.onClear()}
+            >
+              Clear
+            </button>
+            {batch.batchMessage ? (
+              <span className="form-message" data-tone="error">
+                {batch.batchMessage}
+              </span>
+            ) : null}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function toggleColumnSort(current: ProposalSort, column: "title" | "track" | "status" | "submitted" | "aggregate"): ProposalSort {
+  if (column === "title") return current === "title-asc" ? "title-desc" : "title-asc";
+  if (column === "track") return current === "track-asc" ? "track-desc" : "track-asc";
+  if (column === "status") return current === "status-asc" ? "status-desc" : "status-asc";
+  if (column === "aggregate") return current === "aggregate-desc" ? "aggregate-asc" : "aggregate-desc";
+  return current === "newest" ? "oldest" : "newest";
+}
+
+function sortAria(current: ProposalSort, column: "title" | "track" | "status" | "submitted" | "aggregate") {
+  if (column === "title") {
+    if (current === "title-asc") return "ascending" as const;
+    if (current === "title-desc") return "descending" as const;
+  }
+  if (column === "track") {
+    if (current === "track-asc") return "ascending" as const;
+    if (current === "track-desc") return "descending" as const;
+  }
+  if (column === "status") {
+    if (current === "status-asc") return "ascending" as const;
+    if (current === "status-desc") return "descending" as const;
+  }
+  if (column === "aggregate") {
+    if (current === "aggregate-asc") return "ascending" as const;
+    if (current === "aggregate-desc") return "descending" as const;
+  }
+  if (column === "submitted") {
+    if (current === "oldest") return "ascending" as const;
+    if (current === "newest") return "descending" as const;
+  }
+  return "none" as const;
+}
+
+function filterAndSortProposals(
+  rows: OrganizerProposal[],
+  queue: ProposalQueueState,
+): OrganizerProposal[] {
+  const needle = queue.query.trim().toLowerCase();
+  let next = rows;
+  if (queue.status !== "all") {
+    next = next.filter((row) => row.status === queue.status);
+  }
+  if (queue.track) {
+    next = next.filter((row) => row.trackId === queue.track);
+  }
+  if (needle) {
+    next = next.filter((row) => {
+      const hay = [
+        row.title,
+        row.speakerName,
+        row.id,
+        row.trackName,
+        row.speakerEmail,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(needle);
+    });
+  }
+  const sorted = [...next];
+  switch (queue.sort) {
+    case "oldest":
+      sorted.sort(
+        (a, b) => a.submittedAt.localeCompare(b.submittedAt) || a.id.localeCompare(b.id),
+      );
+      break;
+    case "title-asc":
+      sorted.sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
+      break;
+    case "title-desc":
+      sorted.sort((a, b) => b.title.localeCompare(a.title) || a.id.localeCompare(b.id));
+      break;
+    case "track-asc":
+      sorted.sort(
+        (a, b) => a.trackName.localeCompare(b.trackName) || a.id.localeCompare(b.id),
+      );
+      break;
+    case "track-desc":
+      sorted.sort(
+        (a, b) => b.trackName.localeCompare(a.trackName) || a.id.localeCompare(b.id),
+      );
+      break;
+    case "status-asc":
+      sorted.sort((a, b) => a.status.localeCompare(b.status) || a.id.localeCompare(b.id));
+      break;
+    case "status-desc":
+      sorted.sort((a, b) => b.status.localeCompare(a.status) || a.id.localeCompare(b.id));
+      break;
+    case "speaker-asc":
+      sorted.sort(
+        (a, b) => a.speakerName.localeCompare(b.speakerName) || a.id.localeCompare(b.id),
+      );
+      break;
+    case "aggregate-asc":
+      sorted.sort((a, b) => {
+        const left = a.scorecardAggregate?.aggregateScore;
+        const right = b.scorecardAggregate?.aggregateScore;
+        if (left === null || left === undefined) return right === null || right === undefined ? a.id.localeCompare(b.id) : 1;
+        if (right === null || right === undefined) return -1;
+        return left - right || a.id.localeCompare(b.id);
+      });
+      break;
+    case "aggregate-desc":
+      sorted.sort((a, b) => {
+        const left = a.scorecardAggregate?.aggregateScore;
+        const right = b.scorecardAggregate?.aggregateScore;
+        if (left === null || left === undefined) return right === null || right === undefined ? a.id.localeCompare(b.id) : 1;
+        if (right === null || right === undefined) return -1;
+        return right - left || a.id.localeCompare(b.id);
+      });
+      break;
+    case "newest":
+    default:
+      sorted.sort(
+        (a, b) => b.submittedAt.localeCompare(a.submittedAt) || b.id.localeCompare(a.id),
+      );
+      break;
+  }
+  return sorted;
+}
+
 export function SubmissionsWorkspace({
   event,
   principal,
@@ -121,7 +486,8 @@ export function SubmissionsWorkspace({
   onCloseProposal,
   queue,
   onQueueChange,
-  cfpHref,
+  onBatchChromeChange,
+  onReviewChromeChange,
   focusSelectedRecord = false,
 }: {
   event: EventRecord;
@@ -131,60 +497,104 @@ export function SubmissionsWorkspace({
   onCloseProposal?: () => void;
   queue: ProposalQueueState;
   onQueueChange: (next: ProposalQueueState) => void;
-  cfpHref: string;
+  onBatchChromeChange?: (batch: BatchChrome | null) => void;
+  onReviewChromeChange?: (review: ReviewChrome | null) => void;
   focusSelectedRecord?: boolean;
 }) {
   const navigate = useNavigate();
-  const [search, setSearch] = useState(queue.query);
-  const [routingOpen, setRoutingOpen] = useState(false);
-  const [inspectorWidth, setInspectorWidth] = useState(460);
+  const [inspectorWidth, setInspectorWidth] = useState(560);
+  const [queuePaneWidth, setQueuePaneWidth] = useState(0);
+  const inspectorWidthRef = useRef(inspectorWidth);
+  inspectorWidthRef.current = inspectorWidth;
   const [batchIds, setBatchIds] = useState<Set<string>>(() =>
     restoredDecisionBatch(event.id),
   );
-  const [batchOutcome, setBatchOutcome] = useState<ProgramOutcome>("accepted");
   const [batchMessage, setBatchMessage] = useState<string | null>(null);
+  const [resultsOpen, setResultsOpen] = useState(false);
+  const [colWidths, setColWidths] = useState<Record<QueueCol, number>>(loadQueueColWidths);
+  const colWidthsRef = useRef(colWidths);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const splitRef = useRef<HTMLDivElement>(null);
+  colWidthsRef.current = colWidths;
 
-  useEffect(() => setSearch(queue.query), [queue.query]);
+  useEffect(() => {
+    localStorage.setItem(QUEUE_COL_STORAGE, JSON.stringify(colWidths));
+  }, [colWidths]);
+
+  function startColResize(column: QueueCol, pointer: ReactPointerEvent<HTMLSpanElement>) {
+    pointer.preventDefault();
+    pointer.stopPropagation();
+    const handle = pointer.currentTarget;
+    handle.setPointerCapture(pointer.pointerId);
+    const header = handle.closest("th");
+    const colEl = tableRef.current?.querySelector<HTMLTableColElement>(`col.col-${column}`);
+    const startX = pointer.clientX;
+    const startWidth = header?.getBoundingClientRect().width ?? colWidthsRef.current[column];
+    let nextWidth = startWidth;
+    const move = (event: PointerEvent) => {
+      nextWidth = Math.max(QUEUE_COL_MIN[column], Math.round(startWidth + event.clientX - startX));
+      if (colEl) colEl.style.width = `${nextWidth}px`;
+    };
+    const stop = () => {
+      handle.releasePointerCapture(pointer.pointerId);
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", stop);
+      setColWidths((current) => ({ ...current, [column]: nextWidth }));
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", stop);
+  }
+
   useEffect(() => {
     const key = decisionBatchStorageKey(event.id);
     if (batchIds.size === 0) sessionStorage.removeItem(key);
     else sessionStorage.setItem(key, JSON.stringify([...batchIds]));
   }, [batchIds, event.id]);
-  useEffect(() => {
-    if (search === queue.query) return;
-    const handle = window.setTimeout(
-      () => onQueueChange({ ...queue, query: search }),
-      150,
-    );
-    return () => window.clearTimeout(handle);
-  }, [onQueueChange, queue, search]);
 
+  // Event + optional round only. Sort/filter stay client-side so header clicks never wipe the table.
   const query = useQuery({
-    queryKey: ["proposals", event.id, queue],
-    queryFn: () => fetchProposals(event.id, queue),
+    queryKey: ["proposals", event.id, queue.roundId || "all"],
+    queryFn: () => fetchProposals(event.id, { roundId: queue.roundId || undefined }),
+    staleTime: 30_000,
+    placeholderData: keepPreviousData,
   });
-  const proposals = query.data ?? [];
-  const detailQuery = useQuery({
-    queryKey: ["proposal-review", event.id, selectedProposalId],
-    queryFn: () => fetchOrganizerProposal(event.id, selectedProposalId!),
-    enabled: Boolean(selectedProposalId),
-  });
-  const selected = selectedProposalId ? (detailQuery.data?.proposal ?? null) : null;
-  const auditEvents = selectedProposalId ? (detailQuery.data?.auditEvents ?? []) : [];
+  const proposals = useMemo(
+    () => filterAndSortProposals(query.data ?? [], queue),
+    [query.data, queue],
+  );
+  const showInitialLoading = query.isPending && !query.data;
   const currentRole = principal.rolesByEvent?.[event.id] ?? principal.role;
-
-  function setQueue(patch: Partial<ProposalQueueState>) {
-    onQueueChange({ ...queue, ...patch });
-  }
+  const detailQuery = useQuery({
+    queryKey: ["proposal-review", event.id, selectedProposalId, queue.roundId],
+    queryFn: () => fetchOrganizerProposal(event.id, selectedProposalId!, queue.roundId || undefined),
+    enabled: Boolean(selectedProposalId),
+    placeholderData: keepPreviousData,
+  });
+  const resultsQuery = useQuery({
+    queryKey: ["review-results", event.id],
+    queryFn: () => fetchReviewResults(event.id),
+    enabled: currentRole === "admin",
+    staleTime: 30_000,
+  });
+  const listSelected = selectedProposalId
+    ? (proposals.find((proposal) => proposal.id === selectedProposalId) ?? null)
+    : null;
+  const selected = detailQuery.data?.proposal ?? listSelected;
+  const auditEvents = selectedProposalId ? (detailQuery.data?.auditEvents ?? []) : [];
+  const selectableIds = proposals
+    .filter((proposal) => !proposal.programOutcome)
+    .map((proposal) => proposal.id);
+  const allVisibleSelected =
+    selectableIds.length > 0 && selectableIds.every((id) => batchIds.has(id));
 
   const batchMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (outcome: ProgramOutcome) =>
       createDecisionCourseCheck(event.id, {
         items: [...batchIds].map((proposalId) => ({
           proposalId,
-          outcome: batchOutcome,
+          outcome,
         })),
-        idempotencyKey: `ui-batch-${[...batchIds].sort().join("-")}-${batchOutcome}-${createClientId()}`,
+        idempotencyKey: `ui-batch-${[...batchIds].sort().join("-")}-${outcome}-${createClientId()}`,
       }),
     onSuccess: (plan) => {
       setBatchMessage(null);
@@ -204,160 +614,184 @@ export function SubmissionsWorkspace({
     },
   });
 
+  useEffect(() => {
+    if (!onBatchChromeChange) return;
+    if (currentRole !== "admin") {
+      onBatchChromeChange(null);
+      return;
+    }
+    onBatchChromeChange({
+      selectedCount: batchIds.size,
+      selectableCount: selectableIds.length,
+      allVisibleSelected,
+      batchMessage,
+      isPending: batchMutation.isPending,
+      onAccept: () => {
+        setBatchMessage(null);
+        batchMutation.mutate("accepted");
+      },
+      onDecline: () => {
+        setBatchMessage(null);
+        batchMutation.mutate("declined");
+      },
+      onClear: () => setBatchIds(new Set()),
+    });
+  }, [
+    allVisibleSelected,
+    batchIds.size,
+    batchMessage,
+    batchMutation.isPending,
+    currentRole,
+    onBatchChromeChange,
+    selectableIds.length,
+  ]);
+
+  useEffect(() => {
+    if (!onReviewChromeChange) return;
+    if (currentRole !== "admin") {
+      onReviewChromeChange(null);
+      return;
+    }
+    onReviewChromeChange({
+      open: resultsOpen,
+      onOpen: () => setResultsOpen(true),
+    });
+  }, [currentRole, onReviewChromeChange, resultsOpen]);
+
+  function openProposal(proposalId: string) {
+    setResultsOpen(false);
+    onSelectProposal?.(proposalId);
+  }
+
+  function setSort(column: "title" | "track" | "status" | "submitted" | "aggregate") {
+    onQueueChange({ ...queue, sort: toggleColumnSort(queue.sort, column) });
+  }
+
+  function toggleSelectAllVisible() {
+    setBatchIds((current) => {
+      if (allVisibleSelected) {
+        const next = new Set(current);
+        for (const id of selectableIds) next.delete(id);
+        return next;
+      }
+      const next = new Set(current);
+      for (const id of selectableIds) next.add(id);
+      return next;
+    });
+  }
+
+  const leadingFixed = (currentRole === "admin" ? 36 : 0) + 40;
+  const trailingFixed =
+    colWidths.track + colWidths.status + colWidths.score + colWidths.submitted;
+
+  function queueFloorWidth(widths: Record<QueueCol, number> = colWidths) {
+    // Minimum queue footprint: Talk at its floor, trailing cols at their current sizes.
+    return (
+      leadingFixed +
+      QUEUE_COL_MIN.talk +
+      widths.track +
+      widths.status +
+      widths.score +
+      widths.submitted
+    );
+  }
+
+  function clampInspectorWidth(
+    desired: number,
+    splitWidth: number,
+    widths: Record<QueueCol, number> = colWidths,
+  ) {
+    const floor = queueFloorWidth(widths);
+    const maxWidth = Math.max(280, Math.floor(splitWidth - 8 - floor));
+    return Math.min(maxWidth, Math.max(280, Math.min(desired, maxWidth)));
+  }
+
+  // Talk shrinks as the queue pane shrinks (inspector grows). Gap absorbs slack first.
+  const talkDisplayWidth = (() => {
+    if (queuePaneWidth <= 0) return colWidths.talk;
+    const roomForTalk = queuePaneWidth - leadingFixed - trailingFixed;
+    if (roomForTalk >= colWidths.talk) return colWidths.talk;
+    return Math.max(QUEUE_COL_MIN.talk, roomForTalk);
+  })();
+
+  useEffect(() => {
+    const splitEl = splitRef.current;
+    if (!splitEl) return;
+    const apply = () => {
+      const splitWidth = splitEl.getBoundingClientRect().width;
+      const next = clampInspectorWidth(
+        inspectorWidthRef.current,
+        splitWidth,
+        colWidthsRef.current,
+      );
+      if (next !== inspectorWidthRef.current) {
+        inspectorWidthRef.current = next;
+        setInspectorWidth(next);
+      }
+      splitEl.style.setProperty("--inspector-width", `${next}px`);
+      // Queue pane width = split minus gutter minus inspector
+      setQueuePaneWidth(Math.max(0, Math.round(splitWidth - 8 - next)));
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(splitEl);
+    return () => observer.disconnect();
+  }, [
+    currentRole,
+    colWidths.talk,
+    colWidths.track,
+    colWidths.status,
+    colWidths.score,
+    colWidths.submitted,
+  ]);
+
   function startInspectorResize(pointer: ReactPointerEvent<HTMLDivElement>) {
     pointer.preventDefault();
+    const handle = pointer.currentTarget;
+    handle.setPointerCapture(pointer.pointerId);
+    const splitEl = handle.parentElement;
     const startX = pointer.clientX;
-    const startWidth = inspectorWidth;
+    const startWidth = inspectorWidthRef.current;
+    const widths = colWidthsRef.current;
+    let nextWidth = startWidth;
     const move = (event: PointerEvent) => {
-      const maxWidth = Math.max(380, Math.min(720, window.innerWidth - 560));
-      setInspectorWidth(
-        Math.min(maxWidth, Math.max(380, startWidth + startX - event.clientX)),
+      const splitWidth = splitEl?.getBoundingClientRect().width ?? window.innerWidth;
+      nextWidth = clampInspectorWidth(
+        startWidth + startX - event.clientX,
+        splitWidth,
+        widths,
       );
+      if (splitEl) {
+        splitEl.style.setProperty("--inspector-width", `${nextWidth}px`);
+        setQueuePaneWidth(Math.max(0, Math.round(splitWidth - 8 - nextWidth)));
+      }
     };
     const stop = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", stop);
+      handle.releasePointerCapture(pointer.pointerId);
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", stop);
+      inspectorWidthRef.current = nextWidth;
+      setInspectorWidth(nextWidth);
     };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop);
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", stop);
   }
 
   return (
     <div className="work" aria-label="Submissions workspace">
-      <div className="toolbar">
-        <label className="field search-field">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="11" cy="11" r="7" />
-            <path d="m20 20-3.5-3.5" />
-          </svg>
-          <input
-            type="search"
-            value={search}
-            onChange={(change) => setSearch(change.target.value)}
-            placeholder="Search title, speaker, or ID…"
-            aria-label="Search title, speaker, or ID"
-            autoComplete="off"
-          />
-        </label>
-        <div className="seg" role="group" aria-label="Status filter">
-          {(["unreviewed", "approve", "maybe", "deny", "all"] as const).map(
-            (status) => (
-              <button
-                key={status}
-                type="button"
-                aria-pressed={queue.status === status}
-                onClick={() => setQueue({ status })}
-              >
-                {status === "all" ? "All" : statusLabel(status)}
-              </button>
-            ),
-          )}
-        </div>
-        <AppSelect
-          label="Filter"
-          ariaLabel="Track filter"
-          value={queue.track}
-          options={[
-            { value: "", label: "All assigned tracks" },
-            ...event.tracks.map((track) => ({ value: track.id, label: track.name })),
-          ]}
-          onValueChange={(track) => setQueue({ track })}
-        />
-        <AppSelect
-          label="Sort"
-          ariaLabel="Sort submissions"
-          value={queue.sort}
-          options={[
-            { value: "newest", label: "Newest" },
-            { value: "oldest", label: "Oldest" },
-            { value: "title-asc", label: "Title A-Z" },
-            { value: "speaker-asc", label: "Speaker A-Z" },
-          ]}
-          onValueChange={(sort) =>
-            setQueue({ sort: sort as ProposalQueueState["sort"] })
-          }
-        />
-        <span className="toolbar-spacer" />
-        {currentRole === "admin" ? (
-          <Dialog.Root open={routingOpen} onOpenChange={setRoutingOpen}>
-            <Dialog.Trigger className="btn btn-secondary btn-sm">
-              Reviewer routing
-            </Dialog.Trigger>
-            <Dialog.Portal>
-              <Dialog.Backdrop className="dialog-backdrop" />
-              <Dialog.Viewport className="dialog-viewport">
-                <Dialog.Popup className="routing-dialog">
-                  <div className="routing-dialog-header">
-                    <div>
-                      <p className="eyebrow">Committee access</p>
-                      <Dialog.Title>Reviewer routing</Dialog.Title>
-                      <Dialog.Description>
-                        Grant or remove track access for signed-in reviewers.
-                      </Dialog.Description>
-                    </div>
-                    <Dialog.Close className="dialog-close" aria-label="Close reviewer routing">
-                      ×
-                    </Dialog.Close>
-                  </div>
-                  <ReviewerRouting event={event} />
-                </Dialog.Popup>
-              </Dialog.Viewport>
-            </Dialog.Portal>
-          </Dialog.Root>
-        ) : null}
-        <a className="btn btn-primary btn-sm" href={cfpHref}>
-          Open CFP form
-        </a>
-      </div>
-
       <div
+        ref={splitRef}
         className="split"
-        style={{ "--inspector-width": `${inspectorWidth}px` } as CSSProperties}
+        style={
+          {
+            "--inspector-width": `${inspectorWidth}px`,
+          } as CSSProperties
+        }
       >
         <div className="table-wrap">
-          {currentRole === "admin" && batchIds.size > 0 ? (
-            <div className="batch-decision-bar" role="region" aria-label="Batch final decisions">
-              <strong>{batchIds.size} selected</strong>
-              <AppSelect
-                label="Final outcome"
-                ariaLabel="Batch final outcome"
-                value={batchOutcome}
-                options={[
-                  { value: "accepted", label: "Accept" },
-                  { value: "declined", label: "Decline" },
-                ]}
-                onValueChange={(value) =>
-                  setBatchOutcome(value === "declined" ? "declined" : "accepted")
-                }
-              />
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                disabled={batchMutation.isPending}
-                onClick={() => {
-                  setBatchMessage(null);
-                  batchMutation.mutate();
-                }}
-              >
-                Open batch Course Check
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setBatchIds(new Set())}
-              >
-                Clear
-              </button>
-              {batchMessage ? (
-                <span className="form-message" data-tone="error">
-                  {batchMessage}
-                </span>
-              ) : null}
-            </div>
-          ) : null}
-          {query.isPending ? (
+          {showInitialLoading ? (
             <p className="empty-state">Loading submissions…</p>
-          ) : query.isError ? (
+          ) : query.isError && !query.data ? (
             <div className="submission-error" role="alert">
               <strong>Unable to load submissions.</strong>
               <span>{query.error.message}</span>
@@ -376,33 +810,173 @@ export function SubmissionsWorkspace({
                 : "No proposals match these queue filters. Try another status, track, or search."}
             </p>
           ) : (
-            <table className="grid" aria-label="Submissions">
+            <table
+              ref={tableRef}
+              className="grid grid-queue"
+              aria-label="Submissions"
+              style={{
+                minWidth: queueFloorWidth(),
+              }}
+            >
+              <colgroup>
+                {currentRole === "admin" ? <col className="col-batch" /> : null}
+                <col className="col-avatar" />
+                <col className="col-talk" style={{ width: talkDisplayWidth }} />
+                <col className="col-gap" />
+                <col className="col-track" style={{ width: colWidths.track }} />
+                <col className="col-status" style={{ width: colWidths.status }} />
+                <col className="col-score" style={{ width: colWidths.score }} />
+                <col className="col-submitted" style={{ width: colWidths.submitted }} />
+              </colgroup>
               <thead>
                 <tr>
-                  {currentRole === "admin" ? <th scope="col">Batch</th> : null}
-                  <th scope="col"> </th>
-                  <th scope="col">Talk</th>
-                  <th scope="col">Track</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Submitted</th>
+                  {currentRole === "admin" ? (
+                    <th scope="col" className="col-batch">
+                      <input
+                        className="batch-check"
+                        type="checkbox"
+                        aria-label="Select all visible submissions"
+                        checked={allVisibleSelected}
+                        disabled={selectableIds.length === 0}
+                        ref={(node) => {
+                          if (!node) return;
+                          node.indeterminate =
+                            batchIds.size > 0 && !allVisibleSelected &&
+                            selectableIds.some((id) => batchIds.has(id));
+                        }}
+                        onChange={toggleSelectAllVisible}
+                      />
+                    </th>
+                  ) : null}
+                  <th scope="col" className="col-avatar">
+                    <span className="visually-hidden">Speaker</span>
+                  </th>
+                  <th scope="col" className="col-talk" aria-sort={sortAria(queue.sort, "title")}>
+                    <button type="button" className="th-sort" onClick={() => setSort("title")}>
+                      Talk
+                      <span className="th-sort-ind" aria-hidden="true">
+                        {sortAria(queue.sort, "title") === "ascending"
+                          ? "↑"
+                          : sortAria(queue.sort, "title") === "descending"
+                            ? "↓"
+                            : ""}
+                      </span>
+                    </button>
+                    <span
+                      className="col-resizer"
+                      role="separator"
+                      aria-orientation="vertical"
+                      aria-label="Resize Talk column"
+                      onPointerDown={(event) => startColResize("talk", event)}
+                    />
+                  </th>
+                  <th scope="col" className="col-gap" aria-hidden="true" />
+                  <th scope="col" className="col-track" aria-sort={sortAria(queue.sort, "track")}>
+                    <button type="button" className="th-sort" onClick={() => setSort("track")}>
+                      Track
+                      <span className="th-sort-ind" aria-hidden="true">
+                        {sortAria(queue.sort, "track") === "ascending"
+                          ? "↑"
+                          : sortAria(queue.sort, "track") === "descending"
+                            ? "↓"
+                            : ""}
+                      </span>
+                    </button>
+                    <span
+                      className="col-resizer"
+                      role="separator"
+                      aria-orientation="vertical"
+                      aria-label="Resize Track column"
+                      onPointerDown={(event) => startColResize("track", event)}
+                    />
+                  </th>
+                  <th scope="col" className="col-status" aria-sort={sortAria(queue.sort, "status")}>
+                    <button type="button" className="th-sort" onClick={() => setSort("status")}>
+                      Status
+                      <span className="th-sort-ind" aria-hidden="true">
+                        {sortAria(queue.sort, "status") === "ascending"
+                          ? "↑"
+                          : sortAria(queue.sort, "status") === "descending"
+                            ? "↓"
+                            : ""}
+                      </span>
+                    </button>
+                    <span
+                      className="col-resizer"
+                      role="separator"
+                      aria-orientation="vertical"
+                      aria-label="Resize Status column"
+                      onPointerDown={(event) => startColResize("status", event)}
+                    />
+                  </th>
+                  <th scope="col" className="col-score" aria-sort={sortAria(queue.sort, "aggregate")}>
+                    <button type="button" className="th-sort" onClick={() => setSort("aggregate")}>
+                      Aggregate
+                      <span className="th-sort-ind" aria-hidden="true">
+                        {sortAria(queue.sort, "aggregate") === "ascending"
+                          ? "↑"
+                          : sortAria(queue.sort, "aggregate") === "descending"
+                            ? "↓"
+                            : ""}
+                      </span>
+                    </button>
+                    <span
+                      className="col-resizer"
+                      role="separator"
+                      aria-orientation="vertical"
+                      aria-label="Resize Aggregate column"
+                      onPointerDown={(event) => startColResize("score", event)}
+                    />
+                  </th>
+                  <th scope="col" className="col-submitted" aria-sort={sortAria(queue.sort, "submitted")}>
+                    <button type="button" className="th-sort" onClick={() => setSort("submitted")}>
+                      Submitted
+                      <span className="th-sort-ind" aria-hidden="true">
+                        {sortAria(queue.sort, "submitted") === "ascending"
+                          ? "↑"
+                          : sortAria(queue.sort, "submitted") === "descending"
+                            ? "↓"
+                            : ""}
+                      </span>
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {proposals.map((proposal) => {
                   const href = proposalHref(event.id, proposal.id, queue);
+                  const locked = Boolean(proposal.programOutcome);
                   return (
                     <tr
                       key={proposal.id}
+                      className={`proposal-row${locked ? " proposal-row-locked" : ""}`}
                       data-id={proposal.id}
-                      aria-selected={selected?.id === proposal.id}
+                      data-polish-id="S-2-row"
+                      aria-selected={selectedProposalId === proposal.id}
+                      title={
+                        locked
+                          ? `Final outcome already set (${proposal.programOutcome}). Open to inspect; batch select is locked.`
+                          : undefined
+                      }
                     >
                       {currentRole === "admin" ? (
-                        <td>
+                        <td className="col-batch">
                           <input
+                            className="batch-check"
                             type="checkbox"
-                            aria-label={`Select ${proposal.id} for batch decision`}
+                            aria-label={
+                              locked
+                                ? `${proposal.id} locked — final outcome already set`
+                                : `Select ${proposal.id} for batch decision`
+                            }
                             checked={batchIds.has(proposal.id)}
-                            disabled={Boolean(proposal.programOutcome)}
+                            disabled={locked}
+                            title={
+                              locked
+                                ? `Final outcome already set (${proposal.programOutcome})`
+                                : "Select for batch decision"
+                            }
+                            onClick={(click) => click.stopPropagation()}
                             onChange={() => {
                               setBatchIds((current) => {
                                 const next = new Set(current);
@@ -414,16 +988,16 @@ export function SubmissionsWorkspace({
                           />
                         </td>
                       ) : null}
-                      <td>
+                      <td className="col-avatar">
                         <span className="avatar" aria-hidden="true">
                           {initials(proposal.speakerName)}
                         </span>
                       </td>
-                      <td>
+                      <td className="col-talk">
                         <ProposalLink
                           href={href}
                           proposalId={proposal.id}
-                          onSelectProposal={onSelectProposal}
+                          onSelectProposal={openProposal}
                         >
                           <span className="talk">{proposal.title}</span>
                           <span className="talk-sub">
@@ -431,17 +1005,25 @@ export function SubmissionsWorkspace({
                           </span>
                         </ProposalLink>
                       </td>
-                      <td>
+                      <td className="col-gap" aria-hidden="true" />
+                      <td className="col-track">
                         <span className={`track ${trackClass(proposal.trackId)}`}>
                           {proposal.trackName}
                         </span>
                       </td>
-                      <td>
+                      <td className="col-status">
                         <span className={`flag flag-${proposal.status}`}>
                           {statusLabel(proposal.status)}
                         </span>
                       </td>
-                      <td className="muted">{formatSubmittedAt(proposal.submittedAt)}</td>
+                      <td className="col-score">
+                        {proposal.scorecardAggregate?.aggregateScore == null
+                          ? <span className="muted">Unscored</span>
+                          : `${proposal.scorecardAggregate.aggregateScore.toFixed(2)}`}
+                      </td>
+                      <td className="col-submitted muted">
+                        {formatSubmittedAt(proposal.submittedAt)}
+                      </td>
                     </tr>
                   );
                 })}
@@ -461,25 +1043,41 @@ export function SubmissionsWorkspace({
           tabIndex={0}
           onPointerDown={startInspectorResize}
           onKeyDown={(key) => {
+            const splitWidth =
+              key.currentTarget.parentElement?.getBoundingClientRect().width ??
+              window.innerWidth;
             if (key.key === "ArrowLeft") {
               key.preventDefault();
-              setInspectorWidth((width) => Math.min(720, width + 24));
+              setInspectorWidth((width) => {
+                const next = clampInspectorWidth(width + 24, splitWidth, colWidthsRef.current);
+                inspectorWidthRef.current = next;
+                return next;
+              });
             } else if (key.key === "ArrowRight") {
               key.preventDefault();
-              setInspectorWidth((width) => Math.max(380, width - 24));
+              setInspectorWidth((width) => {
+                const next = clampInspectorWidth(width - 24, splitWidth, colWidthsRef.current);
+                inspectorWidthRef.current = next;
+                return next;
+              });
             }
           }}
         />
 
         <aside
-          className={`inspector${selectedProposalId ? " has-selection" : ""}`}
-          aria-label="Proposal detail"
+          className={`inspector${selectedProposalId || resultsOpen ? " has-selection" : ""}`}
+          aria-label={resultsOpen || (!selectedProposalId && currentRole === "admin") ? "Review results" : "Proposal detail"}
         >
-          {selectedProposalId && detailQuery.isPending ? (
-            <div className="inspector-body" aria-busy="true">
-              <p className="empty-state">Loading proposal…</p>
-            </div>
-          ) : selectedProposalId && detailQuery.isError ? (
+          {currentRole === "admin" && (resultsOpen || !selectedProposalId) ? (
+            <ReviewResultsPanel
+              eventId={event.id}
+              results={resultsQuery.data ?? null}
+              queueRows={proposals}
+              fallbackTotal={event.submissionCount}
+              isLoading={resultsQuery.isPending && !resultsQuery.data}
+              error={resultsQuery.error instanceof Error ? resultsQuery.error.message : null}
+            />
+          ) : selectedProposalId && detailQuery.isError && !selected ? (
             <div className="inspector-body">
               <div className="submission-error" role="alert">
                 <strong>Unable to open this proposal.</strong>
@@ -489,8 +1087,10 @@ export function SubmissionsWorkspace({
           ) : selected ? (
             <ProposalInspector
               eventId={event.id}
+              roundId={queue.roundId}
               proposal={selected}
               auditEvents={auditEvents}
+              scorecard={detailQuery.data?.scorecard ?? null}
               isAdmin={currentRole === "admin"}
               focusRecord={focusSelectedRecord}
               onClose={onCloseProposal}
@@ -540,17 +1140,175 @@ function ProposalLink({
   );
 }
 
-function ReviewerRouting({ event }: { event: EventRecord }) {
+function ReviewResultsPanel({
+  eventId,
+  results,
+  queueRows,
+  fallbackTotal,
+  error,
+}: {
+  eventId: string;
+  results: ReviewResultsResponse | null;
+  queueRows: OrganizerProposal[];
+  fallbackTotal: number;
+  isLoading: boolean;
+  error: string | null;
+}) {
+  const rows =
+    results?.submissions ??
+    queueRows.map((proposal) => ({
+      proposalId: proposal.id,
+      title: proposal.title,
+      speakers: [
+        {
+          name: proposal.speakerName,
+          email: proposal.speakerEmail,
+          role: "speaker",
+        },
+      ],
+      completionStatus: "not_started" as const,
+      recommendation: proposal.status,
+      aggregateScore: proposal.scorecardAggregate?.aggregateScore ?? null,
+    }));
+  const completed = rows.filter((row) => row.completionStatus === "complete").length;
+  const scored = rows.filter((row) => row.aggregateScore !== null);
+  const average =
+    scored.length === 0
+      ? null
+      : scored.reduce((sum, row) => sum + (row.aggregateScore ?? 0), 0) / scored.length;
+  const incomplete = results ? rows.length - completed : Math.max(fallbackTotal, rows.length);
+  const avgLabel = average === null ? "—" : average.toFixed(1);
+
+  return (
+    <div className="inspector-content review-results">
+      <header className="review-results-header">
+        <h2>Review Ledger</h2>
+        <a className="btn btn-secondary btn-sm" href={reviewResultsCsvUrl(eventId)}>
+          Download CSV
+        </a>
+      </header>
+      <div className="inspector-body">
+        {error ? (
+          <div className="submission-error" role="alert">
+            <strong>Unable to load review results.</strong>
+            <span>{error}</span>
+          </div>
+        ) : null}
+        <section className="review-results-metrics" aria-label="Review totals">
+          <div className="review-stat review-stat-complete">
+            <span className="review-stat-value">{completed}</span>
+            <span className="review-stat-label">Complete</span>
+          </div>
+          <div className="review-stat review-stat-incomplete">
+            <span className="review-stat-value">{incomplete}</span>
+            <span className="review-stat-label">Incomplete</span>
+          </div>
+          <div className="review-stat review-stat-average">
+            <span className="review-stat-value">{avgLabel}</span>
+            <span className="review-stat-label">Average</span>
+          </div>
+        </section>
+        <section className="panel review-results-ledger">
+          <h3>Submissions</h3>
+          {rows.length === 0 ? (
+            <p>No submissions in this queue.</p>
+          ) : (
+            <ul className="review-results-list">
+              {rows.map((row) => (
+                <li key={row.proposalId}>
+                  <div className="review-results-row-main">
+                    <span className="talk">{row.title}</span>
+                    <span className="review-results-score">
+                      {row.aggregateScore === null ? "—" : row.aggregateScore.toFixed(1)}
+                    </span>
+                  </div>
+                  <span className="talk-sub">
+                    {row.speakers.map((speaker) => speaker.name).join(", ") || "No speakers"}
+                    {" · "}
+                    {row.completionStatus === "complete" ? "Complete" : "Incomplete"}
+                    {" · "}
+                    {statusLabel(row.recommendation)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+export function ReviewerRouting({ event }: { event: EventRecord }) {
   const queryClient = useQueryClient();
   const [email, setEmail] = useState("");
   const [trackIds, setTrackIds] = useState<string[]>([]);
   const [editingReviewerId, setEditingReviewerId] = useState<string | null>(null);
   const [editTrackIds, setEditTrackIds] = useState<string[]>([]);
+  const [selectedRoundId, setSelectedRoundId] = useState("");
+  const [bulkTrackIds, setBulkTrackIds] = useState<string[]>([]);
+  const [bulkReviewerIds, setBulkReviewerIds] = useState<string[]>([]);
+  const [bulkCap, setBulkCap] = useState("");
+  const [distributionPreview, setDistributionPreview] =
+    useState<EvaluationRoundDistributionPreview | null>(null);
+  const [showIncompleteOnly, setShowIncompleteOnly] = useState(true);
+  const [selectedReminderIds, setSelectedReminderIds] = useState<string[]>([]);
+  const [reminderDrafts, setReminderDrafts] = useState<ReviewProgressReminderDraft[]>([]);
+  const [reminderKey, setReminderKey] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const query = useQuery({
     queryKey: ["reviewers", event.id],
     queryFn: () => fetchReviewerAssignments(event.id),
   });
+  const planQuery = useQuery({
+    queryKey: ["evaluation-plan", event.id],
+    queryFn: () => fetchEvaluationPlan(event.id),
+  });
+  const rounds = planQuery.data?.plan?.enabled ? planQuery.data.plan.rounds : [];
+  const selectedRound =
+    rounds.find((round) => round.id === selectedRoundId) ?? rounds[0] ?? null;
+  const proposalsQuery = useQuery({
+    queryKey: ["assignment-proposals", event.id],
+    queryFn: () => fetchProposals(event.id, { sort: "track-asc" }),
+    enabled: rounds.length > 0,
+  });
+  const assignmentsQuery = useQuery({
+    queryKey: ["round-assignments", event.id, selectedRound?.id ?? ""],
+    queryFn: () =>
+      selectedRound
+        ? fetchEvaluationRoundAssignments(event.id, selectedRound.id)
+        : Promise.resolve([] as EvaluationRoundAssignment[]),
+    enabled: Boolean(selectedRound),
+  });
+  const progressQuery = useQuery({
+    queryKey: ["review-progress", event.id, selectedRound?.id ?? ""],
+    queryFn: () => fetchReviewProgress(event.id, selectedRound?.id ?? null),
+    enabled: query.isSuccess && planQuery.isSuccess,
+  });
+  const assignmentKeys = useMemo(
+    () =>
+      new Set(
+        (assignmentsQuery.data ?? []).map(
+          (assignment) => `${assignment.reviewerId}::${assignment.proposalId}`,
+        ),
+      ),
+    [assignmentsQuery.data],
+  );
+
+  useEffect(() => {
+    if (!selectedRound && selectedRoundId) {
+      setSelectedRoundId("");
+      return;
+    }
+    if (selectedRound && selectedRound.id !== selectedRoundId) {
+      setSelectedRoundId(selectedRound.id);
+      setBulkReviewerIds(selectedRound.reviewerPool);
+      setDistributionPreview(null);
+      setReminderDrafts([]);
+      setSelectedReminderIds([]);
+      setReminderKey("");
+    }
+  }, [selectedRound, selectedRoundId]);
   const mutation = useMutation({
     mutationFn: () => grantReviewerTracks(event.id, { email, trackIds }),
     onSuccess: (result) => {
@@ -601,6 +1359,108 @@ function ReviewerRouting({ event }: { event: EventRecord }) {
       void queryClient.invalidateQueries({ queryKey: ["reviewers", event.id] });
     },
   });
+  const roundAssignmentMutation = useMutation({
+    mutationFn: (input: { proposalId: string; reviewerId: string; assigned: boolean }) => {
+      if (!selectedRound) throw new Error("Choose an evaluation round.");
+      return setEvaluationRoundAssignment(event.id, selectedRound.id, input);
+    },
+    onSuccess: () => {
+      setMessage("Round assignment updated.");
+      void queryClient.invalidateQueries({ queryKey: ["round-assignments", event.id, selectedRound?.id ?? ""] });
+    },
+  });
+
+  function distributionRequest() {
+    return {
+      trackIds: bulkTrackIds,
+      reviewerIds: bulkReviewerIds,
+      maxAssignmentsPerReviewer: bulkCap.trim() ? Number(bulkCap) : null,
+    };
+  }
+
+  const previewMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedRound) throw new Error("Choose an evaluation round.");
+      return previewEvaluationRoundDistribution(
+        event.id,
+        selectedRound.id,
+        distributionRequest(),
+      );
+    },
+    onSuccess: (preview) => {
+      setDistributionPreview(preview);
+      setMessage("Distribution preview ready.");
+    },
+  });
+  const distributeMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedRound) throw new Error("Choose an evaluation round.");
+      return distributeEvaluationRoundAssignments(
+        event.id,
+        selectedRound.id,
+        distributionRequest(),
+      );
+    },
+    onSuccess: (result) => {
+      setDistributionPreview(result.preview);
+      setMessage("Round assignments distributed.");
+      void queryClient.invalidateQueries({ queryKey: ["round-assignments", event.id, selectedRound?.id ?? ""] });
+    },
+  });
+  const previewReminderMutation = useMutation({
+    mutationFn: () =>
+      previewReviewReminders(event.id, {
+        roundId: progressQuery.data?.round.roundId ?? selectedRound?.id ?? null,
+        reviewerIds: selectedReminderIds,
+      }),
+    onSuccess: (preview) => {
+      setReminderDrafts(preview.drafts);
+      setReminderKey(`review-reminder-${createClientId()}`);
+      setMessage(
+        preview.drafts.length === 0
+          ? "No incomplete reviewers selected for reminders."
+          : `Prepared ${preview.drafts.length} reviewer reminder draft${preview.drafts.length === 1 ? "" : "s"}.`,
+      );
+    },
+  });
+  const sendReminderMutation = useMutation({
+    mutationFn: () =>
+      sendReviewReminders(event.id, {
+        roundId: progressQuery.data?.round.roundId ?? selectedRound?.id ?? null,
+        idempotencyKey: reminderKey || `review-reminder-${createClientId()}`,
+        drafts: reminderDrafts.map((draft) => ({
+          reviewerId: draft.reviewerId,
+          subject: draft.subject,
+          bodyText: draft.bodyText,
+        })),
+      }),
+    onSuccess: (result) => {
+      const sent = result.results.filter((entry) => entry.status === "sent").length;
+      const retryable = result.results.filter((entry) => entry.status === "retryable").length;
+      const failed = result.results.filter((entry) => entry.status === "failed").length;
+      setMessage(
+        `Reviewer reminders queued: ${result.results.length}; sent ${sent}, retryable ${retryable}, failed ${failed}.`,
+      );
+      setReminderDrafts([]);
+      setSelectedReminderIds([]);
+      setReminderKey("");
+      void queryClient.invalidateQueries({ queryKey: ["review-progress", event.id, selectedRound?.id ?? ""] });
+    },
+  });
+  const retryReminderMutation = useMutation({
+    mutationFn: (outboxId: string) => retryReviewReminder(event.id, outboxId),
+    onSuccess: () => {
+      setMessage("Reviewer reminder retry requested.");
+      void queryClient.invalidateQueries({ queryKey: ["review-progress", event.id, selectedRound?.id ?? ""] });
+    },
+  });
+
+  const reviewersById = new Map((query.data?.reviewers ?? []).map((reviewer) => [reviewer.id, reviewer]));
+  const roundReviewers = selectedRound?.reviewerPool ?? [];
+  const reviewProgressRows = progressQuery.data?.reviewers ?? [];
+  const visibleReviewProgressRows = showIncompleteOnly
+    ? reviewProgressRows.filter((reviewer) => reviewer.outstandingCount > 0)
+    : reviewProgressRows;
 
   return (
     <section className="reviewer-routing" aria-label="Reviewer access controls">
@@ -647,9 +1507,9 @@ function ReviewerRouting({ event }: { event: EventRecord }) {
           {mutation.isPending ? "Sending…" : "Send reviewer invitation"}
         </button>
       </form>
-      {mutation.isError || editMutation.isError || invitationRetryMutation.isError || invitationRevokeMutation.isError ? (
+      {mutation.isError || editMutation.isError || invitationRetryMutation.isError || invitationRevokeMutation.isError || roundAssignmentMutation.isError || previewMutation.isError || distributeMutation.isError || previewReminderMutation.isError || sendReminderMutation.isError || retryReminderMutation.isError ? (
         <p className="form-message" data-tone="error" role="alert">
-          {mutation.error?.message ?? editMutation.error?.message ?? invitationRetryMutation.error?.message ?? invitationRevokeMutation.error?.message}
+          {mutation.error?.message ?? editMutation.error?.message ?? invitationRetryMutation.error?.message ?? invitationRevokeMutation.error?.message ?? roundAssignmentMutation.error?.message ?? previewMutation.error?.message ?? distributeMutation.error?.message ?? previewReminderMutation.error?.message ?? sendReminderMutation.error?.message ?? retryReminderMutation.error?.message}
         </p>
       ) : message ? (
         <p className="form-message" role="status">{message}</p>
@@ -663,11 +1523,11 @@ function ReviewerRouting({ event }: { event: EventRecord }) {
           </button>
         </div>
       ) : null}
-      {query.isSuccess && query.data.invitations.length > 0 ? (
+      {query.isSuccess && (query.data.invitations ?? []).length > 0 ? (
         <div className="reviewer-invitations" aria-label="Reviewer invitations">
           <h3>Invitations</h3>
           <ul className="reviewer-list">
-            {query.data.invitations.map((invitation) => {
+            {(query.data.invitations ?? []).map((invitation) => {
               const deliveryLabel =
                 invitation.status === "revoked"
                   ? "Invitation revoked"
@@ -723,9 +1583,9 @@ function ReviewerRouting({ event }: { event: EventRecord }) {
           </ul>
         </div>
       ) : null}
-      {query.isSuccess && query.data.reviewers.length > 0 ? (
+      {query.isSuccess && (query.data.reviewers ?? []).length > 0 ? (
         <ul className="reviewer-list">
-          {query.data.reviewers.map((reviewer) => (
+          {(query.data.reviewers ?? []).map((reviewer) => (
             <li key={reviewer.id}>
               <div>
                 <strong>{reviewer.name}</strong>
@@ -800,6 +1660,350 @@ function ReviewerRouting({ event }: { event: EventRecord }) {
           ))}
         </ul>
       ) : null}
+      {progressQuery.isError ? (
+        <div className="submission-error" role="alert">
+          <strong>Unable to load review progress.</strong>
+          <span>{progressQuery.error.message}</span>
+          <button className="btn btn-sm" type="button" onClick={() => void progressQuery.refetch()}>
+            Try again
+          </button>
+        </div>
+      ) : null}
+      {progressQuery.isSuccess ? (
+        <div className="review-progress-panel" aria-label="Review progress and reviewer reminders">
+          <div className="reviewer-routing-header">
+            <div>
+              <h3>Review progress</h3>
+              <p className="muted">
+                {progressQuery.data.round.roundName}: {progressQuery.data.round.completedCount} of {progressQuery.data.round.assignedCount} assigned reviews complete · {progressQuery.data.round.outstandingCount} outstanding
+              </p>
+            </div>
+            <label className="review-progress-filter">
+              <input
+                type="checkbox"
+                checked={showIncompleteOnly}
+                onChange={(change) => setShowIncompleteOnly(change.target.checked)}
+              />
+              Show incomplete only
+            </label>
+          </div>
+          <div className="review-progress-summary">
+            <span><strong>{progressQuery.data.round.percentComplete}%</strong> complete</span>
+            <span><strong>{progressQuery.data.incompleteReviewers.length}</strong> incomplete reviewers</span>
+            <span><strong>{progressQuery.data.round.overdueReviewerCount}</strong> overdue</span>
+          </div>
+          {visibleReviewProgressRows.length > 0 ? (
+            <ul className="reviewer-list review-progress-list">
+              {visibleReviewProgressRows.map((reviewer) => (
+                <li key={reviewer.reviewerId} data-overdue={reviewer.overdue ? "true" : "false"}>
+                  <div>
+                    <label className="review-progress-select">
+                      <input
+                        type="checkbox"
+                        checked={selectedReminderIds.includes(reviewer.reviewerId)}
+                        disabled={reviewer.outstandingCount === 0}
+                        onChange={(change) =>
+                          setSelectedReminderIds((current) =>
+                            change.target.checked
+                              ? [...new Set([...current, reviewer.reviewerId])]
+                              : current.filter((id) => id !== reviewer.reviewerId),
+                          )
+                        }
+                      />
+                      <strong>{reviewer.reviewerName}</strong>
+                    </label>
+                    <span>{reviewer.email || "No email on file"}</span>
+                  </div>
+                  <span className="reviewer-tracks">
+                    {reviewer.completedCount}/{reviewer.assignedCount} complete · {reviewer.outstandingCount} outstanding{reviewer.recusedCount ? ` · ${reviewer.recusedCount} recused` : ""}
+                  </span>
+                  <span className="reviewer-tracks">
+                    {reviewer.overdue ? "Overdue" : reviewer.lastReminderAt ? `Last reminded ${formatSubmittedAt(reviewer.lastReminderAt)}` : "No reminder yet"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">No reviewers match the current progress filter.</p>
+          )}
+          <div className="reviewer-track-actions">
+            <button
+              className="btn btn-secondary btn-sm"
+              type="button"
+              disabled={previewReminderMutation.isPending || selectedReminderIds.length === 0}
+              onClick={() => previewReminderMutation.mutate()}
+            >
+              {previewReminderMutation.isPending ? "Preparing…" : "Prepare reminder drafts"}
+            </button>
+            <button
+              className="btn btn-secondary btn-sm"
+              type="button"
+              disabled={selectedReminderIds.length === 0}
+              onClick={() => setSelectedReminderIds([])}
+            >
+              Clear reminder selection
+            </button>
+          </div>
+          {reminderDrafts.length > 0 ? (
+            <div className="review-reminder-drafts">
+              <h4>Editable reminder drafts</h4>
+              {reminderDrafts.map((draft) => (
+                <article key={draft.reviewerId} className="review-reminder-draft">
+                  <label>
+                    Subject for {draft.reviewerName}
+                    <input
+                      type="text"
+                      value={draft.subject}
+                      onChange={(change) =>
+                        setReminderDrafts((current) =>
+                          current.map((candidate) =>
+                            candidate.reviewerId === draft.reviewerId
+                              ? { ...candidate, subject: change.target.value }
+                              : candidate,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                  <label>
+                    Body ({draft.pendingCount} pending)
+                    <textarea
+                      rows={7}
+                      value={draft.bodyText}
+                      onChange={(change) =>
+                        setReminderDrafts((current) =>
+                          current.map((candidate) =>
+                            candidate.reviewerId === draft.reviewerId
+                              ? { ...candidate, bodyText: change.target.value }
+                              : candidate,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                </article>
+              ))}
+              <div className="reviewer-track-actions">
+                <button
+                  className="btn btn-primary btn-sm"
+                  type="button"
+                  disabled={sendReminderMutation.isPending}
+                  onClick={() => sendReminderMutation.mutate()}
+                >
+                  {sendReminderMutation.isPending ? "Queueing…" : "Queue reviewed reminders"}
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  type="button"
+                  disabled={sendReminderMutation.isPending}
+                  onClick={() => {
+                    setReminderDrafts([]);
+                    setReminderKey("");
+                  }}
+                >
+                  Discard drafts
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {progressQuery.data.history.length > 0 ? (
+            <div className="review-reminder-history">
+              <h4>Reminder history</h4>
+              <ul className="reviewer-list">
+                {progressQuery.data.history.slice(0, 5).map((entry) => (
+                  <li key={entry.id}>
+                    <div>
+                      <strong>{entry.reviewerName || entry.toEmail}</strong>
+                      <span>{entry.pendingCount} pending when queued by {entry.actorName}</span>
+                    </div>
+                    <span className="reviewer-tracks">{entry.status} · {formatSubmittedAt(entry.createdAt)}</span>
+                    {entry.outboxId && (entry.status === "failed" || entry.status === "retryable") ? (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={retryReminderMutation.isPending}
+                        onClick={() => retryReminderMutation.mutate(entry.outboxId!)}
+                      >
+                        Retry
+                      </button>
+                    ) : <span />}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      ) : progressQuery.isPending ? (
+        <p className="muted">Loading review progress…</p>
+      ) : null}
+      {rounds.length > 0 ? (
+        <div className="round-assignment-controls" aria-label="Round submission assignments">
+          <div className="reviewer-routing-header">
+            <div>
+              <h3>Round submission assignments</h3>
+              <p className="muted">
+                Advanced review is enabled. Reviewer queues only show proposals explicitly assigned here.
+              </p>
+            </div>
+            <label>
+              Round
+              <select
+                value={selectedRound?.id ?? ""}
+                onChange={(change) => {
+                  setSelectedRoundId(change.target.value);
+                  setDistributionPreview(null);
+                }}
+              >
+                {rounds.map((round) => (
+                  <option key={round.id} value={round.id}>
+                    {round.name} ({round.state})
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {selectedRound && roundReviewers.length > 0 ? (
+            <div className="round-distribution-panel">
+              <fieldset>
+                <legend>Bulk distribution reviewers</legend>
+                {roundReviewers.map((reviewerId) => {
+                  const reviewer = reviewersById.get(reviewerId);
+                  return (
+                    <label key={reviewerId}>
+                      <input
+                        type="checkbox"
+                        checked={bulkReviewerIds.includes(reviewerId)}
+                        onChange={(change) => {
+                          setDistributionPreview(null);
+                          setBulkReviewerIds((current) =>
+                            change.target.checked
+                              ? [...new Set([...current, reviewerId])]
+                              : current.filter((id) => id !== reviewerId),
+                          );
+                        }}
+                      />
+                      {reviewer?.name ?? reviewerId}
+                    </label>
+                  );
+                })}
+              </fieldset>
+              <fieldset>
+                <legend>Filter proposals by track</legend>
+                {event.tracks.map((track) => (
+                  <label key={track.id}>
+                    <input
+                      type="checkbox"
+                      checked={bulkTrackIds.includes(track.id)}
+                      onChange={(change) => {
+                        setDistributionPreview(null);
+                        setBulkTrackIds((current) =>
+                          change.target.checked
+                            ? [...new Set([...current, track.id])]
+                            : current.filter((trackId) => trackId !== track.id),
+                        );
+                      }}
+                    />
+                    {track.name}
+                  </label>
+                ))}
+                <span className="muted">Leave all unchecked to include every track.</span>
+              </fieldset>
+              <label>
+                Per-reviewer cap
+                <input
+                  type="number"
+                  min="1"
+                  value={bulkCap}
+                  placeholder="No cap"
+                  onChange={(change) => {
+                    setBulkCap(change.target.value);
+                    setDistributionPreview(null);
+                  }}
+                />
+              </label>
+              <div className="reviewer-track-actions">
+                <button
+                  className="btn btn-secondary btn-sm"
+                  type="button"
+                  disabled={previewMutation.isPending || bulkReviewerIds.length === 0}
+                  onClick={() => previewMutation.mutate()}
+                >
+                  {previewMutation.isPending ? "Previewing…" : "Preview distribution"}
+                </button>
+                <button
+                  className="btn btn-primary btn-sm"
+                  type="button"
+                  disabled={distributeMutation.isPending || bulkReviewerIds.length === 0 || !distributionPreview}
+                  onClick={() => distributeMutation.mutate()}
+                >
+                  {distributeMutation.isPending ? "Applying…" : "Apply distribution"}
+                </button>
+              </div>
+              {distributionPreview ? (
+                <div className="round-distribution-preview" role="status">
+                  <strong>{distributionPreview.totalCandidates} candidate proposals</strong>
+                  <ul>
+                    {distributionPreview.assignments.map((assignment) => (
+                      <li key={assignment.reviewerId}>
+                        {reviewersById.get(assignment.reviewerId)?.name ?? assignment.reviewerId}: {assignment.count}
+                      </li>
+                    ))}
+                    {distributionPreview.unassignedProposalIds.length > 0 ? (
+                      <li>{distributionPreview.unassignedProposalIds.length} left unassigned by the cap</li>
+                    ) : null}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          ) : selectedRound ? (
+            <p className="muted">Add reviewers to this round before assigning submissions.</p>
+          ) : null}
+
+          {selectedRound && proposalsQuery.isSuccess && assignmentsQuery.isSuccess ? (
+            <div className="round-assignment-list">
+              <h4>Specific proposal access</h4>
+              <ul className="reviewer-list">
+                {proposalsQuery.data.map((proposal) => (
+                  <li key={proposal.id}>
+                    <div>
+                      <strong>{proposal.title}</strong>
+                      <span>{proposal.trackName} · {proposal.id}</span>
+                    </div>
+                    <div className="reviewer-track-options">
+                      {roundReviewers.map((reviewerId) => {
+                        const key = `${reviewerId}::${proposal.id}`;
+                        const reviewer = reviewersById.get(reviewerId);
+                        return (
+                          <label key={key}>
+                            <input
+                              type="checkbox"
+                              checked={assignmentKeys.has(key)}
+                              disabled={roundAssignmentMutation.isPending}
+                              onChange={(change) =>
+                                roundAssignmentMutation.mutate({
+                                  proposalId: proposal.id,
+                                  reviewerId,
+                                  assigned: change.target.checked,
+                                })
+                              }
+                            />
+                            {reviewer?.name ?? reviewerId}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : selectedRound ? (
+            <p className="muted">Loading proposal assignments…</p>
+          ) : null}
+        </div>
+      ) : planQuery.isSuccess && planQuery.data.plan ? (
+        <p className="muted">Advanced review is disabled; reviewers continue using the shared track queue.</p>
+      ) : null}
     </section>
   );
 }
@@ -869,15 +2073,19 @@ function speakerAnswerGroups(answers: SubmissionAnswers) {
 
 function ProposalInspector({
   eventId,
+  roundId,
   proposal,
   auditEvents,
+  scorecard,
   isAdmin,
   focusRecord,
   onClose,
 }: {
   eventId: string;
+  roundId: string;
   proposal: OrganizerProposal;
   auditEvents: ProposalAuditEvent[];
+  scorecard: ProposalScorecardReviewProjection | null;
   isAdmin: boolean;
   focusRecord: boolean;
   onClose?: () => void;
@@ -888,6 +2096,11 @@ function ProposalInspector({
   const recordTitleRef = useRef<HTMLHeadingElement>(null);
   const [committeeNote, setCommitteeNote] = useState(proposal.committeeNote);
   const [message, setMessage] = useState<string | null>(null);
+  const [scorecardValues, setScorecardValues] = useState<Record<string, ScorecardCriterionValue>>(
+    scorecard?.reviewerResponse?.values ?? {},
+  );
+  const reviewerRecusals = proposal.reviewerRecusals ?? [];
+  const isRecused = !isAdmin && Boolean(proposal.reviewerRecusal);
   const supportingFile = proposal.supportingFile ?? null;
   const coSpeakers = proposal.coSpeakers ?? [];
   const additionalAnswers = Object.entries(proposal.answers ?? {}).filter(
@@ -897,8 +2110,9 @@ function ProposalInspector({
 
   useEffect(() => {
     setCommitteeNote(proposal.committeeNote);
+    setScorecardValues(scorecard?.reviewerResponse?.values ?? {});
     setMessage(null);
-  }, [proposal.id]);
+  }, [proposal.id, scorecard]);
 
   useEffect(() => {
     if (focusRecord) {
@@ -911,14 +2125,19 @@ function ProposalInspector({
   }, [focusRecord, proposal.id]);
 
   const mutation = useMutation({
-    mutationFn: (input: { status?: ProposalStatus; committeeNote?: string }) =>
+    mutationFn: (input: {
+      status?: ProposalStatus;
+      committeeNote?: string;
+      scorecardValues?: Record<string, ScorecardCriterionValue>;
+    }) =>
       updateProposalReview(eventId, proposal.id, {
         ...input,
         expectedVersion: proposal.reviewVersion ?? 0,
+        roundId: roundId || undefined,
       }),
     onSuccess: (data: ProposalReviewResponse, variables) => {
       queryClient.setQueryData(
-        ["proposal-review", eventId, proposal.id],
+        ["proposal-review", eventId, proposal.id, roundId],
         data,
       );
       queryClient.setQueriesData<OrganizerProposal[]>(
@@ -930,18 +2149,57 @@ function ProposalInspector({
       );
       void queryClient.invalidateQueries({ queryKey: ["proposals", eventId] });
       void queryClient.invalidateQueries({ queryKey: ["events"] });
+      void queryClient.invalidateQueries({ queryKey: ["review-results", eventId] });
       setMessage(
         variables.status
           ? `Internal decision changed to ${statusLabel(variables.status)}.`
-          : "Committee note saved.",
+          : variables.scorecardValues
+            ? "Scorecard saved."
+            : "Committee note saved.",
       );
     },
   });
+
+  const recusalMutation = useMutation({
+    mutationFn: (reason?: string) =>
+      recuseProposalReview(eventId, proposal.id, {
+        roundId,
+        reason: reason?.trim() || undefined,
+      }),
+    onSuccess: (data: ProposalReviewResponse) => {
+      queryClient.setQueryData(
+        ["proposal-review", eventId, proposal.id, roundId],
+        data,
+      );
+      queryClient.setQueriesData<OrganizerProposal[]>(
+        { queryKey: ["proposals", eventId] },
+        (current) =>
+          current?.map((item) =>
+            item.id === data.proposal.id ? data.proposal : item,
+          ),
+      );
+      void queryClient.invalidateQueries({ queryKey: ["proposals", eventId] });
+      setMessage("Conflict recorded. This assignment is closed for you.");
+    },
+  });
+
 
   function decide(status: ProposalStatus) {
     setMessage(null);
     mutation.mutate({ status });
   }
+
+  function recuse() {
+    if (!roundId) {
+      setMessage("Select the evaluation round before recording a recusal.");
+      return;
+    }
+    const reason = window.prompt("Optional private reason for organizers");
+    if (reason === null) return;
+    setMessage(null);
+    recusalMutation.mutate(reason);
+  }
+
 
   const outcomeMutation = useMutation({
     mutationFn: (outcome: ProgramOutcome) =>
@@ -965,28 +2223,30 @@ function ProposalInspector({
         if (key.key === "Escape") onClose?.();
       }}
     >
-      <div className="inspector-header">
-        <button
-          ref={closeRef}
-          className="inspector-close btn btn-secondary btn-sm"
-          type="button"
-          onClick={onClose}
-        >
-          Back to queue
-        </button>
-        <div className="inspector-kicker">{proposal.id}</div>
-        <h2 ref={recordTitleRef} tabIndex={focusRecord ? -1 : undefined}>{proposal.title}</h2>
-        <div className="inspector-who">
-          <span className="avatar" aria-hidden="true">
-            {initials(proposal.speakerName)}
-          </span>
-          <span>
-            {proposal.speakerName}
-            <span className="talk-sub"> · {proposal.speakerEmail}</span>
-          </span>
-          <span className={`flag flag-box flag-${proposal.status}`}>
-            {statusLabel(proposal.status)}
-          </span>
+      <div>
+        <div className="inspector-header">
+          <button
+            ref={closeRef}
+            className="inspector-close btn btn-secondary btn-sm"
+            type="button"
+            onClick={onClose}
+          >
+            Back to queue
+          </button>
+          <div className="inspector-kicker">{proposal.id}</div>
+          <h2 ref={recordTitleRef} tabIndex={focusRecord ? -1 : undefined}>{proposal.title}</h2>
+          <div className="inspector-who">
+            <span className="avatar" aria-hidden="true">
+              {initials(proposal.speakerName)}
+            </span>
+            <span>
+              {proposal.speakerName}
+              <span className="talk-sub"> · {proposal.speakerEmail}</span>
+            </span>
+            <span className={`flag flag-box flag-${proposal.status}`}>
+              {statusLabel(proposal.status)}
+            </span>
+          </div>
         </div>
       </div>
       <div className="inspector-body">
@@ -1024,7 +2284,7 @@ function ProposalInspector({
               {coSpeakers.map((speaker) => (
                 <li key={`${speaker.email}-${speaker.name}`}>
                   <strong>{speaker.name}</strong>
-                  <span className="talk-sub"> · {speaker.email}</span>
+                  <span className="talk-sub"> · {speaker.role || "co-speaker"} · {speaker.email}</span>
                   {speaker.biography ? <p>{speaker.biography}</p> : null}
                 </li>
               ))}
@@ -1077,6 +2337,111 @@ function ProposalInspector({
             </p>
           ) : null}
         </section>
+        {scorecard?.round ? (
+          <section className="panel scorecard-panel">
+            <h3>{scorecard.round.name} scorecard</h3>
+            <p className="muted">{scorecard.calculationDescription}</p>
+            {scorecard.aggregate ? (
+              <p>
+                Aggregate:{" "}
+                <strong>
+                  {scorecard.aggregate.aggregateScore == null
+                    ? "Unscored"
+                    : scorecard.aggregate.aggregateScore.toFixed(2)}
+                </strong>{" "}
+                from {scorecard.aggregate.responseCount} review
+                {scorecard.aggregate.responseCount === 1 ? "" : "s"}.
+              </p>
+            ) : null}
+            {!isAdmin ? (
+              <>
+                {scorecard.round.scorecard.criteria.map((criterion) => (
+                  <label key={criterion.id}>
+                    {criterion.label}
+                    {criterion.required ? " *" : ""}
+                    {criterion.guidance ? <span className="muted">{criterion.guidance}</span> : null}
+                    {criterion.type === "numeric" ? (
+                      <input
+                        max={criterion.maxScore ?? 5}
+                        min="0"
+                        step="0.1"
+                        type="number"
+                        value={scorecardValues[criterion.id] ?? ""}
+                        onChange={(event) =>
+                          setScorecardValues((current) => ({
+                            ...current,
+                            [criterion.id]: event.target.value === "" ? null : Number(event.target.value),
+                          }))
+                        }
+                      />
+                    ) : criterion.type === "dropdown" ? (
+                      <select
+                        value={typeof scorecardValues[criterion.id] === "string" ? String(scorecardValues[criterion.id]) : ""}
+                        onChange={(event) =>
+                          setScorecardValues((current) => ({
+                            ...current,
+                            [criterion.id]: event.target.value || null,
+                          }))
+                        }
+                      >
+                        <option value="">Choose…</option>
+                        {criterion.options.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.label}
+                            {option.score == null ? "" : ` (${option.score})`}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <textarea
+                        value={typeof scorecardValues[criterion.id] === "string" ? String(scorecardValues[criterion.id]) : ""}
+                        onChange={(event) =>
+                          setScorecardValues((current) => ({
+                            ...current,
+                            [criterion.id]: event.target.value,
+                          }))
+                        }
+                      />
+                    )}
+                  </label>
+                ))}
+                <button
+                  className="btn btn-secondary btn-sm"
+                  type="button"
+                  disabled={mutation.isPending || isRecused || !roundId}
+                  onClick={() => {
+                    setMessage(null);
+                    mutation.mutate({ scorecardValues });
+                  }}
+                >
+                  Save scorecard
+                </button>
+              </>
+            ) : scorecard.reviews.length > 0 ? (
+              <ul className="inspector-list">
+                {scorecard.reviews.map((review) => (
+                  <li key={`${review.roundId}-${review.reviewerId}`}>
+                    <strong>{review.reviewerName}</strong>
+                    <span className="talk-sub">
+                      {" "}· {review.completionStatus} ·{" "}
+                      {review.aggregateScore == null ? "unscored" : review.aggregateScore.toFixed(2)}
+                    </span>
+                    <dl className="answer-list">
+                      {scorecard.round!.scorecard.criteria.map((criterion) => (
+                        <div key={criterion.id}>
+                          <dt>{criterion.label}</dt>
+                          <dd>{answerText(review.values[criterion.id] as SubmissionAnswers[string])}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>No scorecard responses yet.</p>
+            )}
+          </section>
+        ) : null}
         <section className="panel committee-note-panel">
           <label htmlFor={`committee-note-${proposal.id}`}>Committee note</label>
           <textarea
@@ -1088,7 +2453,7 @@ function ProposalInspector({
           <button
             className="btn btn-secondary btn-sm"
             type="button"
-            disabled={mutation.isPending || committeeNote.trim() === proposal.committeeNote}
+            disabled={mutation.isPending || isRecused || committeeNote.trim() === proposal.committeeNote}
             onClick={() => {
               setMessage(null);
               mutation.mutate({ committeeNote: committeeNote.trim() });
@@ -1097,6 +2462,44 @@ function ProposalInspector({
             Save committee note
           </button>
         </section>
+        {!isAdmin || reviewerRecusals.length > 0 ? (
+          <section className="panel">
+            <h3>Conflict of interest</h3>
+            {isAdmin ? (
+              reviewerRecusals.length > 0 ? (
+                <ul className="inspector-list">
+                  {reviewerRecusals.map((recusal) => (
+                    <li key={recusal.id}>
+                      <strong>{recusal.reviewerName}</strong>
+                      <span className="talk-sub"> · {formatSubmittedAt(recusal.createdAt)}</span>
+                      {recusal.reason ? <p>{recusal.reason}</p> : <p>No reason provided.</p>}
+                    </li>
+                  ))}
+                </ul>
+              ) : null
+            ) : proposal.reviewerRecusal ? (
+              <p role="status">
+                You recused yourself from this assignment
+                {proposal.reviewerRecusal.reason ? `: ${proposal.reviewerRecusal.reason}` : "."}
+              </p>
+            ) : (
+              <>
+                <p className="internal-only-note">
+                  Record a conflict or recusal if you should not review this assignment.
+                  Organizers will see it for reassignment.
+                </p>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  type="button"
+                  disabled={recusalMutation.isPending || !roundId}
+                  onClick={recuse}
+                >
+                  Record conflict / recusal
+                </button>
+              </>
+            )}
+          </section>
+        ) : null}
         <section className="panel audit-panel">
           <h3>Review history</h3>
           {auditEvents.length === 0 ? (
@@ -1179,23 +2582,27 @@ function ProposalInspector({
         ) : null}
         {mutation.isError ? (
           <p className="form-message" data-tone="error" role="alert">{mutation.error.message}</p>
+        ) : recusalMutation.isError ? (
+          <p className="form-message" data-tone="error" role="alert">{recusalMutation.error.message}</p>
         ) : message ? (
           <p className="form-message" role="status">{message}</p>
         ) : null}
       </div>
-      <div className="inspector-footer" aria-label="Internal decision">
-        {(["unreviewed", "approve", "maybe", "deny"] as const).map((status) => (
-          <button
-            key={status}
-            type="button"
-            className={`btn btn-${status} btn-sm`}
-            aria-pressed={proposal.status === status}
-            disabled={mutation.isPending || proposal.status === status}
-            onClick={() => decide(status)}
-          >
-            {statusLabel(status)}
-          </button>
-        ))}
+      <div>
+        <div className="inspector-footer" aria-label="Internal decision">
+          {(["unreviewed", "approve", "maybe", "deny"] as const).map((status) => (
+            <button
+              key={status}
+              type="button"
+              className={`btn btn-${status} btn-sm`}
+              aria-pressed={proposal.status === status}
+              disabled={mutation.isPending || isRecused || proposal.status === status}
+              onClick={() => decide(status)}
+            >
+              {statusLabel(status)}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );

@@ -273,6 +273,7 @@ function deriveNormalized(
         name: readString(record.name).trim(),
         email: readString(record.email).trim(),
         biography: readString(record.biography).trim(),
+        role: readString(record.role).trim() || "co-speaker",
       };
     });
     const [primary, ...rest] = panels;
@@ -413,6 +414,8 @@ export function validateAndNormalizeSubmission(
 
   const cleaned: SubmissionAnswers = {};
   for (const element of questions) {
+    // Conditions are authoritative at submission time: hidden answers are
+    // ignored rather than validated or persisted, including stale client data.
     if (!isQuestionVisible(element, source)) {
       continue;
     }

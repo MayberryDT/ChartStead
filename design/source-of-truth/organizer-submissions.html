@@ -10,7 +10,9 @@
   <style>
     /*
       ChartStead UI source of truth — Harbor Master Desk
-      Locked 2026-08-09 from design/prototypes direction 01.
+      Locked 2026-08-12 from Competition 27 Submissions polish.
+      The shell toolbar is the single organizer command surface; Forms owns Open CFP,
+      Settings owns reviewer routing, and the sidebar owns account context.
       Written tokens: design/DESIGN.md
       Brand marks: design/assets/brand/
     */
@@ -61,6 +63,8 @@
       --r-control: 2px;
       --sidebar-width: 248px;
       --header-height: 56px;
+      --shell-toolbar-bg: #E8F0F8;
+      --shell-toolbar-border: #C5D4E6;
       --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
       --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
       --dur: 150ms;
@@ -192,7 +196,7 @@
     }
 
     .event-switcher {
-      margin-top: auto;
+      margin-top: 10px;
       padding: 12px;
       text-align: left;
       border: 1px solid rgba(255, 255, 255, 0.1);
@@ -218,6 +222,26 @@
       line-height: 1.3;
     }
 
+    .sidebar-session {
+      padding: 10px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.04);
+    }
+    .sidebar-session strong,
+    .sidebar-session small {
+      display: block;
+    }
+    .sidebar-session strong {
+      font-size: 12.5px;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+    .sidebar-session small {
+      margin-top: 3px;
+      color: rgba(255, 255, 255, 0.58);
+      font-size: 11px;
+    }
+
     .main {
       display: grid;
       grid-template-rows: var(--header-height) 1fr;
@@ -226,13 +250,14 @@
     }
 
     .topbar {
-      height: var(--header-height);
+      min-height: var(--header-height);
       display: flex;
       align-items: center;
-      gap: 14px;
-      padding: 0 18px;
-      background: var(--surface);
-      border-bottom: 1px solid var(--outline);
+      gap: 12px;
+      padding: 10px 16px;
+      background: var(--shell-toolbar-bg);
+      border-bottom: 1px solid var(--shell-toolbar-border);
+      flex-wrap: nowrap;
     }
     .topbar h1 {
       margin: 0;
@@ -248,6 +273,63 @@
     }
     .topbar-spacer { flex: 1; }
     .topbar-actions { display: flex; gap: 8px; align-items: center; }
+
+    .topbar-tools {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      flex: 1 1 auto;
+      overflow-x: auto;
+      scrollbar-width: thin;
+    }
+    .topbar-tools-inner {
+      width: 100%;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: nowrap;
+    }
+    .topbar .field,
+    .topbar .seg,
+    .topbar .btn {
+      background: rgba(255, 255, 255, 0.72);
+      border-color: #B7C9DE;
+    }
+    .topbar .seg button[aria-pressed="true"] {
+      background: var(--primary);
+      color: var(--on-primary);
+    }
+    .topbar-search {
+      flex: 1 1 220px;
+      min-width: 200px;
+      max-width: 320px;
+    }
+    .topbar-track {
+      flex: 0 0 auto;
+    }
+    .topbar-tools-spacer {
+      flex: 1 1 auto;
+      min-width: 12px;
+    }
+    .topbar-batch {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex: 0 0 auto;
+      margin-left: auto;
+      padding: 4px 4px 4px 10px;
+      border-left: 1px solid var(--shell-toolbar-border);
+      white-space: nowrap;
+    }
+    .topbar-batch-idle { opacity: 0.55; }
+    .topbar-batch-count {
+      min-width: 6.5rem;
+      color: var(--on-surface);
+      font-size: 12px;
+      font-weight: 700;
+      text-align: right;
+    }
 
     /* —— Controls —— */
     .btn {
@@ -523,6 +605,38 @@
       z-index: 1;
       white-space: nowrap;
     }
+    table.grid th.col-batch,
+    table.grid td.col-batch {
+      width: 36px;
+      padding-left: 8px;
+      padding-right: 8px;
+      text-align: center;
+    }
+    .batch-check {
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      margin: 0;
+      border: 1px solid var(--outline-strong);
+      background: var(--surface);
+      border-radius: var(--r-control);
+      vertical-align: middle;
+    }
+    .batch-check:checked {
+      border-color: var(--secondary);
+      background: var(--secondary);
+      box-shadow: inset 0 0 0 3px var(--surface);
+    }
+    .th-sort {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      color: inherit;
+      font-size: inherit;
+      font-weight: inherit;
+      letter-spacing: inherit;
+      text-transform: inherit;
+    }
     table.grid td {
       height: 50px;
       padding: 8px 12px;
@@ -688,6 +802,12 @@
       .nav a { justify-content: center; padding: 0; border-left: 0; }
       .nav a[aria-current="page"] { border-bottom: 2px solid var(--tertiary); }
       .nav-count { display: none; }
+      .topbar { overflow-x: auto; }
+      .topbar-tools { overflow: visible; }
+      .topbar-tools-inner { width: max-content; }
+      .topbar .field input,
+      .topbar .btn,
+      .topbar .seg button { min-height: 44px; }
       .split { grid-template-columns: 1fr; }
       .inspector {
         position: absolute;
@@ -743,6 +863,10 @@
         </a>
       </nav>
 
+      <div class="sidebar-session" aria-label="Signed-in account">
+        <strong>Alex Morgan</strong>
+        <small>Event administrator</small>
+      </div>
       <button type="button" class="event-switcher" data-action="event" aria-label="Switch event">
         <div class="event-switcher-label">Event</div>
         <div class="event-switcher-name">Pacific Open Data Summit 2026</div>
@@ -750,44 +874,54 @@
     </aside>
 
     <div class="main">
-      <header class="topbar">
-        <div>
-          <h1>Submissions</h1>
-          <div class="topbar-meta">47 total · 18 unreviewed · track routing on</div>
-        </div>
-        <div class="topbar-spacer"></div>
-        <div class="topbar-actions">
-          <button type="button" class="btn btn-ghost btn-sm" data-action="export">Export</button>
-          <button type="button" class="btn btn-primary btn-sm" data-action="cfp">Open CFP form</button>
+      <header class="topbar shell-toolbar">
+        <div class="topbar-tools" aria-label="Submissions tools">
+          <div class="topbar-tools-inner">
+            <label class="field topbar-search">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              <input type="search" id="search" placeholder="Search title, speaker, or ID…" autocomplete="off" aria-label="Search title, speaker, or ID" />
+            </label>
+            <div class="seg" role="group" aria-label="Status filter" id="status-filter">
+              <button type="button" aria-pressed="true" data-filter="all">All</button>
+              <button type="button" aria-pressed="false" data-filter="unreviewed">Unreviewed<span class="n">18</span></button>
+              <button type="button" aria-pressed="false" data-filter="approve">Approve<span class="n">12</span></button>
+              <button type="button" aria-pressed="false" data-filter="maybe">Maybe<span class="n">9</span></button>
+              <button type="button" aria-pressed="false" data-filter="deny">Deny<span class="n">8</span></button>
+            </div>
+            <div class="topbar-track">
+              <button type="button" class="btn btn-sm" data-action="track-filter">All tracks ▾</button>
+            </div>
+            <span class="topbar-tools-spacer" aria-hidden="true"></span>
+            <div class="topbar-batch topbar-batch-idle" role="region" aria-label="Batch final decisions">
+              <strong class="topbar-batch-count">None selected</strong>
+              <button type="button" class="btn btn-primary btn-sm" disabled>Accept batch</button>
+              <button type="button" class="btn btn-sm" disabled>Decline batch</button>
+              <button type="button" class="btn btn-sm" disabled>Clear</button>
+            </div>
+          </div>
         </div>
       </header>
 
       <div class="work">
-        <div class="toolbar">
-          <label class="field" style="flex: 1; max-width: 300px">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-            <input type="search" id="search" placeholder="Search title, speaker, or ID…" autocomplete="off" />
-          </label>
-          <div class="seg" role="group" aria-label="Status filter" id="status-filter">
-            <button type="button" aria-pressed="true" data-filter="unreviewed">Unreviewed<span class="n">18</span></button>
-            <button type="button" aria-pressed="false" data-filter="approve">Approve<span class="n">12</span></button>
-            <button type="button" aria-pressed="false" data-filter="maybe">Maybe<span class="n">9</span></button>
-            <button type="button" aria-pressed="false" data-filter="deny">Deny<span class="n">8</span></button>
-            <button type="button" aria-pressed="false" data-filter="all">All</button>
-          </div>
-          <button type="button" class="btn btn-sm" data-action="track-filter">Track ▾</button>
-        </div>
-
         <div class="split">
           <div class="table-wrap">
             <table class="grid" aria-label="Submissions">
+              <colgroup>
+                <col style="width: 36px" />
+                <col style="width: 44px" />
+                <col />
+                <col style="width: 170px" />
+                <col style="width: 110px" />
+                <col style="width: 100px" />
+              </colgroup>
               <thead>
                 <tr>
-                  <th scope="col" style="width: 44px"></th>
-                  <th scope="col">Talk</th>
-                  <th scope="col">Track</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Submitted</th>
+                  <th scope="col" class="col-batch"><input class="batch-check" type="checkbox" aria-label="Select all submissions" /></th>
+                  <th scope="col"></th>
+                  <th scope="col"><button type="button" class="th-sort">Talk <span aria-hidden="true">↕</span></button></th>
+                  <th scope="col"><button type="button" class="th-sort">Track <span aria-hidden="true">↕</span></button></th>
+                  <th scope="col"><button type="button" class="th-sort">Status <span aria-hidden="true">↕</span></button></th>
+                  <th scope="col"><button type="button" class="th-sort">Submitted <span aria-hidden="true">↕</span></button></th>
                 </tr>
               </thead>
               <tbody id="rows"></tbody>
@@ -926,8 +1060,9 @@
     ];
 
     let selectedId = SUBS[0].id;
-    let statusFilter = "unreviewed";
+    let statusFilter = "all";
     let query = "";
+    const selectedBatch = new Set();
 
     const rowsEl = document.getElementById("rows");
     const toastEl = document.getElementById("toast");
@@ -978,13 +1113,14 @@
       rowsEl.innerHTML = list
         .map((s) => {
           const sel = s.id === selectedId;
-          return `<tr data-id="${s.id}" aria-selected="${sel}" tabindex="0">
-            <td><span class="avatar">${s.av}</span></td>
-            <td><div class="talk">${s.title}</div><div class="talk-sub">${s.speaker} · ${s.pronouns}</div></td>
-            <td><span class="track ${s.trackClass}">${s.track}</span></td>
-            <td>${flagHtml(s.status, s.statusLabel, false)}</td>
-            <td class="muted">${s.date}</td>
-          </tr>`;
+           return `<tr data-id="${s.id}" aria-selected="${sel}" tabindex="0">
+             <td class="col-batch"><input class="batch-check" type="checkbox" aria-label="Select SUB-${s.id}" ${selectedBatch.has(s.id) ? "checked" : ""} /></td>
+             <td><span class="avatar">${s.av}</span></td>
+             <td><div class="talk">${s.title}</div><div class="talk-sub">${s.speaker} · ${s.pronouns}</div></td>
+             <td><span class="track ${s.trackClass}">${s.track}</span></td>
+             <td>${flagHtml(s.status, s.statusLabel, false)}</td>
+             <td class="muted">${s.date}</td>
+           </tr>`;
         })
         .join("");
 
@@ -996,7 +1132,15 @@
             select(tr.dataset.id);
           }
         });
+        tr.querySelector(".batch-check").addEventListener("click", (e) => e.stopPropagation());
+        tr.querySelector(".batch-check").addEventListener("change", (e) => {
+          if (e.target.checked) selectedBatch.add(tr.dataset.id);
+          else selectedBatch.delete(tr.dataset.id);
+          toast(`${selectedBatch.size} selected`);
+        });
       });
+
+      document.querySelector("thead .batch-check").checked = list.length > 0 && list.every((s) => selectedBatch.has(s.id));
 
       fillInspector(find(selectedId));
     }
@@ -1022,6 +1166,16 @@
         toast(`Filter · ${btn.textContent.replace(/\s+/g, " ").trim()}`);
         renderRows();
       });
+    });
+
+    document.querySelector("thead .batch-check").addEventListener("change", (e) => {
+      const checked = e.target.checked;
+      visibleSubs().forEach((s) => {
+        if (checked) selectedBatch.add(s.id);
+        else selectedBatch.delete(s.id);
+      });
+      toast(`${selectedBatch.size} selected`);
+      renderRows();
     });
 
     document.querySelectorAll(".nav a").forEach((a) => {

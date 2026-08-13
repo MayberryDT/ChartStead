@@ -66,6 +66,9 @@ export function createSeedProposals(event: EventRecord): OrganizerProposal[] {
           reviewVersion: 0,
           submittedAt: `2026-07-${String((proposalIndex % 28) + 1).padStart(2, "0")}T12:00:00.000Z`,
           confirmationEmailStatus: null,
+          scorecardAggregate: null,
+          reviewerRecusal: null,
+          reviewerRecusals: [],
         } satisfies OrganizerProposal;
       }),
     );

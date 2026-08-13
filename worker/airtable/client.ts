@@ -63,7 +63,14 @@ export function isAirtableConfigured(env: {
   AIRTABLE_ACCESS_TOKEN?: string;
   AIRTABLE_BASE_ID?: string;
 }): boolean {
-  return Boolean(env.AIRTABLE_ACCESS_TOKEN?.trim() && env.AIRTABLE_BASE_ID?.trim());
+  const accessToken = env.AIRTABLE_ACCESS_TOKEN?.trim();
+  const baseId = env.AIRTABLE_BASE_ID?.trim();
+  return Boolean(
+    accessToken &&
+      baseId &&
+      accessToken !== "replace-with-airtable-personal-access-token" &&
+      baseId !== "replace-with-airtable-base-id",
+  );
 }
 
 export function createAirtableClient(config: AirtableClientConfig): AirtableClient {

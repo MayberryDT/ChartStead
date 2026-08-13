@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { renderCommunicationTemplate } from "../shared/communication-template";
 import type { CommunicationPlanBody, CourseCheckPlan } from "../shared/course-check";
@@ -12,7 +12,7 @@ import {
 } from "./api";
 import { CommunicationResultPanel } from "./course-check/CommunicationResultPanel";
 
-type AudienceFilter = "all" | "needs_follow_up" | "overdue" | "ready";
+export type AudienceFilter = "all" | "needs_follow_up" | "overdue" | "ready";
 
 const FILTERS: Array<{ value: AudienceFilter; label: string }> = [
   { value: "all", label: "All speakers" },
@@ -20,6 +20,76 @@ const FILTERS: Array<{ value: AudienceFilter; label: string }> = [
   { value: "overdue", label: "Overdue" },
   { value: "ready", label: "Ready" },
 ];
+
+const EMPTY_SPEAKERS: OnboardingBoardSpeaker[] = [];
+
+export type MessagesChrome = {
+  filter: AudienceFilter;
+  onFilterChange: (filter: AudienceFilter) => void;
+  visibleCount: number;
+  includedCount: number;
+  excludedCount: number;
+  missingCount: number;
+  canSelectVisible: boolean;
+  onSelectVisible: () => void;
+  canReview: boolean;
+  reviewLabel: string;
+  onReview: () => void;
+};
+
+export function MessagesCommandBar({ chrome }: { chrome: MessagesChrome | null }) {
+  if (!chrome) {
+    return (
+      <div className="topbar-tools-inner messages-shell-tools" aria-busy="true">
+        <span className="messages-shell-summary">Loading message audiences…</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="topbar-tools-inner messages-shell-tools">
+      <div className="seg messages-filter" role="group" aria-label="Readiness group">
+        {FILTERS.map((option) => (
+          <button
+            type="button"
+            key={option.value}
+            aria-pressed={chrome.filter === option.value}
+            onClick={() => chrome.onFilterChange(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      <span className="messages-shell-summary" aria-label="Visible speakers">
+        {chrome.visibleCount} shown
+      </span>
+      <div className="messages-scope-counts messages-shell-counts" aria-label="Audience scope">
+        <strong>{chrome.includedCount} included</strong>
+        <span>{chrome.excludedCount} excluded</span>
+        <span>
+          {chrome.missingCount} missing {chrome.missingCount === 1 ? "address" : "addresses"}
+        </span>
+      </div>
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm"
+        disabled={!chrome.canSelectVisible}
+        onClick={chrome.onSelectVisible}
+      >
+        Select visible
+      </button>
+      <span className="topbar-tools-spacer" aria-hidden="true" />
+      <button
+        type="button"
+        className="btn btn-primary btn-sm"
+        disabled={!chrome.canReview}
+        onClick={chrome.onReview}
+      >
+        {chrome.reviewLabel}
+      </button>
+    </div>
+  );
+}
 
 function isDeliverable(address: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address.trim());
@@ -87,11 +157,13 @@ export function MessagesWorkspace({
   eventName,
   focusedPlanId,
   onOpenCourseCheck,
+  onChromeChange,
 }: {
   eventId: string;
   eventName: string;
   focusedPlanId?: string | null;
   onOpenCourseCheck: (planId: string) => void;
+  onChromeChange?: (chrome: MessagesChrome | null) => void;
 }) {
   const board = useQuery({
     queryKey: ["onboarding-board", eventId],
@@ -109,16 +181,28 @@ export function MessagesWorkspace({
   const [bodyText, setBodyText] = useState(
     "Hello {{speaker_name}},\n\nWe have an update about {{proposal_title}} for {{event_name}}.\n\nThank you,\nThe organizing team",
   );
+  const [portalInvitation, setPortalInvitation] = useState(false);
 
-  const speakers = board.data?.speakers ?? [];
+  const speakers = board.data?.speakers ?? EMPTY_SPEAKERS;
   const visibleSpeakers = useMemo(
     () => speakers.filter((speaker) => matchesFilter(speaker, filter)),
     [filter, speakers],
   );
-  const deliverableSpeakers = speakers.filter((speaker) => isDeliverable(speaker.email));
-  const includedSpeakers = speakers.filter(
-    (speaker) =>
-      selectedSpeakerIds.has(speaker.speakerId) && isDeliverable(speaker.email),
+  const deliverableSpeakers = useMemo(
+    () => speakers.filter((speaker) => isDeliverable(speaker.email)),
+    [speakers],
+  );
+  const visibleDeliverableSpeakers = useMemo(
+    () => visibleSpeakers.filter((speaker) => isDeliverable(speaker.email)),
+    [visibleSpeakers],
+  );
+  const includedSpeakers = useMemo(
+    () =>
+      speakers.filter(
+        (speaker) =>
+          selectedSpeakerIds.has(speaker.speakerId) && isDeliverable(speaker.email),
+      ),
+    [selectedSpeakerIds, speakers],
   );
   const missingCount = speakers.length - deliverableSpeakers.length;
   const excludedCount = deliverableSpeakers.length - includedSpeakers.length;
@@ -138,10 +222,65 @@ export function MessagesWorkspace({
         templateKind: "custom",
         subject,
         bodyText,
+        portalInvitation,
         idempotencyKey: `speaker-message-${crypto.randomUUID()}`,
       }),
     onSuccess: (plan) => onOpenCourseCheck(plan.id),
   });
+  const createPlanRef = useRef(createPlan);
+  useEffect(() => {
+    createPlanRef.current = createPlan;
+  });
+
+  const selectVisible = useCallback(() => {
+    setSelectedSpeakerIds((current) => {
+      const next = new Set(current);
+      for (const speaker of visibleSpeakers) {
+        if (isDeliverable(speaker.email)) next.add(speaker.speakerId);
+      }
+      return next;
+    });
+  }, [visibleSpeakers]);
+
+  const openReview = useCallback(() => createPlanRef.current.mutate(), []);
+
+  useEffect(() => {
+    if (!onChromeChange) return;
+    const recipientLabel = `Review ${includedSpeakers.length} recipient${
+      includedSpeakers.length === 1 ? "" : "s"
+    } in Course Check`;
+    onChromeChange({
+      filter,
+      onFilterChange: setFilter,
+      visibleCount: visibleSpeakers.length,
+      includedCount: includedSpeakers.length,
+      excludedCount,
+      missingCount,
+      canSelectVisible: visibleDeliverableSpeakers.length > 0,
+      onSelectVisible: selectVisible,
+      canReview:
+        includedSpeakers.length > 0 &&
+        Boolean(subject.trim()) &&
+        Boolean(bodyText.trim()) &&
+        !createPlan.isPending,
+      reviewLabel: createPlan.isPending ? "Opening Course Check…" : recipientLabel,
+      onReview: openReview,
+    });
+    return () => onChromeChange(null);
+  }, [
+    bodyText,
+    createPlan.isPending,
+    excludedCount,
+    filter,
+    includedSpeakers.length,
+    missingCount,
+    onChromeChange,
+    openReview,
+    selectVisible,
+    subject,
+    visibleDeliverableSpeakers.length,
+    visibleSpeakers.length,
+  ]);
 
   if (board.isPending || plans.isPending) {
     return (
@@ -178,22 +317,11 @@ export function MessagesWorkspace({
           }
         />
       ) : null}
-      <section className="messages-intro" aria-labelledby="speaker-messages-title">
-        <div>
-          <p className="eyebrow">Communications</p>
-          <h2 id="speaker-messages-title">Speaker messages</h2>
-          <p>
-            Choose the exact audience and message. Course Check reviews recipients and
-            freezes drafts before any separate send approval.
-          </p>
-        </div>
-        <div className="messages-scope-counts" aria-label="Audience scope">
-          <strong>{includedSpeakers.length} included</strong>
-          <span>{excludedCount} excluded</span>
-          <span>
-            {missingCount} missing {missingCount === 1 ? "address" : "addresses"}
-          </span>
-        </div>
+      <section className="messages-guidance operations-panel" aria-label="Speaker message guidance">
+        <p>
+          Choose the exact audience and message. Course Check reviews recipients and freezes drafts
+          before any separate send approval.
+        </p>
       </section>
 
       <div className="messages-compose-grid">
@@ -203,35 +331,8 @@ export function MessagesWorkspace({
               <h2 id="audience-title">Audience</h2>
               <span>{visibleSpeakers.length} shown</span>
             </div>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              disabled={!visibleSpeakers.some((speaker) => isDeliverable(speaker.email))}
-              onClick={() => {
-                setSelectedSpeakerIds((current) => {
-                  const next = new Set(current);
-                  for (const speaker of visibleSpeakers) {
-                    if (isDeliverable(speaker.email)) next.add(speaker.speakerId);
-                  }
-                  return next;
-                });
-              }}
-            >
-              Select visible
-            </button>
           </div>
-          <div className="seg messages-filter" role="group" aria-label="Readiness group">
-            {FILTERS.map((option) => (
-              <button
-                type="button"
-                key={option.value}
-                aria-pressed={filter === option.value}
-                onClick={() => setFilter(option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+
           <div className="messages-table-wrap">
             <table className="messages-table">
               <thead>
@@ -289,6 +390,20 @@ export function MessagesWorkspace({
             <span>Draft only</span>
           </div>
           <div className="messages-compose-fields">
+            <label className="messages-invitation-toggle">
+              <input
+                type="checkbox"
+                checked={portalInvitation}
+                onChange={(event) => {
+                  const checked = event.target.checked;
+                  setPortalInvitation(checked);
+                  if (checked && !bodyText.includes("{{portal_url}}")) {
+                    setBodyText(`${bodyText}\n\nOpen your private speaker portal: {{portal_url}}`);
+                  }
+                }}
+              />
+              Personalize as speaker portal invitation
+            </label>
             <label className="stack-field">
               Subject
               <input
@@ -308,6 +423,7 @@ export function MessagesWorkspace({
             <p className="messages-token-help">
               Available substitutions: <code>{"{{speaker_name}}"}</code>,{" "}
               <code>{"{{proposal_title}}"}</code>, <code>{"{{event_name}}"}</code>
+              {portalInvitation ? <>, <code>{"{{portal_url}}"}</code></> : null}
             </p>
           </div>
           <div className="messages-preview" aria-live="polite">
@@ -321,6 +437,7 @@ export function MessagesWorkspace({
                     speakerName: previewSpeaker.name,
                     proposalTitle: previewSpeaker.proposalTitle ?? "your session",
                     eventName,
+                    portalUrl: portalInvitation ? "https://chartstead.test/e/event/portal/private-link" : undefined,
                   })}
                 </h3>
                 <p>
@@ -328,6 +445,7 @@ export function MessagesWorkspace({
                     speakerName: previewSpeaker.name,
                     proposalTitle: previewSpeaker.proposalTitle ?? "your session",
                     eventName,
+                    portalUrl: portalInvitation ? "https://chartstead.test/e/event/portal/private-link" : undefined,
                   })}
                 </p>
               </>
@@ -337,26 +455,9 @@ export function MessagesWorkspace({
           </div>
           <div className="messages-handoff">
             <p>
-              This creates a reviewable Communication Course Check. It does not create
-              drafts and does not send.
+              The shell Review action creates a reviewable Communication Course Check. It does not
+              create drafts and does not send.
             </p>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={
-                includedSpeakers.length === 0 ||
-                !subject.trim() ||
-                !bodyText.trim() ||
-                createPlan.isPending
-              }
-              onClick={() => createPlan.mutate()}
-            >
-              {createPlan.isPending
-                ? "Opening Course Check…"
-                : `Review ${includedSpeakers.length} recipient${
-                    includedSpeakers.length === 1 ? "" : "s"
-                  } in Course Check`}
-            </button>
           </div>
           {createPlan.isError ? (
             <p className="form-message" data-tone="error" role="alert">
@@ -392,6 +493,7 @@ export function MessagesWorkspace({
                     <a href={`/e/${eventId}/course-checks/${plan.id}`}>
                       {plan.body.subject}
                     </a>
+                    {plan.body.portalInvitation ? <span>Portal invitation</span> : null}
                     {plan.body.compensation ? <span>Reviewed correction</span> : null}
                   </th>
                   <td>{communicationRecipientCount(plan.body)}</td>

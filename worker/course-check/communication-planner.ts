@@ -29,6 +29,8 @@ export interface CommunicationSpeakerRef {
   name: string;
   email: string;
   role: "primary" | "co" | "speaker";
+  portalUrl?: string | null;
+  portalTokenId?: string | null;
 }
 
 export interface CommunicationGroupInput {
@@ -59,6 +61,7 @@ export interface PlanCommunicationInput {
   organizerName?: string;
   eventName?: string;
   compensation?: CommunicationPlanBody["compensation"];
+  portalInvitation?: boolean;
 }
 
 function normalizeEmail(email: string): string {
@@ -299,6 +302,8 @@ export function planCommunicationCascade(
         deliverability,
         selected,
         priorCommunications: prior,
+        portalUrl: speaker.portalUrl ?? null,
+        portalTokenId: speaker.portalTokenId ?? null,
       };
       recipients.push(recipient);
 
@@ -442,7 +447,9 @@ export function planCommunicationCascade(
       : "not_started";
 
   const purpose: CommunicationPlanBody["purpose"] =
-    input.source.kind === "publication" || calendarOps.length > 0
+    input.portalInvitation
+      ? "speaker_notification"
+      : input.source.kind === "publication" || calendarOps.length > 0
       ? "calendar_update"
       : input.templateKind === "custom"
         ? "custom"
@@ -453,6 +460,7 @@ export function planCommunicationCascade(
     actionType: "communication",
     source: input.source,
     purpose,
+    portalInvitation: Boolean(input.portalInvitation),
     templateKind: input.templateKind,
     subject: input.subject,
     bodyText: input.bodyText,
@@ -507,6 +515,7 @@ export function communicationBodyDigestPayload(body: CommunicationPlanBody): unk
   return {
     actionType: body.actionType,
     source: body.source,
+    portalInvitation: Boolean(body.portalInvitation),
     templateKind: body.templateKind,
     subject: body.subject,
     bodyText: body.bodyText,
@@ -523,6 +532,8 @@ export function communicationBodyDigestPayload(body: CommunicationPlanBody): unk
         name: recipient.name,
         role: recipient.role,
         speakerId: recipient.speakerId,
+        portalUrl: recipient.portalUrl ?? null,
+        portalTokenId: recipient.portalTokenId ?? null,
         inclusion: recipient.inclusion,
         selected: recipient.selected,
         deliverability: recipient.deliverability,
@@ -685,11 +696,13 @@ export function freezeCommunicationDrafts(input: {
           speakerName: recipient.name,
           proposalTitle: group.label,
           eventName,
+          portalUrl: recipient.portalUrl ?? undefined,
         }),
         bodyText: renderCommunicationTemplate(input.body.bodyText, {
           speakerName: recipient.name,
           proposalTitle: group.label,
           eventName,
+          portalUrl: recipient.portalUrl ?? undefined,
         }),
         bodyHtml: renderCommunicationTemplate(
           input.body.bodyHtml,
@@ -697,6 +710,7 @@ export function freezeCommunicationDrafts(input: {
             speakerName: recipient.name,
             proposalTitle: group.label,
             eventName,
+            portalUrl: recipient.portalUrl ?? undefined,
           },
           { html: true },
         ),
@@ -767,6 +781,8 @@ export function redactCommunicationBody(body: CommunicationPlanBody): Communicat
       recipients: group.recipients.map((recipient) => ({
         ...recipient,
         address: recipient.address ? "[redacted]" : "",
+        portalUrl: null,
+        portalTokenId: null,
         inclusionReason: "Private recipient evidence is hidden without communication authority.",
         priorCommunications: recipient.priorCommunications.map((prior) => ({
           ...prior,

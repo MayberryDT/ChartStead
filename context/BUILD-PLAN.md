@@ -14,7 +14,7 @@ Research that informed locks (do not re-litigate casually):
 - `.research/chartstead-post-spine-differentiation-follow-up.md`
 - `.research/chartstead-safety-layer-precedents.md`
 
-Product requirements live in `context.md`. Design system in `design/DESIGN.md`. Implement the organizer shell and submissions spine against `design/source-of-truth/organizer-submissions.html`.
+Product requirements live in `context.md`. Design system in `design/DESIGN.md`. Cross-screen organizer chrome is locked in `design/ORGANIZER-DESK-CHROME.md`; implement the organizer shell and submissions spine against `design/source-of-truth/organizer-submissions.html`.
 
 ---
 

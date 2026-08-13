@@ -112,6 +112,119 @@ describe("Ticket 24 organizer speaker directory", () => {
     });
   });
 
+  it("persists event workflow and logistics separately from task readiness and current profile edits", async () => {
+    const created = await createSpeaker(eventId, {
+      name: "Workflow Participant",
+      email: "workflow.participant@example.test",
+      biography: "Current identity biography",
+      titleSnapshot: "Event Speaker",
+      organizationSnapshot: "Event Organization",
+      role: "invited",
+      createNewIdentity: true,
+    });
+    expect(created.status).toBe(201);
+    const { speaker } = await created.json<{ speaker: { speakerId: string } }>();
+
+    const participation = await adminApp.request(
+      `https://chartstead.test/api/events/${eventId}/speakers/${speaker.speakerId}/participation`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workflowStatus: "preparing",
+          travelPreferences: "Train preferred; no early departures.",
+          logistics: { Arrival: "Tuesday after 3pm", Hotel: "Two nights" },
+        }),
+      },
+      env,
+    );
+    expect(participation.status).toBe(200);
+    await expect(participation.json()).resolves.toMatchObject({
+      speakerId: speaker.speakerId,
+      workflowStatus: "preparing",
+      travelPreferences: "Train preferred; no early departures.",
+      logistics: { Arrival: "Tuesday after 3pm", Hotel: "Two nights" },
+      titleSnapshot: "Event Speaker",
+      organizationSnapshot: "Event Organization",
+      openTaskCount: 0,
+    });
+
+    const task = await adminApp.request(
+      `https://chartstead.test/api/events/${eventId}/onboarding/tasks`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          speakerId: speaker.speakerId,
+          title: "Send headshot",
+          completionRequirement: "file",
+          readinessFlag: "headshot",
+        }),
+      },
+      env,
+    );
+    expect(task.status).toBe(201);
+
+    const profile = await adminApp.request(
+      `https://chartstead.test/api/events/${eventId}/speakers/${speaker.speakerId}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ biography: "Corrected current biography" }),
+      },
+      env,
+    );
+    expect(profile.status).toBe(200);
+
+    const board = await (
+      await adminApp.request(
+        `https://chartstead.test/api/events/${eventId}/onboarding`,
+        undefined,
+        env,
+      )
+    ).json<OnboardingBoard>();
+    expect(board.speakers.find((row) => row.speakerId === speaker.speakerId)).toMatchObject({
+      biography: "Corrected current biography",
+      titleSnapshot: "Event Speaker",
+      organizationSnapshot: "Event Organization",
+      workflowStatus: "preparing",
+      travelPreferences: "Train preferred; no early departures.",
+      logistics: { Arrival: "Tuesday after 3pm", Hotel: "Two nights" },
+      openTaskCount: 1,
+      readinessFlags: ["headshot"],
+    });
+
+    const apiSpeaker = await (
+      await adminApp.request(
+        `https://chartstead.test/api/v1/events/${eventId}/speakers`,
+        undefined,
+        env,
+      )
+    ).json<{
+      speakers: Array<{
+        id: string;
+        biography: string;
+        participation: {
+          titleAtEvent: string;
+          organizationAtEvent: string;
+          workflowStatus: string;
+          travelPreferences: string;
+          logistics: Record<string, string>;
+        } | null;
+      }>;
+    }>();
+    expect(apiSpeaker.speakers.find((row) => row.id === speaker.speakerId)).toMatchObject({
+      biography: "Corrected current biography",
+      participation: {
+        titleAtEvent: "Event Speaker",
+        organizationAtEvent: "Event Organization",
+        workflowStatus: "preparing",
+        travelPreferences: "Train preferred; no early departures.",
+        logistics: { Arrival: "Tuesday after 3pm", Hotel: "Two nights" },
+      },
+    });
+  });
+
   it("requires an explicit identity choice for exact email reuse and ambiguous name matches", async () => {
     const first = await createSpeaker(eventId, {
       name: "Deliberate Reuse",
@@ -236,6 +349,12 @@ describe("Ticket 24 organizer speaker directory", () => {
           name: "Portal Name Corrected",
           email: "portal.corrected@example.test",
           biography: "Corrected by the organizer.",
+          socialLinks: {
+            linkedin: "https://linkedin.com/in/portal-corrected",
+            x: "https://x.com/portal_corrected",
+            github: "",
+            website: "https://portal-corrected.example.test",
+          },
         }),
       },
       env,
@@ -253,8 +372,94 @@ describe("Ticket 24 organizer speaker directory", () => {
       name: "Portal Name Corrected",
       email: "portal.corrected@example.test",
       biography: "Corrected by the organizer.",
+      socialLinks: {
+        linkedin: "https://linkedin.com/in/portal-corrected",
+        x: "https://x.com/portal_corrected",
+        github: "",
+        website: "https://portal-corrected.example.test",
+      },
     });
     expect(after.participation).toEqual(before.participation);
+  });
+
+  it("lets an organizer upload a constrained headshot and exposes it to the same speaker portal", async () => {
+    const created = await createSpeaker(eventId, {
+      name: "Organizer Headshot",
+      email: "organizer.headshot@example.test",
+      titleSnapshot: "Historic Title",
+      organizationSnapshot: "Historic Organization",
+      createNewIdentity: true,
+    });
+    const { speaker } = await created.json<{ speaker: { speakerId: string } }>();
+
+    const deniedType = await adminApp.request(
+      `https://chartstead.test/api/events/${eventId}/speakers/${speaker.speakerId}/headshot-uploads`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fileName: "speaker.svg", mime: "image/svg+xml", sizeBytes: 12 }),
+      },
+      env,
+    );
+    expect(deniedType.status).toBe(400);
+
+    const invalidAttach = await adminApp.request(
+      `https://chartstead.test/api/events/${eventId}/speakers/${speaker.speakerId}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ headshotAssetId: { assetId: "wrong-shape" } }),
+      },
+      env,
+    );
+    expect(invalidAttach.status).toBe(400);
+
+    const start = await adminApp.request(
+      `https://chartstead.test/api/events/${eventId}/speakers/${speaker.speakerId}/headshot-uploads`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fileName: "organizer.png", mime: "image/png", sizeBytes: 12 }),
+      },
+      env,
+    );
+    expect(start.status).toBe(200);
+    const { upload } = await start.json<{
+      upload: { assetId: string; uploadUrl: string; maxBytes: number };
+    }>();
+    expect(upload.maxBytes).toBe(5 * 1024 * 1024);
+    const bytes = new Uint8Array(12).fill(9);
+    const put = await adminApp.request(`https://chartstead.test${upload.uploadUrl}`, {
+      method: "PUT",
+      headers: { "content-type": "image/png", "content-length": String(bytes.byteLength) },
+      body: bytes,
+    }, env);
+    expect(put.status).toBe(200);
+
+    const attach = await adminApp.request(
+      `https://chartstead.test/api/events/${eventId}/speakers/${speaker.speakerId}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ headshotAssetId: upload.assetId }),
+      },
+      env,
+    );
+    expect(attach.status).toBe(200);
+    await expect(attach.json()).resolves.toMatchObject({
+      headshotAssetId: upload.assetId,
+      headshotFileName: "organizer.png",
+      titleSnapshot: "Historic Title",
+      organizationSnapshot: "Historic Organization",
+    });
+
+    const image = await adminApp.request(
+      `https://chartstead.test/api/events/${eventId}/speakers/${speaker.speakerId}/headshot?asset=${upload.assetId}`,
+      undefined,
+      env,
+    );
+    expect(image.status).toBe(200);
+    expect(image.headers.get("content-type")).toBe("image/png");
   });
 
   it("does not silently create a session and leaves guaranteed-speaker linkage on the existing Course Check path", async () => {
@@ -369,5 +574,55 @@ describe("Ticket 24 organizer speaker directory", () => {
         name: "Second Event Identity",
       }),
     ]);
+  });
+
+  it("keeps workflow and logistics isolated to the event participation", async () => {
+    const email = "workflow.isolation@example.test";
+    const first = await createSpeaker(eventId, {
+      name: "Workflow Isolation",
+      email,
+      titleSnapshot: "First event title",
+      organizationSnapshot: "First event org",
+      createNewIdentity: true,
+    });
+    expect(first.status).toBe(201);
+    const firstBody = await first.json<{ speaker: { speakerId: string } }>();
+    const firstParticipation = await adminApp.request(
+      `https://chartstead.test/api/events/${eventId}/speakers/${firstBody.speaker.speakerId}/participation`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workflowStatus: "ready",
+          travelPreferences: "First event preference",
+          logistics: { Hotel: "First event hotel" },
+        }),
+      },
+      env,
+    );
+    expect(firstParticipation.status).toBe(200);
+
+    const second = await createSpeaker(otherEventId, {
+      name: "Workflow Isolation",
+      email: "workflow.isolation.second@example.test",
+      titleSnapshot: "Second event title",
+      organizationSnapshot: "Second event org",
+      createNewIdentity: true,
+    });
+    expect(second.status).toBe(201);
+    const secondBody = await second.json<{ speaker: { speakerId: string } }>();
+    const secondBoard = await (
+      await adminApp.request(
+        `https://chartstead.test/api/events/${otherEventId}/onboarding`,
+        undefined,
+        env,
+      )
+    ).json<OnboardingBoard>();
+    expect(secondBoard.speakers.find((row) => row.speakerId === secondBody.speaker.speakerId)).toMatchObject({
+      workflowStatus: "invited",
+      travelPreferences: "",
+      logistics: {},
+      titleSnapshot: "Second event title",
+    });
   });
 });

@@ -36,7 +36,8 @@ test("organizer sees the truthful reviewer invitation lifecycle", async ({ page 
   });
 
   await page.goto("/e/pacific-open-data-summit-2026/submissions");
-  await page.getByRole("button", { name: "Reviewer routing" }).click();
+  await page.getByRole("link", { name: "Settings" }).click();
+  await expect(page.getByRole("heading", { name: "Reviewers" })).toBeVisible();
   await expect(page.getByText("Delivery failed — retry available")).toBeVisible();
   await expect(page.getByText("reviewer@example.com")).toBeVisible();
 

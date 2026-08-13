@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useBlocker, useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useBlocker, useParams } from "@tanstack/react-router";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   addQuestion,
@@ -30,9 +30,7 @@ import {
 import type { OrganizerCfpForm, PublishedCfpForm } from "../shared/events";
 import {
   closeOrganizerForm,
-  createOrganizerForm,
   fetchOrganizerForm,
-  fetchOrganizerForms,
   publishOrganizerForm,
   reopenOrganizerForm,
   saveOrganizerFormDraft,
@@ -46,6 +44,12 @@ type DraftSaveState =
   | { status: "unsaved"; revision: number }
   | { status: "saving"; revision: number }
   | { status: "failed"; revision: number; message: string };
+
+export type CfpBuilderChrome = {
+  title: string;
+  meta: string;
+  actions: ReactNode;
+};
 
 type SaveVars = {
   revision: number;
@@ -190,81 +194,35 @@ function earlierSingleChoiceSources(
     );
 }
 
-export function CfpFormsPage() {
-  const { eventId } = useParams({ from: "/e/$eventId/forms" });
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const forms = useQuery({
-    queryKey: ["forms", eventId],
-    queryFn: () => fetchOrganizerForms(eventId),
-  });
-  const create = useMutation({
-    mutationFn: (name: string) => createOrganizerForm(eventId, name),
-    onSuccess: async (form) => {
-      await queryClient.invalidateQueries({ queryKey: ["forms", eventId] });
-      void navigate({
-        to: "/e/$eventId/forms/$formId",
-        params: { eventId, formId: form.id },
-      });
-    },
-  });
+export function CfpBuilderPage() {
+  const { eventId, formId } = useParams({ strict: false }) as {
+    eventId?: string;
+    formId?: string;
+  };
 
-  return (
-    <main className="builder-shell">
-      <header className="builder-header">
-        <div>
-          <p className="eyebrow">CFP forms</p>
-          <h1>Guided call for proposals</h1>
-        </div>
-        <div className="builder-actions">
-          <Link className="btn btn-ghost" to="/">
-            Event desk
-          </Link>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={create.isPending}
-            onClick={() => create.mutate(`CFP ${new Date().toLocaleDateString()}`)}
-          >
-            Create form
-          </button>
-        </div>
-      </header>
-
-      {forms.isPending ? <p>Loading forms…</p> : null}
-      {forms.isError ? (
+  if (!eventId || !formId) {
+    return (
+      <section className="builder-work" aria-label="Guided CFP builder">
         <p className="form-message error" role="alert">
-          {forms.error.message}
+          CFP builder route is missing an event or form id.
         </p>
-      ) : null}
+      </section>
+    );
+  }
 
-      <ul className="form-card-list">
-        {(forms.data ?? []).map((form) => (
-          <li key={form.id}>
-            <Link
-              className="form-card"
-              to="/e/$eventId/forms/$formId"
-              params={{ eventId, formId: form.id }}
-            >
-              <strong>{form.name}</strong>
-              <span className={`status-pill status-${form.lifecycleStatus}`}>
-                {form.lifecycleStatus}
-              </span>
-              <span>
-                {form.publishedVersion
-                  ? `Published v${form.publishedVersion}`
-                  : "Not published yet"}
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </main>
-  );
+  return <CfpBuilderWorkspace eventId={eventId} formId={formId} />;
 }
 
-export function CfpBuilderPage() {
-  const { eventId, formId } = useParams({ from: "/e/$eventId/forms/$formId" });
+
+export function CfpBuilderWorkspace({
+  eventId,
+  formId,
+  onChromeChange,
+}: {
+  eventId: string;
+  formId: string;
+  onChromeChange?: (chrome: CfpBuilderChrome | null) => void;
+}) {
   const queryClient = useQueryClient();
   const formQuery = useQuery({
     queryKey: ["form", eventId, formId],
@@ -482,77 +440,156 @@ export function CfpBuilderPage() {
     return published;
   }, [draft, form, name]);
 
-  if (formQuery.isError) {
-    return (
-      <main className="builder-shell">
-        <p className="form-message error" role="alert">
-          {formQuery.error.message}
-        </p>
-      </main>
-    );
-  }
+  const chromeTitle = form ? name || form.name : "Guided CFP builder";
+  const chromeMeta = formQuery.isError
+    ? "Builder could not open"
+    : form
+      ? `Status: ${form.lifecycleStatus}${
+          form.publishedVersion ? ` · Live version ${form.publishedVersion}` : " · Not published"
+        } · ${saveStatusLabel(saveState)}`
+      : "Loading form…";
 
-  if (formQuery.isPending || !draft || !form) {
-    return (
-      <main className="builder-shell" aria-busy="true">
-        <p>Loading form builder…</p>
-      </main>
-    );
-  }
-
-  return (
-    <main className="builder-shell">
-      <header className="builder-header">
-        <div>
-          <p className="eyebrow">Guided CFP builder</p>
-          <h1>{name || form.name}</h1>
-          <p className="builder-meta">
-            Status: <strong>{form.lifecycleStatus}</strong>
-            {form.publishedVersion
-              ? ` · Live version ${form.publishedVersion}`
-              : " · Not published"}
-            {" · "}
-            <span className="builder-save-status" role="status">
-              {saveStatusLabel(saveState)}
-            </span>
-          </p>
-        </div>
-        <div className="builder-actions">
-          <Link className="btn btn-ghost" to="/e/$eventId/forms" params={{ eventId }}>
+  useEffect(() => {
+    if (!onChromeChange) return;
+    onChromeChange({
+      title: chromeTitle,
+      meta: chromeMeta,
+      actions: (
+        <>
+          <Link
+            className="btn btn-ghost btn-sm"
+            to="/e/$eventId/forms"
+            params={{ eventId }}
+          >
             All forms
           </Link>
-          {saveState.status === "failed" ? (
+          <a className="btn btn-secondary btn-sm" href={`/e/${eventId}/cfp?formId=${formId}`}>
+            Open CFP
+          </a>
+          {form && saveState.status === "failed" ? (
             <button
               type="button"
-              className="btn btn-secondary"
+              className="btn btn-secondary btn-sm"
               disabled={save.isPending}
               onClick={requestSave}
             >
               Retry save
             </button>
           ) : null}
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={save.isPending || saveState.status === "saved"}
-            onClick={requestSave}
-          >
-            Save draft
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={publish.isPending || saveInFlight}
-            onClick={() => publish.mutate()}
-          >
-            Publish
-          </button>
-        </div>
-      </header>
+          {form ? (
+            <>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={save.isPending || saveState.status === "saved"}
+                onClick={requestSave}
+              >
+                Save draft
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={publish.isPending || saveInFlight}
+                onClick={() => publish.mutate()}
+              >
+                Publish
+              </button>
+            </>
+          ) : null}
+        </>
+      ),
+    });
+    return () => onChromeChange(null);
+  }, [
+    chromeMeta,
+    chromeTitle,
+    eventId,
+    form,
+    formId,
+    onChromeChange,
+    publish.isPending,
+    save.isPending,
+    saveInFlight,
+    saveState.status,
+  ]);
+
+  if (formQuery.isError) {
+    return (
+      <section className="builder-work" aria-label="Guided CFP builder">
+        <p className="form-message error" role="alert">
+          {formQuery.error.message}
+        </p>
+      </section>
+    );
+  }
+
+  if (formQuery.isPending || !draft || !form) {
+    return (
+      <section className="builder-work" aria-label="Guided CFP builder" aria-busy="true">
+        <p>Loading form builder…</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="builder-work" aria-label="Guided CFP builder">
 
       <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {liveAnnouncement}
       </div>
+
+      {!onChromeChange ? (
+        <div className="builder-standalone-chrome">
+          <div>
+            <p className="eyebrow">Guided CFP builder</p>
+            <h1>{chromeTitle}</h1>
+            <p className="builder-meta">
+              Status: <strong>{form.lifecycleStatus}</strong>
+              {form.publishedVersion
+                ? ` · Live version ${form.publishedVersion}`
+                : " · Not published"}
+              {" · "}
+              <span className="builder-save-status" role="status">
+                {saveStatusLabel(saveState)}
+              </span>
+            </p>
+          </div>
+          <div className="builder-actions">
+            <a className="btn btn-ghost" href={`/e/${eventId}/forms`}>
+              All forms
+            </a>
+            <a className="btn btn-secondary" href={`/e/${eventId}/cfp?formId=${formId}`}>
+              Open CFP
+            </a>
+            {saveState.status === "failed" ? (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={save.isPending}
+                onClick={requestSave}
+              >
+                Retry save
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={save.isPending || saveState.status === "saved"}
+              onClick={requestSave}
+            >
+              Save draft
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={publish.isPending || saveInFlight}
+              onClick={() => publish.mutate()}
+            >
+              Publish
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {message ? (
         <p className={`form-message ${tone}`} role="status">
@@ -625,7 +662,7 @@ export function CfpBuilderPage() {
           )}
         </aside>
       </div>
-    </main>
+    </section>
   );
 }
 

@@ -16,4 +16,5 @@
 
 Filed after Ticket 06 functional completion. Human-led visual/UX work only; outbox semantics, signed portal access, and reminder delivery behavior remain unchanged.
 
-- 2026-08-12 — frontier-reconcile: Blockers satisfied; remains human-tandem only (not agent-ready).
+- 2026-08-13 — frontier-reconcile: Blockers satisfied; remains human-tandem only (not agent-ready).
+- 2026-08-12 — Tyler named Competition 39 as the actual Speakers-tab tandem polish (directory + detail + chasing). 18 stays the earlier global design-standard note; do not treat it as a separate later Speakers pass.

@@ -85,11 +85,19 @@ function summary(
 export function SpeakerCsvImport({
   eventId,
   onChanged,
+  open: controlledOpen,
+  onOpenChange,
+  hideTrigger = false,
 }: {
   eventId: string;
   onChanged: () => Promise<void>;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = onOpenChange ?? setInternalOpen;
   const [csvText, setCsvText] = useState("");
   const [fileName, setFileName] = useState("");
   const [headers, setHeaders] = useState<string[]>([]);
@@ -189,18 +197,22 @@ export function SpeakerCsvImport({
     });
   }
 
+  if (hideTrigger && !open) return null;
+
   return (
     <div className="speaker-csv-import">
-      <button
-        type="button"
-        className="btn btn-secondary"
-        onClick={() => {
-          setOpen((value) => !value);
-          setError(null);
-        }}
-      >
-        {open ? "Close CSV import" : "Import CSV"}
-      </button>
+      {hideTrigger ? null : (
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={() => {
+            setOpen(!open);
+            setError(null);
+          }}
+        >
+          {open ? "Close CSV import" : "Import CSV"}
+        </button>
+      )}
       {open ? (
         <section className="speaker-csv-panel" aria-label="Import speakers from CSV">
           <div className="speaker-directory-form-head">

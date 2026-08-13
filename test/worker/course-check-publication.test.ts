@@ -100,6 +100,22 @@ async function acceptProposal(proposalId: string, key: string): Promise<void> {
     env,
   );
   expect(apply.status).toBe(200);
+  const agenda = await getAgenda();
+  const session = agenda.sessions.find((row) => row.proposalId === proposalId);
+  expect(session).toBeTruthy();
+  const content = await adminApp.request(
+    `https://chartstead.test/api/events/${eventId}/session-content/${session!.id}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        expectedVersion: session!.contentVersion ?? 1,
+        status: "approved",
+      }),
+    },
+    env,
+  );
+  expect(content.status).toBe(200);
 }
 
 async function getAgenda(): Promise<AgendaWorkspaceResponse> {

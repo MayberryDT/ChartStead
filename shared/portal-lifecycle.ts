@@ -49,6 +49,8 @@ export function auditEventLabel(type: string, toStatus: string): string {
       return `reconciled delivery (${toStatus})`;
     case "course_check.communication.correction_created":
       return `opened a corrective communication (${toStatus})`;
+    case "proposal.review.recused":
+      return "recorded a conflict / recusal";
     case "proposal.review.changed":
       return `set internal review ${toStatus}`;
     default:

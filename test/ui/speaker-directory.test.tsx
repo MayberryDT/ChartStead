@@ -23,6 +23,9 @@ const board: OnboardingBoard = {
       proposalId: null,
       proposalTitle: null,
       role: "invited",
+      workflowStatus: "confirmed",
+      travelPreferences: "Rail preferred",
+      logistics: { Arrival: "Tuesday afternoon" },
       openTaskCount: 0,
       overdueCount: 0,
       nextDueAt: null,
@@ -44,6 +47,9 @@ const board: OnboardingBoard = {
       proposalId: "SUB-1",
       proposalTitle: "Compiler Operations",
       role: "primary",
+      workflowStatus: "preparing",
+      travelPreferences: "Window seat",
+      logistics: {},
       openTaskCount: 2,
       overdueCount: 1,
       nextDueAt: "2026-08-01T00:00:00.000Z",
@@ -80,7 +86,7 @@ describe("Ticket 24 speaker directory UI", () => {
     vi.spyOn(api, "fetchOnboardingBoard").mockResolvedValue(board);
   });
 
-  it("searches by name or email and filters readiness without losing exact counts", async () => {
+  it("searches by name or email and filters workflow separately from readiness", async () => {
     const user = userEvent.setup();
     renderDirectory();
 
@@ -93,11 +99,18 @@ describe("Ticket 24 speaker directory UI", () => {
 
     await user.clear(search);
     await user.selectOptions(
-      screen.getByRole("combobox", { name: /readiness filter/i }),
+      screen.getByRole("combobox", { name: /directory filter/i }),
       "ready",
     );
     expect(screen.getAllByText("Ada Ready")).not.toHaveLength(0);
     expect(screen.queryByText("Grace Outstanding")).not.toBeInTheDocument();
+
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: /directory filter/i }),
+      "preparing",
+    );
+    expect(screen.getAllByText("Grace Outstanding")).not.toHaveLength(0);
+    expect(screen.getAllByText("Preparing")).not.toHaveLength(0);
   });
 
   it("keeps add and edit explicit, including identity-choice recovery", async () => {
@@ -157,5 +170,34 @@ describe("Ticket 24 speaker directory UI", () => {
         expect.objectContaining({ name: "Ada Corrected" }),
       );
     });
+  });
+
+  it("edits participation workflow and logistics without submitting profile fields", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(api, "updateDirectorySpeaker").mockResolvedValue(board.speakers[0]!);
+    vi.spyOn(api, "updateSpeakerParticipation").mockResolvedValue({
+      ...board.speakers[0]!,
+      workflowStatus: "ready",
+      travelPreferences: "Rail preferred",
+      logistics: { Hotel: "Two nights" },
+    });
+    renderDirectory();
+
+    await user.click(await screen.findByRole("button", { name: /Ada Ready/i }));
+    await user.click(screen.getByRole("button", { name: /edit event details/i }));
+    const form = screen.getByRole("form", { name: /edit event participation/i });
+    await user.selectOptions(within(form).getByLabelText(/workflow status/i), "ready");
+    await user.clear(within(form).getByLabelText(/logistics fields/i));
+    await user.type(within(form).getByLabelText(/logistics fields/i), "Hotel: Two nights");
+    await user.click(within(form).getByRole("button", { name: /save event details/i }));
+
+    await waitFor(() => {
+      expect(api.updateSpeakerParticipation).toHaveBeenCalledWith(eventId, "sp-ready", {
+        workflowStatus: "ready",
+        travelPreferences: "Rail preferred",
+        logistics: { Hotel: "Two nights" },
+      });
+    });
+    expect(api.updateDirectorySpeaker).not.toHaveBeenCalled();
   });
 });

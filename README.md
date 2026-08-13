@@ -183,4 +183,5 @@ Production and demo use distinct checked-in D1 resource IDs and separate Durable
 | [context.md](context.md) | Product requirements |
 | [context/BUILD-PLAN.md](context/BUILD-PLAN.md) | Locked architecture |
 | [design/DESIGN.md](design/DESIGN.md) | Design system |
+| [design/ORGANIZER-DESK-CHROME.md](design/ORGANIZER-DESK-CHROME.md) | Cross-screen organizer shell and work-surface contract |
 | [design/source-of-truth/organizer-submissions.html](design/source-of-truth/organizer-submissions.html) | Visual SOT |

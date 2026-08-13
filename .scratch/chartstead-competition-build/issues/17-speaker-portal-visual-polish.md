@@ -16,4 +16,4 @@
 
 Filed after Ticket 06 because it extended the Ticket 05 portal. Ticket 18 separately owns the organizer onboarding-and-chasing workspace.
 
-- 2026-08-12 — frontier-reconcile: Blockers satisfied; remains human-tandem only (not agent-ready).
+- 2026-08-13 — frontier-reconcile: Blockers satisfied; remains human-tandem only (not agent-ready).

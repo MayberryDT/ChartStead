@@ -142,7 +142,7 @@ The organizer application follows the locked Harbor Master Desk visual direction
 
 - Canonical requirements and evidence boundaries are in `context.md`.
 - Locked architecture, implementation order, spikes, and operating constraints are in `context/BUILD-PLAN.md`.
-- Visual implementation follows `design/source-of-truth/organizer-submissions.html`; behavioral rules remain in the context, build plan, and design system.
+- Visual implementation follows `design/source-of-truth/organizer-submissions.html` and the cross-screen rules in `design/ORGANIZER-DESK-CHROME.md`; behavioral rules remain in the context, build plan, and design system.
 - Gene Kim's conference history is high-value adjacent-practitioner evidence, not a replacement for direct organizer requirements.
 - The implementation order remains spine-first. This specification adds invariants inside existing steps rather than adding parallel feature tracks.
 - The committed Course Check expansion is specified in `.scratch/chartstead-course-check/spec.md` and sequenced in `context/BUILD-PLAN.md`; it extends rather than replaces this competition spine.

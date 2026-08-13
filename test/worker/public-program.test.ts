@@ -6,6 +6,7 @@ import type {
   AgendaWorkspaceResponse,
   OrganizerPrincipal,
   OrganizerProposal,
+  PublicEmbedConfig,
   PublicProgramResponse,
   SessionPlacementResponse,
 } from "../../shared/events";
@@ -238,6 +239,61 @@ describe("Ticket 09 public program", () => {
       biography: "Public-approved biography for Ada.",
       name: sessionA.speakers[0]!.name,
     });
+    const profile = await adminApp.request(
+      `https://chartstead.test/api/events/${eventId}/speakers/${speakerId}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          socialLinks: {
+            linkedin: "https://linkedin.com/in/public-ada",
+            x: "",
+            github: "https://github.com/public-ada",
+            website: "https://public-ada.example.test",
+          },
+        }),
+      },
+      env,
+    );
+    expect(profile.status).toBe(200);
+    const headshotStart = await adminApp.request(
+      `https://chartstead.test/api/events/${eventId}/speakers/${speakerId}/headshot-uploads`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fileName: "public-ada.webp", mime: "image/webp", sizeBytes: 8 }),
+      },
+      env,
+    );
+    expect(headshotStart.status).toBe(200);
+    const { upload: headshotUpload } = await headshotStart.json<{
+      upload: { assetId: string; uploadUrl: string };
+    }>();
+    const headshotBytes = new Uint8Array(8).fill(7);
+    const headshotPut = await adminApp.request(
+      `https://chartstead.test${headshotUpload.uploadUrl}`,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": "image/webp",
+          "content-length": String(headshotBytes.byteLength),
+        },
+        body: headshotBytes,
+      },
+      env,
+    );
+    expect(headshotPut.status).toBe(200);
+    const headshotProfile = await adminApp.request(
+      `https://chartstead.test/api/events/${eventId}/speakers/${speakerId}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ headshotAssetId: headshotUpload.assetId }),
+      },
+      env,
+    );
+    expect(headshotProfile.status).toBe(200);
+
 
     const published = await publishRevision();
     expect(published.revision.isCurrent).toBe(true);
@@ -263,6 +319,24 @@ describe("Ticket 09 public program", () => {
 
     const speaker = published.speakers.find((item) => item.id === speakerId);
     expect(speaker?.biography).toBe("Public-approved biography for Ada.");
+    expect(speaker?.socialLinks).toEqual({
+      linkedin: "https://linkedin.com/in/public-ada",
+      x: "",
+      github: "https://github.com/public-ada",
+      website: "https://public-ada.example.test",
+    });
+    expect(speaker).not.toHaveProperty("email");
+    expect(speaker?.headshotAssetId).toBe(headshotUpload.assetId);
+    expect(speaker?.headshotUrl).toBe(
+      `/api/events/${eventId}/program/assets/${headshotUpload.assetId}?revision=${published.revision.id}`,
+    );
+    const headshot = await publicApp.request(
+      `https://chartstead.test${speaker?.headshotUrl}`,
+      undefined,
+      env,
+    );
+    expect(headshot.status).toBe(200);
+    expect(headshot.headers.get("content-type")).toBe("image/webp");
     expect(speaker?.sessionIds).toContain(sessionA.id);
 
     const leaks = assertPublicProgramPayloadIsSafe(published);
@@ -340,6 +414,29 @@ describe("Ticket 09 public program", () => {
     }
   });
 
+  it("exports selected public sessions as one revision-scoped ICS attachment", async () => {
+    const { status, body } = await fetchProgram();
+    expect(status).toBe(200);
+    if (!("sessions" in body)) return;
+    expect(body.sessions.length).toBeGreaterThanOrEqual(2);
+    const selected = body.sessions.slice(0, 2).reverse();
+
+    const response = await publicApp.request(
+      `https://chartstead.test/api/events/${eventId}/program/calendar.ics?revision=${encodeURIComponent(body.revision.id)}&sessionIds=${selected.map((session) => session.id).join(",")}`,
+      undefined,
+      env,
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type") ?? "").toMatch(/text\/calendar/);
+    expect(response.headers.get("content-disposition") ?? "").toMatch(/attachment/);
+    const ics = await response.text();
+    expect(ics.match(/BEGIN:VEVENT/g)).toHaveLength(2);
+    for (const session of selected) {
+      expect(ics).toContain(`UID:${session.calendarUid}`);
+      expect(ics).toContain(`SUMMARY:${session.title.replace(/([,;\\])/g, "\\$1")}`);
+    }
+  });
+
   it("does not expose working agenda sessions that were never published", async () => {
     const proposals = await listProposals();
     const unpublished = proposals.find(
@@ -356,5 +453,95 @@ describe("Ticket 09 public program", () => {
     expect(status).toBe(200);
     if (!("sessions" in body)) return;
     expect(body.sessions.some((item) => item.id === fresh!.id)).toBe(false);
+  });
+
+  it("persists managed embeds, resolves public-safe feeds, pins revisions, and disables access", async () => {
+    const first = await publishRevision();
+    const target = first.sessions[0];
+    expect(target).toBeTruthy();
+
+    const create = await adminApp.request(
+      `https://chartstead.test/api/events/${eventId}/embed-configs`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "Agenda embed",
+          widget: "agenda",
+          theme: "dark",
+          filters: { trackId: target!.trackId },
+          fields: {
+            title: true,
+            dateTime: true,
+            room: true,
+            track: true,
+            speakers: true,
+            description: false,
+            format: true,
+            headshots: true,
+            biography: true,
+          },
+          revisionId: first.revision.id,
+        }),
+      },
+      env,
+    );
+    expect(create.status).toBe(201);
+    const config = await create.json<PublicEmbedConfig>();
+    expect(config.embedCode).toContain(`/e/${eventId}/embed/${config.id}`);
+    expect(config.feedUrl).toContain(`/api/events/${eventId}/public-embeds/${config.id}/feed.json`);
+
+    const listed = await adminApp.request(
+      `https://chartstead.test/api/events/${eventId}/embed-configs`,
+      undefined,
+      env,
+    );
+    expect(listed.status).toBe(200);
+    expect((await listed.json<{ configs: PublicEmbedConfig[] }>()).configs.map((row) => row.id))
+      .toContain(config.id);
+
+    const publicResolved = await publicApp.request(
+      `https://chartstead.test/api/events/${eventId}/public-embeds/${config.id}`,
+      undefined,
+      env,
+    );
+    expect(publicResolved.status).toBe(200);
+    const resolved = await publicResolved.json<{
+      config: PublicEmbedConfig;
+      program: PublicProgramResponse;
+    }>();
+    expect(resolved.config.disabled).toBe(false);
+    expect(resolved.program.revision.id).toBe(first.revision.id);
+    expect(resolved.program.sessions.every((session) => session.trackId === target!.trackId))
+      .toBe(true);
+    expect(assertPublicProgramPayloadIsSafe(resolved.program)).toEqual([]);
+    expect(JSON.stringify(resolved)).not.toMatch(/committeeNote|onboarding|portalToken|"email"/);
+
+    const next = await publishRevision();
+    expect(next.revision.id).not.toBe(first.revision.id);
+    const pinnedFeed = await publicApp.request(
+      `https://chartstead.test/api/events/${eventId}/public-embeds/${config.id}/feed.json`,
+      undefined,
+      env,
+    );
+    expect(pinnedFeed.status).toBe(200);
+    expect((await pinnedFeed.json<PublicProgramResponse>()).revision.id).toBe(first.revision.id);
+
+    const disable = await adminApp.request(
+      `https://chartstead.test/api/events/${eventId}/embed-configs/${config.id}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ disabled: true }),
+      },
+      env,
+    );
+    expect(disable.status).toBe(200);
+    const disabled = await publicApp.request(
+      `https://chartstead.test/api/events/${eventId}/public-embeds/${config.id}`,
+      undefined,
+      env,
+    );
+    expect(disabled.status).toBe(404);
   });
 });

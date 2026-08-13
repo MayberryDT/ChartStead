@@ -270,6 +270,20 @@ describe("Ticket 25 speaker CSV import", () => {
       role: "invited",
       createNewIdentity: true,
     });
+    const participation = await adminApp.request(
+      `https://chartstead.test/api/events/${eventId}/speakers/${existing.speaker.speakerId}/participation`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workflowStatus: "ready",
+          travelPreferences: "Train preferred",
+          logistics: { Hotel: "Two nights" },
+        }),
+      },
+      env,
+    );
+    expect(participation.status).toBe(200);
     const csvText = [
       "Full Name,Email Address,Bio,Job Title,Company",
       "CSV Created,csv.created@example.test,Created biography,Engineer,Create Org",
@@ -337,6 +351,9 @@ describe("Ticket 25 speaker CSV import", () => {
           biography: "After import",
           titleSnapshot: "Principal",
           organizationSnapshot: "Stable Org",
+          workflowStatus: "ready",
+          travelPreferences: "Train preferred",
+          logistics: { Hotel: "Two nights" },
         }),
       ]),
     );

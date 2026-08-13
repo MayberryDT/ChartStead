@@ -7,24 +7,50 @@ import type {
 import type { AirtablePullResult, AirtableSyncState } from "../shared/airtable";
 import type { CourseCheckUxEventInput } from "../shared/course-check-ux";
 import type {
+  AgendaAutoPlaceApplyResponse,
+  AgendaAutoPlacePreview,
   AgendaWorkspaceResponse,
   AssetUploadSession,
   CfpDefinitionV1,
   CfpFormResponse,
   CfpPublicLifecycle,
+  EvaluationPlan,
+  EvaluationPlanAuditEvent,
+  EvaluationScorecard,
+  EvaluationRoundAssignment,
+  EvaluationRoundDistributionPreview,
+  EvaluationRoundState,
   EventListResponse,
   EventRecord,
+  FilesLibraryExportRequest,
+  FilesLibraryResponse,
   OnboardingBoard,
   OnboardingCompletionRequirement,
+  OnboardingDeliverableComment,
+  OnboardingAutomaticReminderResult,
+  OnboardingBulkReminderResult,
   OnboardingReminderDraft,
+  OnboardingReminderAutomationPolicy,
+  OnboardingTaskBatchResult,
   OrganizerCfpForm,
   OrganizerCfpFormSummary,
   OrganizerProposal,
   PortalOnboardingTask,
   ProposalReviewResponse,
   ProposalStatus,
+  ScorecardCriterionValue,
+  ReviewCriterionResult,
+  ReviewProgressReminderDraft,
+  ReviewProgressReminderPreview,
+  ReviewProgressReminderResult,
+  ReviewProgressReminderSendResult,
+  ReviewProgressResponse,
+  ReviewResultsResponse,
   ProposalListResponse,
   ProposalValidationError,
+  PublicEmbedConfig,
+  PublicEmbedConfigInput,
+  PublicEmbedResolveResponse,
   PublicProgramResponse,
   PublicProposal,
   ReviewerAssignment,
@@ -33,15 +59,23 @@ import type {
   ReviewerRoutingResponse,
   SessionPlacementPatch,
   SessionPlacementResponse,
+  SessionContentMutationResponse,
+  SessionContentPatch,
+  SessionContentWorkspaceResponse,
   SpeakerDirectoryCreateInput,
   SpeakerDirectoryMutation,
+  SpeakerSocialLinks,
   SpeakerCsvColumnMapping,
   SpeakerCsvImportApplyResult,
   SpeakerCsvImportPreview,
   SpeakerCsvResolution,
   SpeakerPortalSession,
   SubmissionAnswers,
+  SubmitterDraftSession,
   SubmitterEditSession,
+  SubmitterDashboardResponse,
+  SubmitterProposal,
+  SubmitterProposalDraft,
   UploadedAssetAnswer,
 } from "../shared/events";
 
@@ -341,6 +375,7 @@ export async function submitProposal(
   eventId: string,
   answers: SubmissionAnswers,
   form: Pick<CfpFormResponse["form"], "id" | "definitionVersion">,
+  draftId?: string,
 ): Promise<PublicProposal> {
   const response = await fetch(`/api/events/${eventId}/proposals`, {
     method: "POST",
@@ -349,6 +384,7 @@ export async function submitProposal(
       formId: form.id,
       formDefinitionVersion: form.definitionVersion,
       answers,
+      ...(draftId ? { draftId } : {}),
     }),
   });
   const body = await readJson<
@@ -360,6 +396,96 @@ export async function submitProposal(
   if (!response.ok || !("proposal" in body)) {
     throw new ApiError(
       "error" in body ? body.error : "Unable to submit proposal",
+      response.status,
+      body,
+    );
+  }
+  return body.proposal;
+}
+
+export async function saveProposalDraft(
+  eventId: string,
+  input: {
+    formId: string;
+    formDefinitionVersion: number;
+    answers: SubmissionAnswers;
+    expectedUpdatedAt?: string;
+  },
+  draftId?: string,
+): Promise<SubmitterProposalDraft> {
+  const response = await fetch(
+    draftId
+      ? `/api/events/${eventId}/submitter/drafts/${draftId}`
+      : `/api/events/${eventId}/submitter/drafts`,
+    {
+      method: draftId ? "PATCH" : "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  const body = await readJson<
+    | { draft: SubmitterProposalDraft }
+    | ProposalValidationError
+    | { error: string }
+  >(response);
+  if (response.status === 400 && body && "errors" in body) {
+    throw new ApiError("Validation failed", 400, body);
+  }
+  if (!response.ok || !("draft" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to save draft",
+      response.status,
+      body,
+    );
+  }
+  return body.draft;
+}
+
+export async function fetchSubmitterDraft(
+  eventId: string,
+  draftId: string,
+): Promise<SubmitterDraftSession> {
+  const response = await fetch(`/api/events/${eventId}/submitter/drafts/${draftId}`);
+  const body = await readJson<SubmitterDraftSession | { error: string }>(response);
+  if (!response.ok || !("draft" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to load draft",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function fetchSubmitterDashboard(
+  eventId: string,
+): Promise<SubmitterDashboardResponse> {
+  const response = await fetch(`/api/events/${eventId}/submitter/proposals`);
+  const body = await readJson<SubmitterDashboardResponse | { error: string }>(response);
+  if (!response.ok || !("proposals" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to load your proposals",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function claimSubmitterProposal(
+  eventId: string,
+  proposalId: string,
+): Promise<SubmitterProposal> {
+  const response = await fetch(
+    `/api/events/${eventId}/submitter/proposals/${proposalId}/claim`,
+    { method: "POST" },
+  );
+  const body = await readJson<{ proposal: SubmitterProposal } | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("proposal" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to claim proposal",
       response.status,
       body,
     );
@@ -393,7 +519,19 @@ export async function fetchProposals(
     query?: string;
     status?: ProposalStatus | "all";
     track?: string;
-    sort?: "newest" | "oldest" | "title-asc" | "speaker-asc";
+    roundId?: string;
+    sort?:
+      | "newest"
+      | "oldest"
+      | "title-asc"
+      | "title-desc"
+      | "track-asc"
+      | "track-desc"
+      | "status-asc"
+      | "status-desc"
+      | "speaker-asc"
+      | "aggregate-asc"
+      | "aggregate-desc";
   } = {},
 ): Promise<OrganizerProposal[]> {
   const params = new URLSearchParams();
@@ -402,6 +540,7 @@ export async function fetchProposals(
     params.set("status", options.status);
   }
   if (options.track) params.set("track", options.track);
+  if (options.roundId) params.set("roundId", options.roundId);
   if (options.sort && options.sort !== "newest") params.set("sort", options.sort);
   const suffix = params.size ? `?${params}` : "";
   const response = await fetch(`/api/events/${eventId}/proposals${suffix}`);
@@ -418,12 +557,31 @@ export async function fetchProposals(
   return body.proposals;
 }
 
+export async function fetchReviewResults(eventId: string): Promise<ReviewResultsResponse> {
+  const response = await fetch(`/api/events/${eventId}/review-results`);
+  const body = await readJson<ReviewResultsResponse | { error: string }>(response);
+  if (!response.ok || !("submissions" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to load review results",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export function reviewResultsCsvUrl(eventId: string): string {
+  return `/api/events/${eventId}/review-results.csv`;
+}
+
 export async function fetchOrganizerProposal(
   eventId: string,
   proposalId: string,
+  roundId?: string,
 ): Promise<ProposalReviewResponse> {
+  const params = roundId ? `?roundId=${encodeURIComponent(roundId)}` : "";
   const response = await fetch(
-    `/api/events/${eventId}/organizer/proposals/${proposalId}`,
+    `/api/events/${eventId}/organizer/proposals/${proposalId}${params}`,
   );
   const body = await readJson<ProposalReviewResponse | { error: string }>(response);
   if (!response.ok || !("proposal" in body)) {
@@ -443,6 +601,9 @@ export async function updateProposalReview(
     expectedVersion: number;
     status?: ProposalStatus;
     committeeNote?: string;
+    roundId?: string;
+    criteria?: ReviewCriterionResult[];
+    scorecardValues?: Record<string, ScorecardCriterionValue>;
   },
 ): Promise<ProposalReviewResponse> {
   const response = await fetch(
@@ -462,6 +623,302 @@ export async function updateProposalReview(
     );
   }
   return body;
+}
+
+export async function recuseProposalReview(
+  eventId: string,
+  proposalId: string,
+  input: { roundId: string; reason?: string },
+): Promise<ProposalReviewResponse> {
+  const response = await fetch(
+    `/api/events/${eventId}/organizer/proposals/${proposalId}/recusal`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  const body = await readJson<ProposalReviewResponse | { error: string }>(response);
+  if (!response.ok || !("proposal" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to record recusal",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export interface EvaluationPlanResponse {
+  plan: EvaluationPlan | null;
+  auditEvents: EvaluationPlanAuditEvent[];
+}
+
+export type EvaluationPlanRoundInput = {
+  id?: string;
+  name: string;
+  state?: EvaluationRoundState;
+  startsOn: string;
+  endsOn: string;
+  scorecardRef: string;
+  scorecard?: EvaluationScorecard;
+  reviewerPool: string[];
+  anonymization: "none" | "blind";
+};
+
+export async function fetchEvaluationPlan(eventId: string): Promise<EvaluationPlanResponse> {
+  const response = await fetch(`/api/events/${eventId}/evaluation-plan`);
+  const body = await readJson<EvaluationPlanResponse | { error: string }>(response);
+  if (!response.ok || !("plan" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to load evaluation plan",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function saveEvaluationPlan(
+  eventId: string,
+  input: { rounds: EvaluationPlanRoundInput[]; expectedVersion?: number; enabled?: boolean },
+): Promise<EvaluationPlanResponse> {
+  const response = await fetch(`/api/events/${eventId}/evaluation-plan`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<EvaluationPlanResponse | { error: string }>(response);
+  if (!response.ok || !("plan" in body) || !body.plan) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to save evaluation plan",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function setEvaluationPlanEnabled(
+  eventId: string,
+  input: { enabled: boolean; expectedVersion?: number },
+): Promise<EvaluationPlanResponse> {
+  const response = await fetch(`/api/events/${eventId}/evaluation-plan`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<EvaluationPlanResponse | { error: string }>(response);
+  if (!response.ok || !("plan" in body) || !body.plan) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to update evaluation plan",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function fetchEvaluationRoundAssignments(
+  eventId: string,
+  roundId: string,
+): Promise<EvaluationRoundAssignment[]> {
+  const response = await fetch(
+    `/api/events/${eventId}/evaluation-rounds/${encodeURIComponent(roundId)}/assignments`,
+  );
+  const body = await readJson<
+    { assignments: EvaluationRoundAssignment[] } | { error: string }
+  >(response);
+  if (!response.ok || !("assignments" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to load round assignments",
+      response.status,
+      body,
+    );
+  }
+  return body.assignments;
+}
+
+export async function setEvaluationRoundAssignment(
+  eventId: string,
+  roundId: string,
+  input: { proposalId: string; reviewerId: string; assigned: boolean },
+): Promise<EvaluationRoundAssignment[]> {
+  const response = await fetch(
+    `/api/events/${eventId}/evaluation-rounds/${encodeURIComponent(roundId)}/assignments`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  const body = await readJson<
+    { assignments: EvaluationRoundAssignment[] } | { error: string }
+  >(response);
+  if (!response.ok || !("assignments" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to update round assignment",
+      response.status,
+      body,
+    );
+  }
+  return body.assignments;
+}
+
+export async function previewEvaluationRoundDistribution(
+  eventId: string,
+  roundId: string,
+  input: {
+    trackIds?: string[];
+    reviewerIds?: string[];
+    maxAssignmentsPerReviewer?: number | null;
+  },
+): Promise<EvaluationRoundDistributionPreview> {
+  const response = await fetch(
+    `/api/events/${eventId}/evaluation-rounds/${encodeURIComponent(roundId)}/assignments/preview`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  const body = await readJson<
+    { preview: EvaluationRoundDistributionPreview } | { error: string }
+  >(response);
+  if (!response.ok || !("preview" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to preview round distribution",
+      response.status,
+      body,
+    );
+  }
+  return body.preview;
+}
+
+export async function distributeEvaluationRoundAssignments(
+  eventId: string,
+  roundId: string,
+  input: {
+    trackIds?: string[];
+    reviewerIds?: string[];
+    maxAssignmentsPerReviewer?: number | null;
+  },
+): Promise<{
+  preview: EvaluationRoundDistributionPreview;
+  assignments: EvaluationRoundAssignment[];
+}> {
+  const response = await fetch(
+    `/api/events/${eventId}/evaluation-rounds/${encodeURIComponent(roundId)}/assignments/distribute`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  const body = await readJson<
+    | {
+        preview: EvaluationRoundDistributionPreview;
+        assignments: EvaluationRoundAssignment[];
+      }
+    | { error: string }
+  >(response);
+  if (!response.ok || !("assignments" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to distribute round assignments",
+      response.status,
+      body,
+    );
+  }
+  return { preview: body.preview, assignments: body.assignments };
+}
+
+export async function fetchReviewProgress(
+  eventId: string,
+  roundId?: string | null,
+): Promise<ReviewProgressResponse> {
+  const params = roundId ? `?roundId=${encodeURIComponent(roundId)}` : "";
+  const response = await fetch(`/api/events/${eventId}/review-progress${params}`);
+  const body = await readJson<ReviewProgressResponse | { error: string }>(response);
+  if (!response.ok || !("reviewers" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to load review progress",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function previewReviewReminders(
+  eventId: string,
+  input: { roundId?: string | null; reviewerIds: string[] },
+): Promise<ReviewProgressReminderPreview> {
+  const response = await fetch(`/api/events/${eventId}/review-progress/reminders/preview`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<ReviewProgressReminderPreview | { error: string }>(response);
+  if (!response.ok || !("drafts" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to preview reviewer reminders",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function sendReviewReminders(
+  eventId: string,
+  input: {
+    roundId?: string | null;
+    idempotencyKey: string;
+    drafts: Array<Pick<ReviewProgressReminderDraft, "reviewerId" | "subject" | "bodyText">>;
+  },
+): Promise<ReviewProgressReminderSendResult> {
+  const response = await fetch(`/api/events/${eventId}/review-progress/reminders/send`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<ReviewProgressReminderSendResult | { error: string }>(response);
+  if (!response.ok || !("results" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to send reviewer reminders",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function retryReviewReminder(
+  eventId: string,
+  outboxId: string,
+): Promise<ReviewProgressReminderResult> {
+  const response = await fetch(
+    `/api/events/${eventId}/review-progress/reminders/${encodeURIComponent(outboxId)}/retry`,
+    { method: "POST" },
+  );
+  const body = await readJson<
+    | ({ outboxId: string } & Pick<ReviewProgressReminderResult, "status" | "error">)
+    | { error: string }
+  >(response);
+  if (!response.ok || !("outboxId" in body)) {
+    throw new ApiError(
+      !("outboxId" in body) ? body.error : "Unable to retry reviewer reminder",
+      response.status,
+      body,
+    );
+  }
+  return {
+    reviewerId: "",
+    toEmail: "",
+    outboxId: body.outboxId,
+    status: body.status,
+    error: body.error,
+  };
 }
 
 export async function fetchReviewerAssignments(
@@ -848,6 +1305,42 @@ export async function fetchOnboardingBoard(eventId: string): Promise<OnboardingB
   return body;
 }
 
+export async function fetchOnboardingFilesLibrary(eventId: string): Promise<FilesLibraryResponse> {
+  const response = await fetch(`/api/events/${eventId}/onboarding/files`);
+  const body = await readJson<FilesLibraryResponse | { error: string }>(response);
+  if (!response.ok || !("files" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to load files library",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function exportOnboardingFilesZip(
+  eventId: string,
+  input: FilesLibraryExportRequest,
+): Promise<{ blob: Blob; filename: string; fileCount: number }> {
+  const response = await fetch(`/api/events/${eventId}/onboarding/files/export`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const body: { error?: string } = await readJson<{ error?: string }>(response).catch(() => ({}));
+    throw new ApiError(body.error ?? "Unable to export files", response.status, body);
+  }
+  const disposition = response.headers.get("content-disposition") ?? "";
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? "deliverables.zip";
+  const count = Number(response.headers.get("x-chartstead-export-file-count") ?? "0");
+  return {
+    blob: await response.blob(),
+    filename,
+    fileCount: Number.isFinite(count) ? count : 0,
+  };
+}
+
 export async function createDirectorySpeaker(
   eventId: string,
   input: SpeakerDirectoryCreateInput,
@@ -871,7 +1364,13 @@ export async function createDirectorySpeaker(
 export async function updateDirectorySpeaker(
   eventId: string,
   speakerId: string,
-  patch: { name?: string; email?: string; biography?: string },
+  patch: {
+    name?: string;
+    email?: string;
+    biography?: string;
+    socialLinks?: SpeakerSocialLinks;
+    headshotAssetId?: string | null;
+  },
 ): Promise<OnboardingBoard["speakers"][number]> {
   const response = await fetch(`/api/events/${eventId}/speakers/${speakerId}`, {
     method: "PATCH",
@@ -884,6 +1383,129 @@ export async function updateDirectorySpeaker(
   if (!response.ok || !("speakerId" in body)) {
     throw new ApiError(
       "error" in body ? body.error : "Unable to update speaker",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+
+export async function uploadDirectorySpeakerHeadshot(
+  eventId: string,
+  speakerId: string,
+  file: File,
+): Promise<string> {
+  const start = await fetch(
+    `/api/events/${eventId}/speakers/${speakerId}/headshot-uploads`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        fileName: file.name,
+        mime: file.type || "application/octet-stream",
+        sizeBytes: file.size,
+      }),
+    },
+  );
+  const startBody = await readJson<{ upload: AssetUploadSession } | { error: string }>(start);
+  if (!start.ok || !("upload" in startBody)) {
+    throw new ApiError(
+      "error" in startBody ? startBody.error : "Unable to start headshot upload",
+      start.status,
+      startBody,
+    );
+  }
+  const upload = await fetch(startBody.upload.uploadUrl, {
+    method: "PUT",
+    headers: {
+      "content-type": file.type || "application/octet-stream",
+      "content-length": String(file.size),
+    },
+    body: file,
+  });
+  if (!upload.ok) {
+    throw new ApiError("Unable to upload headshot", upload.status);
+  }
+  return startBody.upload.assetId;
+}
+
+export async function addOrganizerDeliverableComment(
+  eventId: string,
+  assetId: string,
+  bodyText: string,
+): Promise<OnboardingDeliverableComment> {
+  const response = await fetch(
+    `/api/events/${eventId}/onboarding/assets/${assetId}/comments`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ body: bodyText }),
+    },
+  );
+  const body = await readJson<OnboardingDeliverableComment | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("id" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to add deliverable comment",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function addPortalDeliverableComment(
+  eventId: string,
+  token: string,
+  assetId: string,
+  bodyText: string,
+): Promise<OnboardingDeliverableComment> {
+  const response = await fetch(
+    `/api/events/${eventId}/portal/assets/${assetId}/comments?token=${encodeURIComponent(token)}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ body: bodyText }),
+    },
+  );
+  const body = await readJson<OnboardingDeliverableComment | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("id" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to add deliverable comment",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function updateSpeakerParticipation(
+  eventId: string,
+  speakerId: string,
+  patch: {
+    workflowStatus: "invited" | "confirmed" | "preparing" | "ready" | "withdrawn";
+    travelPreferences: string;
+    logistics: Record<string, string>;
+  },
+): Promise<OnboardingBoard["speakers"][number]> {
+  const response = await fetch(
+    `/api/events/${eventId}/speakers/${speakerId}/participation`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+  );
+  const body = await readJson<OnboardingBoard["speakers"][number] | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("speakerId" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to update event participation",
       response.status,
       body,
     );
@@ -972,6 +1594,38 @@ export async function createOnboardingTask(
   return body.task;
 }
 
+export async function createOnboardingTasks(
+  eventId: string,
+  input: {
+    speakerIds: string[];
+    title: string;
+    instructions: string;
+    kind: string;
+    completionRequirement: OnboardingCompletionRequirement;
+    readinessFlag?: string | null;
+    dueAt?: string | null;
+    idempotencyKey: string;
+  },
+): Promise<OnboardingTaskBatchResult> {
+  const response = await fetch(`/api/events/${eventId}/onboarding/tasks`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": input.idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<OnboardingTaskBatchResult | { error: string }>(response);
+  if (!response.ok || !("tasks" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to assign tasks",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
 export async function prepareOnboardingReminder(
   eventId: string,
   speakerId: string,
@@ -1047,6 +1701,92 @@ export async function sendOnboardingReminder(
   if (!response.ok || !("id" in body)) {
     throw new ApiError(
       "error" in body ? body.error : "Unable to send reminder",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function prepareBulkOnboardingReminders(
+  eventId: string,
+  input: {
+    speakerIds: string[];
+    mode: "draft" | "send";
+    idempotencyKey: string;
+  },
+): Promise<OnboardingBulkReminderResult> {
+  const response = await fetch(`/api/events/${eventId}/onboarding/reminders/bulk`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": input.idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<OnboardingBulkReminderResult | { error: string }>(response);
+  if (!response.ok || !("recipients" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to prepare bulk reminders",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function fetchOnboardingReminderPolicy(
+  eventId: string,
+): Promise<OnboardingReminderAutomationPolicy> {
+  const response = await fetch(`/api/events/${eventId}/onboarding/reminders/policy`);
+  const body = await readJson<{ policy: OnboardingReminderAutomationPolicy } | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("policy" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to load reminder policy",
+      response.status,
+      body,
+    );
+  }
+  return body.policy;
+}
+
+export async function updateOnboardingReminderPolicy(
+  eventId: string,
+  policy: Partial<OnboardingReminderAutomationPolicy>,
+): Promise<OnboardingReminderAutomationPolicy> {
+  const response = await fetch(`/api/events/${eventId}/onboarding/reminders/policy`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ policy }),
+  });
+  const body = await readJson<{ policy: OnboardingReminderAutomationPolicy } | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("policy" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to update reminder policy",
+      response.status,
+      body,
+    );
+  }
+  return body.policy;
+}
+
+export async function processDueOnboardingReminders(
+  eventId: string,
+): Promise<OnboardingAutomaticReminderResult> {
+  const response = await fetch(
+    `/api/events/${eventId}/onboarding/reminders/process-due`,
+    { method: "POST" },
+  );
+  const body = await readJson<OnboardingAutomaticReminderResult | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("recipients" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to process due reminders",
       response.status,
       body,
     );
@@ -1228,6 +1968,7 @@ export async function createCommunicationCourseCheck(
     subject?: string;
     bodyText?: string;
     bodyHtml?: string;
+    portalInvitation?: boolean;
     idempotencyKey: string;
   },
 ): Promise<CourseCheckPlan> {
@@ -1579,6 +2320,63 @@ export async function fetchAgenda(eventId: string): Promise<AgendaWorkspaceRespo
   return body;
 }
 
+export async function fetchSessionContentWorkspace(
+  eventId: string,
+): Promise<SessionContentWorkspaceResponse> {
+  const response = await fetch(`/api/events/${eventId}/session-content`);
+  const body = await readJson<SessionContentWorkspaceResponse | { error: string }>(response);
+  if (!response.ok || !("sessions" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to load session content",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function updateSessionContent(
+  eventId: string,
+  sessionId: string,
+  patch: SessionContentPatch,
+): Promise<SessionContentMutationResponse> {
+  const response = await fetch(`/api/events/${eventId}/session-content/${sessionId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  const body = await readJson<SessionContentMutationResponse | { error: string }>(response);
+  if (!response.ok || !("session" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to save session content",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function restoreSessionContent(
+  eventId: string,
+  sessionId: string,
+  input: { expectedVersion: number; restoreVersion: number },
+): Promise<SessionContentMutationResponse> {
+  const response = await fetch(`/api/events/${eventId}/session-content/${sessionId}/restore`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<SessionContentMutationResponse | { error: string }>(response);
+  if (!response.ok || !("session" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to restore session content",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
 export async function fetchPublicProgram(
   eventId: string,
   revisionId?: string,
@@ -1596,6 +2394,76 @@ export async function fetchPublicProgram(
   return body;
 }
 
+export async function fetchPublicEmbedConfigs(eventId: string): Promise<PublicEmbedConfig[]> {
+  const response = await fetch(`/api/events/${eventId}/embed-configs`);
+  const body = await readJson<{ configs: PublicEmbedConfig[] } | { error: string }>(response);
+  if (!response.ok || !("configs" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to load embed configurations",
+      response.status,
+      body,
+    );
+  }
+  return body.configs;
+}
+
+export async function createPublicEmbedConfig(
+  eventId: string,
+  input: PublicEmbedConfigInput,
+): Promise<PublicEmbedConfig> {
+  const response = await fetch(`/api/events/${eventId}/embed-configs`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<PublicEmbedConfig | { error: string }>(response);
+  if (!response.ok || !("embedCode" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to save embed configuration",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function updatePublicEmbedConfig(
+  eventId: string,
+  embedId: string,
+  input: Partial<PublicEmbedConfigInput>,
+): Promise<PublicEmbedConfig> {
+  const response = await fetch(`/api/events/${eventId}/embed-configs/${embedId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<PublicEmbedConfig | { error: string }>(response);
+  if (!response.ok || !("embedCode" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to update embed configuration",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function fetchPublicEmbed(
+  eventId: string,
+  embedId: string,
+): Promise<PublicEmbedResolveResponse> {
+  const response = await fetch(`/api/events/${eventId}/public-embeds/${embedId}`);
+  const body = await readJson<PublicEmbedResolveResponse | { error: string }>(response);
+  if (!response.ok || !("program" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to load public embed",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
 export function publicProgramCalendarUrl(
   eventId: string,
   sessionId: string,
@@ -1603,6 +2471,18 @@ export function publicProgramCalendarUrl(
 ): string {
   const params = revisionId ? `?revision=${encodeURIComponent(revisionId)}` : "";
   return `/api/events/${eventId}/program/sessions/${encodeURIComponent(sessionId)}/calendar.ics${params}`;
+}
+
+export function publicProgramCalendarExportUrl(
+  eventId: string,
+  sessionIds: string[],
+  revisionId: string,
+): string {
+  const params = new URLSearchParams({
+    sessionIds: sessionIds.join(","),
+    revision: revisionId,
+  });
+  return `/api/events/${eventId}/program/calendar.ics?${params.toString()}`;
 }
 
 export async function updateSessionPlacement(
@@ -1619,6 +2499,51 @@ export async function updateSessionPlacement(
   if (!response.ok || !("session" in body)) {
     throw new ApiError(
       "error" in body ? body.error : "Unable to update session placement",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function previewAgendaAutoPlace(
+  eventId: string,
+  input: { selectedSessionIds?: string[]; includeManual?: boolean },
+): Promise<AgendaAutoPlacePreview> {
+  const response = await fetch(`/api/events/${eventId}/agenda/auto-place/preview`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<AgendaAutoPlacePreview | { error: string }>(response);
+  if (!response.ok || !("previewId" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to preview auto-place",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function applyAgendaAutoPlace(
+  eventId: string,
+  input: {
+    previewId: string;
+    previewDigest: string;
+    agendaVersion: number;
+    idempotencyKey: string;
+  },
+): Promise<AgendaAutoPlaceApplyResponse> {
+  const response = await fetch(`/api/events/${eventId}/agenda/auto-place/apply`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await readJson<AgendaAutoPlaceApplyResponse | { error: string }>(response);
+  if (!response.ok || !("agenda" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to apply auto-place",
       response.status,
       body,
     );

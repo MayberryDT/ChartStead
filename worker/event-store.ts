@@ -78,18 +78,44 @@ import {
   COURSE_CHECK_DEMO_PRIOR_OUTBOX,
 } from "./seed-course-check-demo";
 import type {
+  AgendaAuditEvent,
+  AgendaAutoPlaceApplyResponse,
+  AgendaAutoPlaceLeftover,
+  AgendaAutoPlacePreview,
+  AgendaAutoPlaceProposal,
   AgendaWorkspaceResponse,
   CalendarIntentRecord,
   CoSpeakerInput,
   CfpPublicLifecycle,
+  EvaluationAnonymization,
+  EvaluationScorecard,
+  EvaluationScorecardCriterion,
+  EvaluationPlan,
+  EvaluationPlanAuditEvent,
+  EvaluationRound,
+  EvaluationRoundAccess,
+  EvaluationRoundAssignment,
+  EvaluationRoundDistributionPreview,
+  EvaluationRoundState,
   EventRecord,
+  FilesLibraryDueState,
+  FilesLibraryResponse,
   OnboardingBoard,
+  OnboardingAutomaticReminderResult,
+  OnboardingBulkReminderResult,
   OnboardingBoardSpeaker,
   OnboardingCompletionRequirement,
+  OnboardingFileConstraints,
   OnboardingHistoryEntry,
+  OnboardingReminderAutomationPolicy,
+  OnboardingReminderRecipientResult,
+  OnboardingDeliverableComment,
   OnboardingReminderDraft,
-  SpeakerDirectoryCreateInput,
+  OnboardingTaskAsset,
+  OnboardingTaskAssetVersion,
+  OnboardingTaskBatchResult,
   SpeakerDirectoryIdentityMatch,
+  SpeakerDirectoryCreateInput,
   SpeakerDirectoryMutation,
   SpeakerCsvColumnMapping,
   SpeakerCsvImportApplyResult,
@@ -101,14 +127,31 @@ import type {
   OrganizerCfpFormSummary,
   OrganizerProposal,
   OrganizerSession,
+  OrganizerTaskAttachment,
+  FilesLibraryItem,
   OutboxDeliveryStatus,
   OutboxMessage,
   OutboxMessageKind,
   PortalMessage,
   PortalOnboardingTask,
   ProposalAuditEvent,
+  ProposalScorecardReviewProjection,
+  ProposalReviewerRecusal,
   ProposalInput,
   ProposalStatus,
+  ScorecardAggregate,
+  ScorecardCriterionValue,
+  ReviewCompletionStatus,
+  ReviewCriterionResult,
+  ReviewEvidence,
+  ReviewResultsCriterion,
+  ReviewResultsResponse,
+  ReviewResultsSpeaker,
+  PublicEmbedConfig,
+  PublicEmbedConfigInput,
+  PublicEmbedFieldVisibility,
+  PublicEmbedTheme,
+  PublicEmbedWidget,
   PublicProgramEventSlice,
   PublicProgramResponse,
   PublicProgramRevisionMeta,
@@ -118,12 +161,44 @@ import type {
   ReminderDraftStatus,
   SessionPlacementPatch,
   SessionPlacementResponse,
+  SessionContentField,
+  SessionContentHistoryEntry,
+  SessionContentPatch,
+  SessionContentRecord,
+  SessionContentSnapshot,
+  SessionContentStatus,
+  SessionContentWorkspaceResponse,
   SpeakerPortalSession,
+  SpeakerSocialLinks,
+  SubmitterProposal,
+  SubmitterProposalDraft,
   SubmissionAnswers,
 } from "../shared/events";
+import { planAutoPlace } from "../shared/agenda-auto-place";
+import {
+  fileExtension,
+  isPreviewableOnboardingMime,
+  resolveOnboardingFileConstraints,
+  SPEAKER_HEADSHOT_MAX_BYTES,
+  SPEAKER_TASK_FILE_MAX_BYTES,
+} from "../shared/onboarding-tasks";
 import { toPortalFacingDeliveryStatus } from "../shared/portal-lifecycle";
 import {
+  EMPTY_SPEAKER_SOCIAL_LINKS,
+  normalizeSpeakerSocialLinks,
+  parseStoredSpeakerSocialLinks,
+  serializeSpeakerSocialLinks,
+} from "../shared/speaker-profile";
+import {
+  buildCombinedIcs,
   buildSessionIcs,
+  filterPublicSessions,
+  filterPublicSpeakers,
+  groupPublicSessionsByDay,
+  isPublicEmbedWidget,
+  normalizePublicEmbedFields,
+  normalizePublicEmbedTheme,
+  normalizePublicProgramFilters,
   selectValidPublicSubset,
 } from "../shared/public-program";
 import {
@@ -162,13 +237,28 @@ import {
 } from "./course-check/publication-planner";
 import { flushCommunicationEffects } from "./course-check/communication-delivery";
 import { createResendCommunicationSender } from "./email";
-import { createStableProposalId } from "./proposals";
+import {
+  createStableProposalId,
+  toSubmitterDashboardProposal,
+} from "./proposals";
 import type { AppBindings } from "./types";
 
 const DEFAULT_THEME_ACCENT = "#2f5d98";
 const THEME_ACCENT_PATTERN = /^#[0-9a-fA-F]{6}$/;
 const COMMUNICATION_SENDING_LEASE_MS = 2 * 60_000;
+const COMMUNICATION_DISPATCH_GRACE_MS = 1_000;
 const COMMUNICATION_CONFIG_RECHECK_MS = 5 * 60_000;
+const DEFAULT_ONBOARDING_REMINDER_POLICY: OnboardingReminderAutomationPolicy = {
+  enabled: false,
+  mode: "draft",
+  dueWindowDays: 0,
+  suppressWithinHours: 72,
+  unattendedSendAuthorized: false,
+  updatedAt: null,
+  updatedById: null,
+  updatedByName: null,
+};
+
 
 export class EventConfigurationError extends Error {
   constructor(
@@ -280,7 +370,7 @@ interface EventRow {
 }
 
 interface ProposalRow {
-  [key: string]: string | number;
+  [key: string]: string | number | null;
   id: string;
   form_id: string;
   form_definition_version: number;
@@ -304,6 +394,20 @@ interface ProposalRow {
   review_version: number;
   submitted_at: string;
   confirmation_email_status: string;
+  submitter_user_id: string | null;
+}
+
+interface ProposalDraftRow {
+  [key: string]: string | number | null;
+  id: string;
+  submitter_user_id: string;
+  form_id: string;
+  form_definition_version: number;
+  answers_json: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  submitted_proposal_id: string | null;
 }
 
 interface CourseCheckPlanRow {
@@ -351,12 +455,13 @@ interface SpeakerRow {
   name: string;
   email: string;
   biography: string;
+  social_links_json: string;
   headshot_asset_id: string | null;
   created_at: string;
 }
 
 interface OnboardingTaskRow {
-  [key: string]: string | null;
+  [key: string]: string | number | null;
   id: string;
   speaker_id: string;
   session_id: string | null;
@@ -373,6 +478,16 @@ interface OnboardingTaskRow {
   asset_id: string | null;
   completed_at: string | null;
   created_by: string;
+  file_accept_mime_types_json: string;
+  file_accept_extensions_json: string;
+  file_max_bytes: number;
+}
+
+interface OnboardingTaskBatchRow {
+  [key: string]: string;
+  idempotency_key: string;
+  response_json: string;
+  created_at: string;
 }
 
 interface ReminderDraftRow {
@@ -400,6 +515,7 @@ interface OnboardingHistoryRow {
   id: string;
   speaker_id: string;
   task_id: string | null;
+  asset_id: string | null;
   type: string;
   summary: string;
   actor_id: string;
@@ -407,9 +523,40 @@ interface OnboardingHistoryRow {
   created_at: string;
 }
 
-const HEADSHOT_MAX_BYTES = 5 * 1024 * 1024;
-const TASK_FILE_MAX_BYTES = 25 * 1024 * 1024;
+interface DeliverableVersionCommentRow {
+  [key: string]: string;
+  id: string;
+  asset_id: string;
+  body: string;
+  author_id: string;
+  author_name: string;
+  author_role: "organizer" | "speaker";
+  created_at: string;
+}
+
+function mapDeliverableComment(row: DeliverableVersionCommentRow): OnboardingDeliverableComment {
+  return {
+    id: row.id,
+    assetId: row.asset_id,
+    body: row.body,
+    author: {
+      id: row.author_id,
+      name: row.author_name,
+      role: row.author_role,
+    },
+    createdAt: row.created_at,
+  };
+}
+
+const HEADSHOT_MAX_BYTES = SPEAKER_HEADSHOT_MAX_BYTES;
+const TASK_FILE_MAX_BYTES = SPEAKER_TASK_FILE_MAX_BYTES;
 const HEADSHOT_MIME_TYPES = ["image/png", "image/jpeg", "image/webp"] as const;
+
+const PREVIEWABLE_MIME_PREFIXES = ["image/", "audio/", "video/"];
+
+function isPreviewableMime(mime: string): boolean {
+  return mime === "application/pdf" || PREVIEWABLE_MIME_PREFIXES.some((prefix) => mime.startsWith(prefix));
+}
 
 function defaultCompletionRequirement(kind: string): OnboardingCompletionRequirement {
   if (kind === "headshot" || kind === "slides" || kind === "employer_approval") {
@@ -425,15 +572,48 @@ function daysUntil(iso: string | null, nowMs: number): number | null {
   return Math.floor((due - nowMs) / (24 * 60 * 60 * 1000));
 }
 
+function fileTypeLabel(mime: string, fileName: string): string {
+  if (mime === "application/pdf") return "PDF";
+  if (mime.includes("presentation") || [".ppt", ".pptx"].includes(fileExtension(fileName))) return "Slides";
+  if (mime.includes("word") || [".doc", ".docx"].includes(fileExtension(fileName))) return "Document";
+  if (mime === "application/zip" || fileExtension(fileName) === ".zip") return "Archive";
+  if (mime.startsWith("image/")) return "Image";
+  if (mime.startsWith("video/")) return "Video";
+  if (mime.startsWith("audio/")) return "Audio";
+  return mime || "File";
+}
+
+function safeExportSegment(value: string | null | undefined, fallback: string): string {
+  const safe = (value ?? "")
+    .trim()
+    .replace(/[/\\]/g, " ")
+    .replace(/\0/g, "")
+    .replace(/\.\./g, "")
+    .replace(/[^a-zA-Z0-9._ -]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^\.+/, "")
+    .slice(0, 80);
+  return safe || fallback;
+}
+
+function deliverableDueState(task: Pick<OnboardingTaskRow, "due_at" | "completed_at">): FilesLibraryDueState {
+  if (!task.due_at) return "no-due-date";
+  const due = Date.parse(task.due_at);
+  const completed = Date.parse(task.completed_at ?? "");
+  if (!Number.isFinite(due) || !Number.isFinite(completed)) return "no-due-date";
+  return completed > due ? "late" : "on-time";
+}
+
 function mapPortalTask(
   row: OnboardingTaskRow,
-  asset: {
-    asset_id: string;
-    file_name: string;
-    mime: string;
-    size_bytes: number;
-  } | null,
+  asset: OnboardingTaskAsset | null,
 ): PortalOnboardingTask {
+  const fileConstraints =
+    row.completion_requirement === "file" ||
+    (!row.completion_requirement && defaultCompletionRequirement(row.kind) === "file")
+      ? resolveTaskFileConstraints(row)
+      : null;
   return {
     id: row.id,
     title: row.title,
@@ -444,16 +624,45 @@ function mapPortalTask(
     instructions: row.instructions ?? "",
     completionRequirement:
       row.completion_requirement || defaultCompletionRequirement(row.kind),
+    fileConstraints,
     readinessFlag: row.readiness_flag,
     asset: asset
       ? {
-          assetId: asset.asset_id,
-          fileName: asset.file_name,
+          assetId: asset.assetId,
+          version: asset.version,
+          isLatest: asset.isLatest,
+          versions: asset.versions,
+          comments: asset.comments,
+          fileName: asset.fileName,
           mime: asset.mime,
-          size: Number(asset.size_bytes),
+          size: asset.size,
+          uploadedAt: asset.uploadedAt,
         }
       : null,
     completedAt: row.completed_at,
+  };
+}
+
+function parseStringArray(value: string | null | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function resolveTaskFileConstraints(row: OnboardingTaskRow): OnboardingFileConstraints {
+  const fallback = resolveOnboardingFileConstraints(row.kind);
+  const mimeTypes = parseStringArray(row.file_accept_mime_types_json);
+  const extensions = parseStringArray(row.file_accept_extensions_json);
+  return {
+    maxBytes: Number(row.file_max_bytes) > 0 ? Number(row.file_max_bytes) : fallback.maxBytes,
+    acceptMimeTypes: mimeTypes.length > 0 ? mimeTypes : fallback.acceptMimeTypes,
+    acceptExtensions: extensions.length > 0 ? extensions : fallback.acceptExtensions,
   };
 }
 
@@ -484,11 +693,41 @@ function mapReminderDraft(row: ReminderDraftRow): OnboardingReminderDraft {
   };
 }
 
+function normalizeOnboardingReminderPolicy(
+  input: Partial<OnboardingReminderAutomationPolicy> | null | undefined,
+  previous: OnboardingReminderAutomationPolicy = DEFAULT_ONBOARDING_REMINDER_POLICY,
+): OnboardingReminderAutomationPolicy {
+  const dueWindowDays = Number(input?.dueWindowDays ?? previous.dueWindowDays);
+  const suppressWithinHours = Number(
+    input?.suppressWithinHours ?? previous.suppressWithinHours,
+  );
+  const unattendedSendAuthorized = Boolean(
+    input?.unattendedSendAuthorized ?? previous.unattendedSendAuthorized,
+  );
+  const mode = input?.mode === "send" && unattendedSendAuthorized ? "send" : "draft";
+  return {
+    enabled: Boolean(input?.enabled ?? previous.enabled),
+    mode,
+    dueWindowDays: Number.isFinite(dueWindowDays)
+      ? Math.max(0, Math.min(30, Math.floor(dueWindowDays)))
+      : previous.dueWindowDays,
+    suppressWithinHours: Number.isFinite(suppressWithinHours)
+      ? Math.max(1, Math.min(24 * 30, Math.floor(suppressWithinHours)))
+      : previous.suppressWithinHours,
+    unattendedSendAuthorized,
+    updatedAt: input?.updatedAt ?? previous.updatedAt,
+    updatedById: input?.updatedById ?? previous.updatedById,
+    updatedByName: input?.updatedByName ?? previous.updatedByName,
+  };
+}
+
+
 function mapOnboardingHistory(row: OnboardingHistoryRow): OnboardingHistoryEntry {
   return {
     id: row.id,
     speakerId: row.speaker_id,
     taskId: row.task_id,
+    assetId: row.asset_id,
     type: row.type,
     summary: row.summary,
     actorId: row.actor_id,
@@ -638,6 +877,7 @@ interface AssetRow {
   size_bytes: number;
   status: string;
   created_at: string;
+  completed_at: string | null;
   form_id: string;
   form_definition_version: number;
   question_name: string;
@@ -660,9 +900,10 @@ interface ProposalCountRow {
 }
 
 interface AuditEventRow {
-  [key: string]: string | number;
+  [key: string]: string | number | null;
   id: string;
   proposal_id: string;
+  review_round_id: string | null;
   type: string;
   actor_id: string;
   actor_name: string;
@@ -672,6 +913,75 @@ interface AuditEventRow {
   created_at: string;
 }
 
+interface ReviewEvidenceRow {
+  [key: string]: string | number | null;
+  proposal_id: string;
+  round_id: string;
+  reviewer_id: string;
+  reviewer_name: string;
+  recommendation: string;
+  completion_status: string;
+  aggregate_score: number | null;
+  criteria_json: string;
+  values_json: string;
+  completed_at: string | null;
+  updated_at: string;
+}
+
+interface EvaluationPlanRow {
+  [key: string]: string | number;
+  event_id: string;
+  enabled: number;
+  version: number;
+  updated_at: string;
+}
+
+interface EvaluationRoundRow {
+  [key: string]: string | number;
+  id: string;
+  name: string;
+  position: number;
+  state: string;
+  starts_on: string;
+  ends_on: string;
+  scorecard_ref: string;
+  scorecard_json: string;
+  anonymization: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface EvaluationAuditRow {
+  [key: string]: string | null;
+  id: string;
+  round_id: string | null;
+  action: string;
+  actor_id: string;
+  actor_name: string;
+  detail_json: string;
+  created_at: string;
+}
+
+interface EvaluationAssignmentRow {
+  [key: string]: string;
+  event_id: string;
+  round_id: string;
+  proposal_id: string;
+  reviewer_id: string;
+  created_at: string;
+}
+interface ProposalReviewRecusalRow {
+  [key: string]: string;
+  id: string;
+  proposal_id: string;
+  review_round_id: string;
+  reviewer_id: string;
+  reviewer_name: string;
+  reason: string;
+  created_at: string;
+}
+
+
 const SUBMISSION_LIMIT = 20;
 const UPLOAD_START_LIMIT = 40;
 const SUBMISSION_WINDOW_MS = 10 * 60 * 1_000;
@@ -679,7 +989,9 @@ const SUBMISSION_WINDOW_MS = 10 * 60 * 1_000;
 function mapProposal(row: ProposalRow, eventId: string): OrganizerProposal {
   let coSpeakers: CoSpeakerInput[] = [];
   try {
-    coSpeakers = JSON.parse(row.co_speakers_json || "[]") as CoSpeakerInput[];
+    coSpeakers = (JSON.parse(row.co_speakers_json || "[]") as CoSpeakerInput[]).map(
+      (speaker) => ({ ...speaker, role: speaker.role || "co-speaker" }),
+    );
   } catch {
     coSpeakers = [];
   }
@@ -759,6 +1071,9 @@ function mapProposal(row: ProposalRow, eventId: string): OrganizerProposal {
       emailStatus === "failed"
         ? emailStatus
         : null,
+    scorecardAggregate: null,
+    reviewerRecusal: null,
+    reviewerRecusals: [],
   };
 }
 
@@ -953,6 +1268,7 @@ function mapCourseCheckPlan(row: CourseCheckPlanRow, eventId: string): CourseChe
 
 const PROPOSAL_AUDIT_TYPES = new Set([
   "proposal.review.changed",
+  "proposal.review.recused",
   "course_check.decision.applied",
   "course_check.communication.drafts_created",
   "course_check.communication.send_started",
@@ -968,12 +1284,377 @@ function mapAuditEvent(row: AuditEventRow): ProposalAuditEvent {
   return {
     id: row.id,
     proposalId: row.proposal_id,
+    roundId: row.review_round_id ?? null,
     type,
     actorId: row.actor_id,
     actorName: row.actor_name,
     fromStatus: row.from_status as ProposalStatus,
     toStatus: row.to_status as ProposalStatus,
     committeeNoteChanged: Boolean(row.committee_note_changed),
+    createdAt: row.created_at,
+  };
+}
+
+function mapProposalReviewRecusal(row: ProposalReviewRecusalRow): ProposalReviewerRecusal {
+  return {
+    id: row.id,
+    proposalId: row.proposal_id,
+    roundId: row.review_round_id,
+    reviewerId: row.reviewer_id,
+    reviewerName: row.reviewer_name,
+    reason: row.reason,
+    createdAt: row.created_at,
+  };
+}
+
+function completionStatus(value: string): ReviewCompletionStatus {
+  if (value === "complete" || value === "incomplete") return value;
+  return "not_started";
+}
+
+function recommendationStatus(value: string): ProposalStatus {
+  return value === "approve" || value === "maybe" || value === "deny"
+    ? value
+    : "unreviewed";
+}
+
+const DEFAULT_SCORECARD: EvaluationScorecard = {
+  criteria: [
+    {
+      id: "overall",
+      type: "numeric",
+      label: "Overall score",
+      guidance: "Rate the proposal against this round's evaluation goals.",
+      required: true,
+      weight: 1,
+      maxScore: 5,
+      options: [],
+    },
+    {
+      id: "comments",
+      type: "text",
+      label: "Reviewer comments",
+      guidance: "Capture strengths, risks, or discussion notes for organizers.",
+      required: false,
+      weight: null,
+      maxScore: null,
+      options: [],
+    },
+  ],
+  calculationDescription:
+    "Weighted aggregate = scored criterion points divided by possible weighted points, shown on a 0–100 scale. Free-text criteria and unscored dropdown choices are excluded.",
+};
+
+function scorecardCalculationDescription(criteria: EvaluationScorecardCriterion[]): string {
+  const scored = criteria.filter((criterion) => (criterion.weight ?? 0) > 0);
+  if (scored.length === 0) {
+    return "This scorecard has no weighted criteria; aggregates remain unscored until weights are added.";
+  }
+  const weights = scored
+    .map((criterion) => `${criterion.label} × ${criterion.weight}`)
+    .join(" + ");
+  return `Weighted aggregate = (${weights}) normalized to 100. Missing scored values are excluded until the reviewer supplies them.`;
+}
+
+function normalizeScorecardId(value: string, fallback: string): string {
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return (normalized || fallback).slice(0, 80);
+}
+
+function normalizeScorecard(value: unknown, fallbackRef = "scorecard"): EvaluationScorecard {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return DEFAULT_SCORECARD;
+  }
+  const body = value as { criteria?: unknown; calculationDescription?: unknown };
+  const rawCriteria = Array.isArray(body.criteria) ? body.criteria : [];
+  const criteria = rawCriteria
+    .map((item, index): EvaluationScorecardCriterion | null => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+      const criterion = item as Record<string, unknown>;
+      const type =
+        criterion.type === "dropdown" || criterion.type === "text"
+          ? criterion.type
+          : "numeric";
+      const label =
+        typeof criterion.label === "string" && criterion.label.trim()
+          ? criterion.label.trim().slice(0, 160)
+          : `Criterion ${index + 1}`;
+      const id = normalizeScorecardId(
+        typeof criterion.id === "string" ? criterion.id : label,
+        `${fallbackRef}-${index + 1}`,
+      );
+      const options = Array.isArray(criterion.options)
+        ? criterion.options.flatMap((option, optionIndex) => {
+            if (!option || typeof option !== "object" || Array.isArray(option)) return [];
+            const raw = option as Record<string, unknown>;
+            const optionLabel =
+              typeof raw.label === "string" && raw.label.trim()
+                ? raw.label.trim().slice(0, 120)
+                : `Option ${optionIndex + 1}`;
+            return [{
+              id: normalizeScorecardId(
+                typeof raw.id === "string" ? raw.id : optionLabel,
+                `${id}-option-${optionIndex + 1}`,
+              ),
+              label: optionLabel,
+              score:
+                typeof raw.score === "number" && Number.isFinite(raw.score)
+                  ? Math.max(0, raw.score)
+                  : null,
+            }];
+          })
+        : [];
+      const rawWeight = criterion.weight;
+      const weight =
+        typeof rawWeight === "number" && Number.isFinite(rawWeight)
+          ? Math.max(0, rawWeight)
+          : null;
+      const rawMaxScore = criterion.maxScore;
+      const optionMax = Math.max(0, ...options.map((option) => option.score ?? 0));
+      const maxScore =
+        type === "text"
+          ? null
+          : typeof rawMaxScore === "number" && Number.isFinite(rawMaxScore) && rawMaxScore > 0
+            ? rawMaxScore
+            : type === "dropdown" && optionMax > 0
+              ? optionMax
+              : 5;
+      return {
+        id,
+        type,
+        label,
+        guidance:
+          typeof criterion.guidance === "string"
+            ? criterion.guidance.trim().slice(0, 500)
+            : "",
+        required: Boolean(criterion.required),
+        weight: type === "text" ? null : weight,
+        maxScore,
+        options: type === "dropdown" ? options : [],
+      };
+    })
+    .filter((criterion): criterion is EvaluationScorecardCriterion => Boolean(criterion));
+  const unique = new Map<string, EvaluationScorecardCriterion>();
+  for (const criterion of criteria.length > 0 ? criteria : DEFAULT_SCORECARD.criteria) {
+    unique.set(criterion.id, criterion);
+  }
+  const normalized = [...unique.values()];
+  return {
+    criteria: normalized,
+    calculationDescription:
+      typeof body.calculationDescription === "string" && body.calculationDescription.trim()
+        ? body.calculationDescription.trim().slice(0, 1000)
+        : scorecardCalculationDescription(normalized),
+  };
+}
+
+function parseScorecardJson(value: string, fallbackRef?: string): EvaluationScorecard {
+  try {
+    return normalizeScorecard(JSON.parse(value || "{}"), fallbackRef);
+  } catch {
+    return DEFAULT_SCORECARD;
+  }
+}
+
+function emptyScorecardValues(scorecard: EvaluationScorecard): Record<string, ScorecardCriterionValue> {
+  return Object.fromEntries(scorecard.criteria.map((criterion) => [criterion.id, null]));
+}
+
+function normalizeScorecardValues(
+  scorecard: EvaluationScorecard,
+  values: Record<string, unknown>,
+): Record<string, ScorecardCriterionValue> {
+  const next: Record<string, ScorecardCriterionValue> = {};
+  for (const criterion of scorecard.criteria) {
+    const value = values[criterion.id];
+    if (criterion.type === "numeric") {
+      next[criterion.id] =
+        typeof value === "number" && Number.isFinite(value)
+          ? Math.max(0, Math.min(criterion.maxScore ?? 5, value))
+          : null;
+    } else if (criterion.type === "dropdown") {
+      next[criterion.id] =
+        typeof value === "string" && criterion.options.some((option) => option.id === value)
+          ? value
+          : null;
+    } else {
+      next[criterion.id] =
+        typeof value === "string" && value.trim()
+          ? value.trim().slice(0, 10_000)
+          : null;
+    }
+  }
+  return next;
+}
+
+function scorecardRequiredComplete(
+  scorecard: EvaluationScorecard,
+  values: Record<string, ScorecardCriterionValue>,
+): boolean {
+  return scorecard.criteria.every((criterion) => {
+    if (!criterion.required) return true;
+    const value = values[criterion.id];
+    return value !== null && value !== "";
+  });
+}
+
+function scorecardCriteriaResults(
+  scorecard: EvaluationScorecard,
+  values: Record<string, ScorecardCriterionValue>,
+): ReviewCriterionResult[] {
+  return normalizeCriterionScores(
+    scorecard.criteria.flatMap((criterion) => {
+      const weight = criterion.weight ?? 0;
+      const maxScore = criterion.maxScore ?? 0;
+      if (weight <= 0 || maxScore <= 0) return [];
+      const rawValue = values[criterion.id];
+      let value: number | null = null;
+      if (criterion.type === "numeric" && typeof rawValue === "number") {
+        value = rawValue;
+      } else if (criterion.type === "dropdown" && typeof rawValue === "string") {
+        value = criterion.options.find((option) => option.id === rawValue)?.score ?? null;
+      }
+      if (value === null) return [];
+      const bounded = Math.max(0, Math.min(maxScore, value));
+      return [{
+        id: criterion.id,
+        label: criterion.label,
+        value: bounded,
+        maxScore,
+        weight,
+        weightedScore: bounded * weight,
+      }];
+    }),
+  );
+}
+
+function normalizeCriterionScores(criteria: ReviewCriterionResult[]): ReviewCriterionResult[] {
+  return criteria.map((criterion) => ({
+    ...criterion,
+    value: Number(criterion.value.toFixed(4)),
+    maxScore: Number(criterion.maxScore.toFixed(4)),
+    weight: Number(criterion.weight.toFixed(4)),
+    weightedScore: Number(criterion.weightedScore.toFixed(4)),
+  }));
+}
+
+function aggregateCriterionScores(criteria: ReviewCriterionResult[]): number | null {
+  const scored = criteria.filter(
+    (criterion) => criterion.maxScore > 0 && criterion.weight > 0,
+  );
+  if (scored.length === 0) return null;
+  const earned = scored.reduce(
+    (sum, criterion) => sum + criterion.value * criterion.weight,
+    0,
+  );
+  const possible = scored.reduce(
+    (sum, criterion) => sum + criterion.maxScore * criterion.weight,
+    0,
+  );
+  if (possible <= 0) return null;
+  return Number(((earned / possible) * 100).toFixed(2));
+}
+
+function mapReviewEvidence(row: ReviewEvidenceRow): ReviewEvidence {
+  let criteria: ReviewCriterionResult[] = [];
+  try {
+    const parsed = JSON.parse(row.criteria_json || "[]") as ReviewCriterionResult[];
+    criteria = Array.isArray(parsed) ? normalizeCriterionScores(parsed) : [];
+  } catch {
+    criteria = [];
+  }
+  let values: Record<string, ScorecardCriterionValue> = {};
+  try {
+    const parsed = JSON.parse(row.values_json || "{}") as Record<string, ScorecardCriterionValue>;
+    values = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    values = {};
+  }
+  return {
+    proposalId: row.proposal_id,
+    roundId: row.round_id || null,
+    reviewerId: row.reviewer_id,
+    reviewerName: row.reviewer_name,
+    recommendation: recommendationStatus(row.recommendation),
+    completionStatus: completionStatus(row.completion_status),
+    aggregateScore:
+      row.aggregate_score === null || row.aggregate_score === undefined
+        ? null
+        : Number(Number(row.aggregate_score).toFixed(2)),
+    criteria,
+    completedAt: row.completed_at ?? null,
+    updatedAt: row.updated_at,
+    values,
+  };
+}
+
+function proposalSpeakersForResults(proposal: OrganizerProposal): ReviewResultsSpeaker[] {
+  return [
+    {
+      name: proposal.speakerName,
+      email: proposal.speakerEmail,
+      role: "primary",
+    },
+    ...proposal.coSpeakers.map((speaker) => ({
+      name: speaker.name,
+      email: speaker.email,
+      role: speaker.role || "co-speaker",
+    })),
+  ];
+}
+
+
+function mapEvaluationRound(
+  row: EvaluationRoundRow,
+  reviewerPool: string[],
+): EvaluationRound {
+  const anonymization: EvaluationAnonymization =
+    row.anonymization === "blind" ? "blind" : "none";
+  return {
+    id: row.id,
+    name: row.name,
+    order: Number(row.position),
+    state: row.state as EvaluationRoundState,
+    startsOn: row.starts_on,
+    endsOn: row.ends_on,
+    scorecardRef: row.scorecard_ref,
+    scorecard: parseScorecardJson(row.scorecard_json, row.scorecard_ref),
+    anonymization,
+    anonymized: anonymization === "blind",
+    reviewerPool,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapEvaluationAuditEvent(row: EvaluationAuditRow): EvaluationPlanAuditEvent {
+  let detail: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(row.detail_json) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      detail = parsed as Record<string, unknown>;
+    }
+  } catch {
+    detail = {};
+  }
+  return {
+    id: row.id,
+    roundId: row.round_id,
+    action: row.action,
+    actorId: row.actor_id,
+    actorName: row.actor_name,
+    detail,
+    createdAt: row.created_at,
+  };
+}
+
+function mapEvaluationRoundAssignment(
+  row: EvaluationAssignmentRow,
+): EvaluationRoundAssignment {
+  return {
+    roundId: row.round_id,
+    proposalId: row.proposal_id,
+    reviewerId: row.reviewer_id,
     createdAt: row.created_at,
   };
 }
@@ -1098,11 +1779,31 @@ export class EventStore extends DurableObject<AppBindings> {
           supporting_file_json TEXT NOT NULL DEFAULT '',
           status TEXT NOT NULL DEFAULT 'unreviewed',
           committee_note TEXT NOT NULL DEFAULT '',
-          private_note TEXT NOT NULL DEFAULT '',
-          review_version INTEGER NOT NULL DEFAULT 0,
-          submitted_at TEXT NOT NULL,
-          confirmation_email_status TEXT NOT NULL DEFAULT ''
+           private_note TEXT NOT NULL DEFAULT '',
+           review_version INTEGER NOT NULL DEFAULT 0,
+           submitted_at TEXT NOT NULL,
+           confirmation_email_status TEXT NOT NULL DEFAULT '',
+           submitter_user_id TEXT
         )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS cfp_proposal_drafts (
+          id TEXT PRIMARY KEY,
+          submitter_user_id TEXT NOT NULL,
+          form_id TEXT NOT NULL,
+          form_definition_version INTEGER NOT NULL,
+          answers_json TEXT NOT NULL DEFAULT '{}',
+          title TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          submitted_proposal_id TEXT
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS cfp_proposal_drafts_submitter_idx
+        ON cfp_proposal_drafts (submitter_user_id, submitted_proposal_id, updated_at DESC)
       `);
 
       this.ctx.storage.sql.exec(`
@@ -1118,10 +1819,113 @@ export class EventStore extends DurableObject<AppBindings> {
           created_at TEXT NOT NULL
         )
       `);
+      this.ensureColumn("audit_events", "review_round_id", "TEXT");
 
       this.ctx.storage.sql.exec(`
         CREATE INDEX IF NOT EXISTS audit_events_proposal_created_idx
         ON audit_events (proposal_id, created_at DESC)
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS review_evidence (
+          proposal_id TEXT NOT NULL,
+          round_id TEXT NOT NULL DEFAULT '',
+          reviewer_id TEXT NOT NULL,
+          reviewer_name TEXT NOT NULL,
+          recommendation TEXT NOT NULL,
+          completion_status TEXT NOT NULL,
+          aggregate_score REAL,
+          criteria_json TEXT NOT NULL DEFAULT '[]',
+          completed_at TEXT,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (proposal_id, round_id, reviewer_id)
+        )
+      `);
+      this.ensureColumn("review_evidence", "values_json", "TEXT NOT NULL DEFAULT '{}'");
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS review_evidence_proposal_idx
+        ON review_evidence (proposal_id, updated_at DESC)
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS evaluation_plans (
+          event_id TEXT PRIMARY KEY,
+          enabled INTEGER NOT NULL,
+          version INTEGER NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS evaluation_rounds (
+          id TEXT PRIMARY KEY,
+          event_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          position INTEGER NOT NULL,
+          state TEXT NOT NULL,
+          starts_on TEXT NOT NULL,
+          ends_on TEXT NOT NULL,
+          scorecard_ref TEXT NOT NULL,
+          anonymization TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (event_id, position)
+        )
+      `);
+      this.ensureColumn(
+        "evaluation_rounds",
+        "scorecard_json",
+        `TEXT NOT NULL DEFAULT '${JSON.stringify(DEFAULT_SCORECARD).replaceAll("'", "''")}'`,
+      );
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS evaluation_round_reviewer_pools (
+          event_id TEXT NOT NULL,
+          round_id TEXT NOT NULL,
+          reviewer_id TEXT NOT NULL,
+          PRIMARY KEY (event_id, round_id, reviewer_id)
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS evaluation_round_assignments (
+          event_id TEXT NOT NULL,
+          round_id TEXT NOT NULL,
+          proposal_id TEXT NOT NULL,
+          reviewer_id TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (event_id, round_id, proposal_id, reviewer_id)
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS proposal_review_recusals (
+          id TEXT PRIMARY KEY,
+          event_id TEXT NOT NULL,
+          proposal_id TEXT NOT NULL,
+          review_round_id TEXT NOT NULL,
+          reviewer_id TEXT NOT NULL,
+          reviewer_name TEXT NOT NULL,
+          reason TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          UNIQUE (event_id, proposal_id, review_round_id, reviewer_id)
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS proposal_review_recusals_proposal_idx
+        ON proposal_review_recusals (event_id, proposal_id, review_round_id)
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS evaluation_plan_audit_events (
+          id TEXT PRIMARY KEY,
+          event_id TEXT NOT NULL,
+          round_id TEXT,
+          action TEXT NOT NULL,
+          actor_id TEXT NOT NULL,
+          actor_name TEXT NOT NULL,
+          detail_json TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS evaluation_plan_audit_event_created_idx
+        ON evaluation_plan_audit_events (event_id, created_at DESC)
       `);
 
       this.ctx.storage.sql.exec(`
@@ -1167,6 +1971,18 @@ export class EventStore extends DurableObject<AppBindings> {
       `);
 
       this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS deliverable_version_comments (
+          id TEXT PRIMARY KEY,
+          asset_id TEXT NOT NULL,
+          body TEXT NOT NULL,
+          author_id TEXT NOT NULL,
+          author_name TEXT NOT NULL,
+          author_role TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS edit_tokens (
           token_id TEXT PRIMARY KEY,
           proposal_id TEXT NOT NULL,
@@ -1189,7 +2005,8 @@ export class EventStore extends DurableObject<AppBindings> {
           form_definition_version INTEGER NOT NULL DEFAULT 0,
           question_name TEXT NOT NULL DEFAULT '',
           max_bytes INTEGER NOT NULL DEFAULT 0,
-          claimed_proposal_id TEXT
+          claimed_proposal_id TEXT,
+          completed_at TEXT
         )
       `);
 
@@ -1214,6 +2031,7 @@ export class EventStore extends DurableObject<AppBindings> {
           name TEXT NOT NULL,
           email TEXT NOT NULL UNIQUE,
           biography TEXT NOT NULL DEFAULT '',
+          social_links_json TEXT NOT NULL DEFAULT '{}',
           created_at TEXT NOT NULL
         )
       `);
@@ -1227,6 +2045,9 @@ export class EventStore extends DurableObject<AppBindings> {
           title_snapshot TEXT NOT NULL,
           organization_snapshot TEXT NOT NULL DEFAULT '',
           role TEXT NOT NULL,
+          workflow_status TEXT NOT NULL DEFAULT 'invited',
+          travel_preferences TEXT NOT NULL DEFAULT '',
+          logistics_json TEXT NOT NULL DEFAULT '{}',
           created_at TEXT NOT NULL
         )
       `);
@@ -1237,6 +2058,12 @@ export class EventStore extends DurableObject<AppBindings> {
           proposal_id TEXT,
           course_check_plan_id TEXT NOT NULL,
           title TEXT NOT NULL,
+          content_abstract TEXT NOT NULL DEFAULT '',
+          public_content TEXT NOT NULL DEFAULT '',
+          content_status TEXT NOT NULL DEFAULT 'approved',
+          content_version INTEGER NOT NULL DEFAULT 1,
+          content_updated_at TEXT,
+          content_updated_by_json TEXT,
           format TEXT NOT NULL DEFAULT '',
           track_id TEXT NOT NULL DEFAULT '',
           room_id TEXT,
@@ -1244,6 +2071,29 @@ export class EventStore extends DurableObject<AppBindings> {
           ends_at TEXT,
           created_at TEXT NOT NULL
         )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS session_content_history (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          version INTEGER NOT NULL,
+          title TEXT NOT NULL,
+          abstract TEXT NOT NULL,
+          public_content TEXT NOT NULL,
+          status TEXT NOT NULL,
+          changed_fields_json TEXT NOT NULL,
+          previous_json TEXT,
+          actor_id TEXT NOT NULL,
+          actor_name TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          change_kind TEXT NOT NULL,
+          UNIQUE (session_id, version)
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS session_content_history_session_idx
+        ON session_content_history (session_id, version DESC)
       `);
 
       this.ctx.storage.sql.exec(`
@@ -1257,6 +2107,264 @@ export class EventStore extends DurableObject<AppBindings> {
           starts_at TEXT,
           ends_at TEXT,
           status TEXT NOT NULL DEFAULT 'pending',
+          created_at TEXT NOT NULL
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS onboarding_tasks (
+          id TEXT PRIMARY KEY,
+          speaker_id TEXT NOT NULL,
+          session_id TEXT,
+          proposal_id TEXT,
+          course_check_plan_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'open',
+          due_at TEXT,
+          created_at TEXT NOT NULL,
+          instructions TEXT NOT NULL DEFAULT '',
+          completion_requirement TEXT NOT NULL DEFAULT 'manual',
+          readiness_flag TEXT,
+          asset_id TEXT,
+          completed_at TEXT,
+          created_by TEXT NOT NULL DEFAULT 'system',
+          file_accept_mime_types_json TEXT NOT NULL DEFAULT '',
+          file_accept_extensions_json TEXT NOT NULL DEFAULT '',
+          file_max_bytes INTEGER NOT NULL DEFAULT 0
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS onboarding_task_batches (
+          idempotency_key TEXT PRIMARY KEY,
+          response_json TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS portal_access_intents (
+          id TEXT PRIMARY KEY,
+          speaker_id TEXT NOT NULL,
+          email TEXT NOT NULL,
+          intent TEXT NOT NULL,
+          proposal_id TEXT,
+          course_check_plan_id TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS portal_tokens (
+          token_id TEXT PRIMARY KEY,
+          speaker_id TEXT NOT NULL,
+          proposal_id TEXT,
+          course_check_plan_id TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          revoked_at TEXT,
+          signed_token TEXT,
+          created_at TEXT NOT NULL
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS course_check_plans (
+          id TEXT PRIMARY KEY,
+          action_type TEXT NOT NULL,
+          state TEXT NOT NULL,
+          version INTEGER NOT NULL,
+          digest TEXT NOT NULL,
+          body_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          created_by_id TEXT NOT NULL,
+          created_by_name TEXT NOT NULL,
+          created_by_json TEXT,
+          approval_json TEXT,
+          receipt_id TEXT
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS course_check_idempotency (
+          command TEXT NOT NULL,
+          idempotency_key TEXT NOT NULL,
+          plan_id TEXT NOT NULL,
+          receipt_id TEXT,
+          response_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (command, idempotency_key)
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS course_check_receipts (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT NOT NULL,
+          plan_version INTEGER NOT NULL,
+          digest TEXT NOT NULL,
+          stage_id TEXT NOT NULL,
+          applied_at TEXT NOT NULL,
+          actor_id TEXT NOT NULL,
+          actor_name TEXT NOT NULL
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS course_check_plan_versions (
+          plan_id TEXT NOT NULL,
+          version INTEGER NOT NULL,
+          digest TEXT NOT NULL,
+          state TEXT NOT NULL,
+          body_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          created_by_id TEXT NOT NULL,
+          created_by_name TEXT NOT NULL,
+          mutation_kind TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          PRIMARY KEY (plan_id, version)
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS course_check_mutations (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT NOT NULL,
+          from_version INTEGER NOT NULL,
+          to_version INTEGER NOT NULL,
+          kind TEXT NOT NULL,
+          actor_id TEXT NOT NULL,
+          actor_name TEXT NOT NULL,
+          at TEXT NOT NULL,
+          summary TEXT NOT NULL
+        )
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS course_check_ux_events (
+          id TEXT PRIMARY KEY,
+          journey_id TEXT NOT NULL,
+          plan_id TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          action_type TEXT NOT NULL,
+          stage TEXT NOT NULL,
+          issue_class TEXT,
+          issue_action TEXT,
+          issue_count INTEGER NOT NULL,
+          affected_count INTEGER NOT NULL,
+          route_changes INTEGER NOT NULL,
+          duration_ms INTEGER,
+          outcome TEXT,
+          occurred_at TEXT NOT NULL
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS course_check_ux_journey_idx
+        ON course_check_ux_events (journey_id, occurred_at)
+      `);
+
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS course_check_follow_ups (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT NOT NULL,
+          proposal_id TEXT NOT NULL,
+          outcome TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          source_version INTEGER NOT NULL,
+          deferred_at TEXT NOT NULL,
+          deferred_by_id TEXT NOT NULL,
+          deferred_by_name TEXT NOT NULL,
+          status TEXT NOT NULL
+        )
+      `);
+      this.ensureColumn("course_check_plans", "created_by_json", "TEXT");
+      this.ensureColumn("course_check_receipts", "actor_json", "TEXT");
+      this.ensureColumn("course_check_plan_versions", "created_by_json", "TEXT");
+      this.ensureColumn("course_check_mutations", "actor_json", "TEXT");
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS communication_drafts (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT NOT NULL,
+          plan_version INTEGER NOT NULL,
+          group_id TEXT NOT NULL,
+          proposal_id TEXT,
+          session_id TEXT,
+          to_email TEXT NOT NULL,
+          recipient_name TEXT NOT NULL,
+          subject TEXT NOT NULL,
+          body_text TEXT NOT NULL,
+          body_html TEXT NOT NULL,
+          attachment_refs_json TEXT NOT NULL DEFAULT '[]',
+          calendar_intent_json TEXT,
+          status TEXT NOT NULL,
+          frozen_at TEXT,
+          frozen_payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS communication_drafts_plan_idx
+        ON communication_drafts (plan_id, plan_version)
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS communication_effects (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT NOT NULL,
+          plan_version INTEGER NOT NULL,
+          draft_id TEXT NOT NULL,
+          payload_identity TEXT NOT NULL,
+          to_email TEXT NOT NULL,
+          status TEXT NOT NULL,
+          provider_reference TEXT,
+          attempt_count INTEGER NOT NULL DEFAULT 0,
+          last_error TEXT,
+          next_attempt_at TEXT,
+          last_attempt_at TEXT,
+          succeeded_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (plan_id, draft_id)
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS communication_effects_due_idx
+        ON communication_effects (status, next_attempt_at, created_at)
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS agenda_auto_place_previews (
+          preview_digest TEXT PRIMARY KEY,
+          preview_id TEXT NOT NULL,
+          agenda_version INTEGER NOT NULL,
+          selected_session_ids_json TEXT NOT NULL,
+          include_manual INTEGER NOT NULL DEFAULT 0,
+          proposals_json TEXT NOT NULL,
+          leftovers_json TEXT NOT NULL,
+          conflicts_json TEXT NOT NULL,
+          assumptions_json TEXT NOT NULL,
+          manual_placement_preserved_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          created_by_id TEXT NOT NULL,
+          created_by_name TEXT NOT NULL,
+          applied_at TEXT
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS agenda_auto_place_applies (
+          idempotency_key TEXT PRIMARY KEY,
+          preview_digest TEXT NOT NULL,
+          response_json TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS agenda_audit_events (
+          id TEXT PRIMARY KEY,
+          type TEXT NOT NULL,
+          actor_id TEXT NOT NULL,
+          actor_name TEXT NOT NULL,
+          session_ids_json TEXT NOT NULL,
+          summary TEXT NOT NULL,
           created_at TEXT NOT NULL
         )
       `);
@@ -1467,6 +2575,7 @@ export class EventStore extends DurableObject<AppBindings> {
 
       this.ensureColumn("events", "submission_count", "INTEGER NOT NULL DEFAULT 0");
       this.ensureColumn("events", "timezone", "TEXT NOT NULL DEFAULT 'UTC'");
+      this.ensureColumn("events", "agenda_version", "INTEGER NOT NULL DEFAULT 0");
       this.ensureColumn(
         "events",
         "course_check_age_warning_hours",
@@ -1478,6 +2587,7 @@ export class EventStore extends DurableObject<AppBindings> {
         `INTEGER NOT NULL DEFAULT ${DEFAULT_DECISION_BATCH_LIMIT}`,
       );
       this.ensureColumn("events", "course_check_policy_json", "TEXT");
+      this.ensureColumn("events", "onboarding_reminder_policy_json", "TEXT");
       this.ensureColumn("course_check_plans", "stage_endorsements_json", "TEXT");
       this.ensureColumn("course_check_plans", "privacy_erased_at", "TEXT");
       this.ensureColumn("events", "unreviewed_count", "INTEGER NOT NULL DEFAULT 0");
@@ -1522,6 +2632,7 @@ export class EventStore extends DurableObject<AppBindings> {
       this.ensureColumn("assets", "question_name", "TEXT NOT NULL DEFAULT ''");
       this.ensureColumn("assets", "max_bytes", "INTEGER NOT NULL DEFAULT 0");
       this.ensureColumn("assets", "claimed_proposal_id", "TEXT");
+      this.ensureColumn("assets", "completed_at", "TEXT");
       this.ensureColumn(
         "outbox_messages",
         "attempt_count",
@@ -1529,6 +2640,8 @@ export class EventStore extends DurableObject<AppBindings> {
       );
       this.ensureColumn("outbox_messages", "next_attempt_at", "TEXT");
       this.ensureColumn("proposals", "program_outcome", "TEXT NOT NULL DEFAULT ''");
+      this.ensureColumn("proposals", "submitter_user_id", "TEXT");
+      this.ensureColumn("cfp_proposal_drafts", "submitted_proposal_id", "TEXT");
       this.ensureColumn("onboarding_tasks", "due_at", "TEXT");
       this.ensureColumn("portal_tokens", "signed_token", "TEXT");
       this.ensureColumn("sessions", "calendar_uid", "TEXT NOT NULL DEFAULT ''");
@@ -1542,8 +2655,20 @@ export class EventStore extends DurableObject<AppBindings> {
         "calendar_invite_recorded",
         "INTEGER NOT NULL DEFAULT 0",
       );
+      this.ensureColumn("sessions", "content_abstract", "TEXT NOT NULL DEFAULT ''");
+      this.ensureColumn("sessions", "public_content", "TEXT NOT NULL DEFAULT ''");
+      this.ensureColumn(
+        "sessions",
+        "content_status",
+        "TEXT NOT NULL DEFAULT 'approved'",
+      );
+      this.ensureColumn("sessions", "content_version", "INTEGER NOT NULL DEFAULT 1");
+      this.ensureColumn("sessions", "content_updated_at", "TEXT");
+      this.ensureColumn("sessions", "content_updated_by_json", "TEXT");
+      this.backfillSessionContentFields();
       this.backfillSessionCalendarUids();
       this.ensureColumn("speakers", "headshot_asset_id", "TEXT");
+      this.ensureColumn("speakers", "social_links_json", "TEXT NOT NULL DEFAULT '{}'");
       this.ensureColumn(
         "onboarding_tasks",
         "instructions",
@@ -1561,6 +2686,36 @@ export class EventStore extends DurableObject<AppBindings> {
         "onboarding_tasks",
         "created_by",
         "TEXT NOT NULL DEFAULT 'system'",
+      );
+      this.ensureColumn(
+        "event_participations",
+        "workflow_status",
+        "TEXT NOT NULL DEFAULT 'invited'",
+      );
+      this.ensureColumn(
+        "event_participations",
+        "travel_preferences",
+        "TEXT NOT NULL DEFAULT ''",
+      );
+      this.ensureColumn(
+        "event_participations",
+        "logistics_json",
+        "TEXT NOT NULL DEFAULT '{}'",
+      );
+      this.ensureColumn(
+        "onboarding_tasks",
+        "file_accept_mime_types_json",
+        "TEXT NOT NULL DEFAULT ''",
+      );
+      this.ensureColumn(
+        "onboarding_tasks",
+        "file_accept_extensions_json",
+        "TEXT NOT NULL DEFAULT ''",
+      );
+      this.ensureColumn(
+        "onboarding_tasks",
+        "file_max_bytes",
+        "INTEGER NOT NULL DEFAULT 0",
       );
       this.ensureColumn("assets", "owner_speaker_id", "TEXT");
       this.ensureColumn(
@@ -1593,6 +2748,7 @@ export class EventStore extends DurableObject<AppBindings> {
           id TEXT PRIMARY KEY,
           speaker_id TEXT NOT NULL,
           task_id TEXT,
+          asset_id TEXT,
           type TEXT NOT NULL,
           summary TEXT NOT NULL,
           actor_id TEXT NOT NULL,
@@ -1603,6 +2759,26 @@ export class EventStore extends DurableObject<AppBindings> {
       this.ctx.storage.sql.exec(`
         CREATE INDEX IF NOT EXISTS onboarding_history_speaker_created_idx
         ON onboarding_history (speaker_id, created_at DESC)
+      `);
+      this.ensureColumn("onboarding_history", "asset_id", "TEXT");
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS public_embed_configs (
+          id TEXT PRIMARY KEY,
+          event_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          widget TEXT NOT NULL,
+          theme TEXT NOT NULL,
+          filters_json TEXT NOT NULL,
+          fields_json TEXT NOT NULL,
+          revision_id TEXT,
+          disabled INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS public_embed_configs_updated_idx
+        ON public_embed_configs (updated_at DESC)
       `);
       this.ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS speaker_imports (
@@ -2795,6 +3971,9 @@ export class EventStore extends DurableObject<AppBindings> {
     answers: SubmissionAnswers;
     normalized: ProposalInput;
     assetClaims?: AssetClaimInput[];
+    submitterUserId?: string | null;
+    assetClaimOwnerId?: string | null;
+    submittedDraft?: { id: string; userId: string } | null;
   }): ProposalWriteResult {
     const event = this.getEvent();
     if (!event) {
@@ -2832,17 +4011,19 @@ export class EventStore extends DurableObject<AppBindings> {
         formId,
         formDefinitionVersion,
         mode: "create",
+        allowedExistingClaimId: input.assetClaimOwnerId ?? null,
       });
       if (claimErrors) return;
 
       this.ctx.storage.sql.exec(
         `INSERT INTO proposals (
           id, form_id, form_definition_version, answers_json, title, abstract,
-          track_id, track_name, speaker_name, speaker_email,
-          biography, supporting_link, session_format, workshop_duration,
-          co_speakers_json, supporting_file_json, status, committee_note,
-          private_note, review_version, submitted_at, confirmation_email_status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unreviewed', '', '', 0, ?, '')`,
+           track_id, track_name, speaker_name, speaker_email,
+           biography, supporting_link, session_format, workshop_duration,
+           co_speakers_json, supporting_file_json, status, committee_note,
+           private_note, review_version, submitted_at, confirmation_email_status,
+           submitter_user_id
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unreviewed', '', '', 0, ?, '', ?)`,
         id,
         formId,
         formDefinitionVersion,
@@ -2857,10 +4038,35 @@ export class EventStore extends DurableObject<AppBindings> {
         normalized.supportingLink.trim(),
         (normalized.sessionFormat ?? "").trim(),
         (normalized.workshopDuration ?? "").trim(),
-        JSON.stringify(normalized.coSpeakers ?? []),
-        normalized.supportingFile ? JSON.stringify(normalized.supportingFile) : "",
-        submittedAt,
-      );
+         JSON.stringify(normalized.coSpeakers ?? []),
+         normalized.supportingFile ? JSON.stringify(normalized.supportingFile) : "",
+         submittedAt,
+         input.submitterUserId ?? null,
+       );
+      if (input.submittedDraft) {
+        const submitted = this.ctx.storage.sql.exec(
+          `UPDATE cfp_proposal_drafts
+           SET submitted_proposal_id = ?, updated_at = ?
+           WHERE id = ?
+             AND submitter_user_id = ?
+             AND submitted_proposal_id IS NULL`,
+          id,
+          submittedAt,
+          input.submittedDraft.id,
+          input.submittedDraft.userId,
+        );
+        if (submitted.rowsWritten === 0) {
+          throw new DraftConflictError(
+            "Draft was already submitted. Refresh your dashboard.",
+          );
+        }
+        this.ctx.storage.sql.exec(
+          `UPDATE assets
+           SET claimed_proposal_id = NULL, status = 'abandoned'
+           WHERE claimed_proposal_id = ?`,
+          draftAssetOwnerId(input.submittedDraft.id),
+        );
+      }
       this.ctx.storage.sql.exec(
         `UPDATE events
          SET submission_count = submission_count + 1,
@@ -2982,11 +4188,305 @@ export class EventStore extends DurableObject<AppBindings> {
     return row ? mapProposal(row, event.id) : null;
   }
 
+  listSubmitterProposals(userId: string, email: string): SubmitterProposal[] {
+    const event = this.getEvent();
+    if (!event) return [];
+    const rows = this.ctx.storage.sql
+      .exec<ProposalRow>(
+        `SELECT id, form_id, form_definition_version, answers_json, title, abstract,
+                track_id, track_name, speaker_name, speaker_email, biography,
+                supporting_link, session_format, workshop_duration, co_speakers_json,
+                supporting_file_json, status, program_outcome, committee_note, private_note,
+                review_version, submitted_at, confirmation_email_status, submitter_user_id
+         FROM proposals
+         WHERE submitter_user_id = ?
+            OR (submitter_user_id IS NULL AND lower(speaker_email) = lower(?))
+         ORDER BY submitted_at DESC, id DESC`,
+        userId,
+        email.trim(),
+      )
+      .toArray();
+
+    return rows.map((row) => {
+      const proposal = mapProposal(row, event.id);
+      const claimed = row.submitter_user_id === userId;
+      return toSubmitterDashboardProposal(proposal, {
+        claimed,
+        claimable: !claimed && row.submitter_user_id === null,
+      });
+    });
+  }
+
+  private projectSubmitterDraft(
+    row: ProposalDraftRow,
+    event: EventRecord,
+  ): SubmitterProposalDraft {
+    const form = this.getFormVersion(row.form_id, Number(row.form_definition_version));
+    const latest = this.getPublishedForm(row.form_id);
+    const evaluatedAt = new Date().toISOString();
+    const lifecycle =
+      this.getFormLifecycle(row.form_id, event.timezone, evaluatedAt) ?? {
+        state: "closed" as const,
+        reason: "manual_close" as const,
+        opensAt: null,
+        closesAt: null,
+        deadlineAt: null,
+        timezone: event.timezone,
+        evaluatedAt,
+      };
+    const latestFormDefinitionVersion = latest?.definitionVersion ?? null;
+    return {
+      id: row.id,
+      eventId: event.id,
+      title: row.title || "Untitled draft",
+      formId: row.form_id,
+      formName: form?.name ?? latest?.name ?? row.form_id,
+      formDefinitionVersion: Number(row.form_definition_version),
+      latestFormDefinitionVersion,
+      formVersionStale:
+        latestFormDefinitionVersion != null &&
+        latestFormDefinitionVersion !== Number(row.form_definition_version),
+      lifecycle,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  listSubmitterDrafts(userId: string): SubmitterProposalDraft[] {
+    const event = this.getEvent();
+    if (!event) return [];
+    return this.ctx.storage.sql
+      .exec<ProposalDraftRow>(
+        `SELECT id, submitter_user_id, form_id, form_definition_version, answers_json,
+                title, created_at, updated_at, submitted_proposal_id
+         FROM cfp_proposal_drafts
+         WHERE submitter_user_id = ?
+           AND submitted_proposal_id IS NULL
+         ORDER BY updated_at DESC, id DESC`,
+        userId,
+      )
+      .toArray()
+      .map((row) => this.projectSubmitterDraft(row, event));
+  }
+
+  getSubmitterDraft(input: {
+    draftId: string;
+    userId: string;
+  }): {
+    draft: SubmitterProposalDraft;
+    answers: SubmissionAnswers;
+    submittedProposalId: string | null;
+  } | null {
+    const event = this.getEvent();
+    if (!event) return null;
+    const row = this.ctx.storage.sql
+      .exec<ProposalDraftRow>(
+        `SELECT id, submitter_user_id, form_id, form_definition_version, answers_json,
+                title, created_at, updated_at, submitted_proposal_id
+         FROM cfp_proposal_drafts
+         WHERE id = ? AND submitter_user_id = ?
+         LIMIT 1`,
+        input.draftId,
+        input.userId,
+      )
+      .toArray()[0];
+    if (!row) return null;
+    return {
+      draft: this.projectSubmitterDraft(row, event),
+      answers: JSON.parse(row.answers_json || "{}") as SubmissionAnswers,
+      submittedProposalId: row.submitted_proposal_id,
+    };
+  }
+
+  saveSubmitterDraft(input: {
+    draftId?: string;
+    userId: string;
+    formId: string;
+    formDefinitionVersion: number;
+    answers: SubmissionAnswers;
+    title: string;
+    assetClaims?: AssetClaimInput[];
+    expectedUpdatedAt?: string;
+  }): ProposalDraftWriteResult | null {
+    const event = this.getEvent();
+    if (!event) throw new Error("Event is not initialized.");
+    const draftId = input.draftId ?? createDraftId();
+    const ownerId = draftAssetOwnerId(draftId);
+    const existing = input.draftId
+      ? this.ctx.storage.sql
+          .exec<ProposalDraftRow>(
+            `SELECT id, submitter_user_id, form_id, form_definition_version, answers_json,
+                    title, created_at, updated_at, submitted_proposal_id
+             FROM cfp_proposal_drafts
+             WHERE id = ? AND submitter_user_id = ? AND submitted_proposal_id IS NULL
+             LIMIT 1`,
+            input.draftId,
+            input.userId,
+          )
+          .toArray()[0]
+      : null;
+    if (input.draftId && !existing) return null;
+    if (
+      existing &&
+      input.expectedUpdatedAt != null &&
+      existing.updated_at !== input.expectedUpdatedAt
+    ) {
+      return {
+        ok: false,
+        conflict: "Draft changed since you last loaded it. Reload and try again.",
+      };
+    }
+
+    const now = new Date().toISOString();
+    let claimErrors: Record<string, string> | null = null;
+    let conflictMessage: string | null = null;
+    this.ctx.storage.transactionSync(() => {
+      claimErrors = this.claimAssets({
+        claims: input.assetClaims ?? [],
+        proposalId: ownerId,
+        formId: input.formId,
+        formDefinitionVersion: input.formDefinitionVersion,
+        mode: "update",
+      });
+      if (claimErrors) return;
+      if (existing) {
+        if (input.expectedUpdatedAt != null) {
+          const updated = this.ctx.storage.sql.exec(
+            `UPDATE cfp_proposal_drafts
+             SET form_id = ?, form_definition_version = ?, answers_json = ?,
+                 title = ?, updated_at = ?
+             WHERE id = ?
+               AND submitter_user_id = ?
+               AND updated_at = ?
+               AND submitted_proposal_id IS NULL`,
+            input.formId,
+            input.formDefinitionVersion,
+            JSON.stringify(input.answers ?? {}),
+            input.title.trim(),
+            now,
+            draftId,
+            input.userId,
+            input.expectedUpdatedAt,
+          );
+          if (updated.rowsWritten === 0) {
+            conflictMessage =
+              "Draft changed since you last loaded it. Reload and try again.";
+            return;
+          }
+        } else {
+          this.ctx.storage.sql.exec(
+            `UPDATE cfp_proposal_drafts
+             SET form_id = ?, form_definition_version = ?, answers_json = ?,
+                 title = ?, updated_at = ?
+             WHERE id = ?
+               AND submitter_user_id = ?
+               AND submitted_proposal_id IS NULL`,
+            input.formId,
+            input.formDefinitionVersion,
+            JSON.stringify(input.answers ?? {}),
+            input.title.trim(),
+            now,
+            draftId,
+            input.userId,
+          );
+        }
+      } else {
+        this.ctx.storage.sql.exec(
+          `INSERT INTO cfp_proposal_drafts
+            (id, submitter_user_id, form_id, form_definition_version, answers_json,
+             title, created_at, updated_at, submitted_proposal_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+          draftId,
+          input.userId,
+          input.formId,
+          input.formDefinitionVersion,
+          JSON.stringify(input.answers ?? {}),
+          input.title.trim(),
+          now,
+          now,
+        );
+      }
+    });
+    if (claimErrors) return { ok: false, errors: claimErrors };
+    if (conflictMessage) return { ok: false, conflict: conflictMessage };
+    const saved = this.getSubmitterDraft({ draftId, userId: input.userId });
+    if (!saved) throw new Error(`Draft ${draftId} was not persisted.`);
+    return { ok: true, draft: saved.draft, answers: saved.answers };
+  }
+
+  claimSubmitterProposal(input: {
+    proposalId: string;
+    userId: string;
+    email: string;
+  }): SubmitterProposal | null {
+    const event = this.getEvent();
+    if (!event) return null;
+    const existing = this.ctx.storage.sql
+      .exec<ProposalRow>(
+        `SELECT id, form_id, form_definition_version, answers_json, title, abstract,
+                track_id, track_name, speaker_name, speaker_email, biography,
+                supporting_link, session_format, workshop_duration, co_speakers_json,
+                supporting_file_json, status, program_outcome, committee_note, private_note,
+                review_version, submitted_at, confirmation_email_status, submitter_user_id
+         FROM proposals WHERE id = ? LIMIT 1`,
+        input.proposalId,
+      )
+      .toArray()[0];
+    if (!existing) return null;
+    if (existing.submitter_user_id && existing.submitter_user_id !== input.userId) {
+      return null;
+    }
+    if (
+      !existing.submitter_user_id &&
+      existing.speaker_email.trim().toLowerCase() !== input.email.trim().toLowerCase()
+    ) {
+      return null;
+    }
+
+    this.ctx.storage.sql.exec(
+      `UPDATE proposals
+       SET submitter_user_id = ?
+       WHERE id = ? AND submitter_user_id IS NULL`,
+      input.userId,
+      input.proposalId,
+    );
+    const row = this.ctx.storage.sql
+      .exec<ProposalRow>(
+        `SELECT id, form_id, form_definition_version, answers_json, title, abstract,
+                track_id, track_name, speaker_name, speaker_email, biography,
+                supporting_link, session_format, workshop_duration, co_speakers_json,
+                supporting_file_json, status, program_outcome, committee_note, private_note,
+                review_version, submitted_at, confirmation_email_status, submitter_user_id
+         FROM proposals WHERE id = ? AND submitter_user_id = ? LIMIT 1`,
+        input.proposalId,
+        input.userId,
+      )
+      .toArray()[0];
+    if (!row) return null;
+    return toSubmitterDashboardProposal(mapProposal(row, event.id), {
+      claimed: true,
+      claimable: false,
+    });
+  }
+
   listProposals(input: string | {
     query?: string;
     status?: ProposalStatus;
     trackIds?: string[];
-    sort?: "newest" | "oldest" | "title-asc" | "speaker-asc";
+    proposalIds?: string[];
+    roundId?: string;
+    sort?:
+      | "newest"
+      | "oldest"
+      | "title-asc"
+      | "title-desc"
+      | "track-asc"
+      | "track-desc"
+      | "status-asc"
+      | "status-desc"
+      | "speaker-asc"
+      | "aggregate-asc"
+      | "aggregate-desc";
   } = ""): OrganizerProposal[] {
     const event = this.getEvent();
     if (!event) return [];
@@ -3009,6 +4509,10 @@ export class EventStore extends DurableObject<AppBindings> {
       const allowedTracks = new Set(options.trackIds);
       proposals = proposals.filter((proposal) => allowedTracks.has(proposal.trackId));
     }
+    if (options.proposalIds) {
+      const allowedProposals = new Set(options.proposalIds);
+      proposals = proposals.filter((proposal) => allowedProposals.has(proposal.id));
+    }
     if (options.status) {
       proposals = proposals.filter((proposal) => proposal.status === options.status);
     }
@@ -3024,6 +4528,26 @@ export class EventStore extends DurableObject<AppBindings> {
         .toLowerCase();
       return hay.includes(needle);
     });
+    if (options.roundId) {
+      proposals = proposals.map((proposal) => ({
+        ...proposal,
+        scorecardAggregate: this.getScorecardAggregate(proposal.id, options.roundId!),
+      }));
+    }
+    if (options.sort === "aggregate-asc" || options.sort === "aggregate-desc") {
+      proposals.sort((left, right) => {
+        const leftScore = left.scorecardAggregate?.aggregateScore;
+        const rightScore = right.scorecardAggregate?.aggregateScore;
+        if (leftScore === null || leftScore === undefined) {
+          return rightScore === null || rightScore === undefined ? left.id.localeCompare(right.id) : 1;
+        }
+        if (rightScore === null || rightScore === undefined) return -1;
+        return options.sort === "aggregate-asc"
+          ? leftScore - rightScore || left.id.localeCompare(right.id)
+          : rightScore - leftScore || left.id.localeCompare(right.id);
+      });
+      return proposals;
+    }
     if (options.sort === "oldest") {
       proposals.sort((left, right) =>
         left.submittedAt.localeCompare(right.submittedAt) || left.id.localeCompare(right.id),
@@ -3031,6 +4555,26 @@ export class EventStore extends DurableObject<AppBindings> {
     } else if (options.sort === "title-asc") {
       proposals.sort((left, right) =>
         left.title.localeCompare(right.title) || left.id.localeCompare(right.id),
+      );
+    } else if (options.sort === "title-desc") {
+      proposals.sort((left, right) =>
+        right.title.localeCompare(left.title) || left.id.localeCompare(right.id),
+      );
+    } else if (options.sort === "track-asc") {
+      proposals.sort((left, right) =>
+        left.trackName.localeCompare(right.trackName) || left.id.localeCompare(right.id),
+      );
+    } else if (options.sort === "track-desc") {
+      proposals.sort((left, right) =>
+        right.trackName.localeCompare(left.trackName) || left.id.localeCompare(right.id),
+      );
+    } else if (options.sort === "status-asc") {
+      proposals.sort((left, right) =>
+        left.status.localeCompare(right.status) || left.id.localeCompare(right.id),
+      );
+    } else if (options.sort === "status-desc") {
+      proposals.sort((left, right) =>
+        right.status.localeCompare(left.status) || left.id.localeCompare(right.id),
       );
     } else if (options.sort === "speaker-asc") {
       proposals.sort((left, right) =>
@@ -3040,11 +4584,730 @@ export class EventStore extends DurableObject<AppBindings> {
     return proposals;
   }
 
+  getEvaluationPlan(): EvaluationPlan | null {
+    const event = this.getEvent();
+    if (!event) return null;
+    const plan = this.ctx.storage.sql
+      .exec<EvaluationPlanRow>(
+        `SELECT event_id, enabled, version, updated_at
+         FROM evaluation_plans WHERE event_id = ?`,
+        event.id,
+      )
+      .toArray()[0];
+    if (!plan) return null;
+
+    const poolRows = this.ctx.storage.sql
+      .exec<{ round_id: string; reviewer_id: string }>(
+        `SELECT round_id, reviewer_id FROM evaluation_round_reviewer_pools
+         WHERE event_id = ? ORDER BY round_id, reviewer_id`,
+        event.id,
+      )
+      .toArray();
+    const pools = new Map<string, string[]>();
+    for (const row of poolRows) {
+      const pool = pools.get(row.round_id) ?? [];
+      pool.push(row.reviewer_id);
+      pools.set(row.round_id, pool);
+    }
+    const rounds = this.ctx.storage.sql
+      .exec<EvaluationRoundRow>(
+        `SELECT id, name, position, state, starts_on, ends_on, scorecard_ref,
+                scorecard_json, anonymization, created_at, updated_at
+         FROM evaluation_rounds WHERE event_id = ?
+         ORDER BY position ASC, id ASC`,
+        event.id,
+      )
+      .toArray()
+      .map((row) => mapEvaluationRound(row, pools.get(row.id) ?? []));
+    return {
+      eventId: plan.event_id,
+      enabled: Boolean(plan.enabled),
+      version: Number(plan.version),
+      rounds,
+      updatedAt: plan.updated_at,
+    };
+  }
+
+  saveEvaluationPlan(input: {
+    rounds: Array<{
+      id?: string;
+      name: string;
+      state?: EvaluationRoundState;
+      startsOn: string;
+      endsOn: string;
+      scorecardRef: string;
+      scorecard?: EvaluationScorecard;
+      anonymization?: EvaluationAnonymization;
+      reviewerPool: string[];
+    }>;
+    expectedVersion?: number;
+    enabled?: boolean;
+    actorId: string;
+    actorName: string;
+  }): EvaluationPlan {
+    const event = this.getEvent();
+    if (!event) throw new Error("Event is not initialized.");
+    if (input.rounds.length < 2) {
+      throw new Error("An advanced evaluation plan needs at least two rounds.");
+    }
+    const ids = new Set<string>();
+    for (const round of input.rounds) {
+      const id = round.id?.trim();
+      if (id) {
+        if (ids.has(id)) throw new Error("Evaluation round ids must be unique.");
+        ids.add(id);
+      }
+      if (!round.name.trim() || round.name.trim().length > 120) {
+        throw new Error("Evaluation round names must be 1 to 120 characters.");
+      }
+      if (!isIsoDate(round.startsOn) || !isIsoDate(round.endsOn)) {
+        throw new Error("Round dates must use YYYY-MM-DD.");
+      }
+      if (round.endsOn < round.startsOn) {
+        throw new Error("A round cannot end before it starts.");
+      }
+      if (!round.scorecardRef.trim() || round.scorecardRef.trim().length > 200) {
+        throw new Error("Each round needs a scorecard reference.");
+      }
+      normalizeScorecard(round.scorecard, round.scorecardRef.trim());
+      if (round.state && !["draft", "open", "closed"].includes(round.state)) {
+        throw new Error("Evaluation round state must be draft, open, or closed.");
+      }
+      if (!Array.isArray(round.reviewerPool)) {
+        throw new Error("A round reviewer pool must be a list.");
+      }
+    }
+
+    const existing = this.ctx.storage.sql
+      .exec<EvaluationPlanRow>(
+        `SELECT event_id, enabled, version, updated_at
+         FROM evaluation_plans WHERE event_id = ?`,
+        event.id,
+      )
+      .toArray()[0];
+    if (
+      input.expectedVersion !== undefined &&
+      input.expectedVersion !== (existing ? Number(existing.version) : 0)
+    ) {
+      throw new Error("Evaluation plan changed since you last loaded it.");
+    }
+
+    const now = new Date().toISOString();
+    const preparedRounds = input.rounds.map((round, position) => {
+      const id = round.id?.trim() || `evaluation-round-${crypto.randomUUID()}`;
+      const previous = this.ctx.storage.sql
+        .exec<{ created_at: string }>(
+          `SELECT created_at FROM evaluation_rounds WHERE id = ? AND event_id = ?`,
+          id,
+          event.id,
+        )
+        .toArray()[0];
+      return {
+        id,
+        name: round.name.trim(),
+        position,
+        state: round.state ?? "draft",
+        startsOn: round.startsOn,
+        endsOn: round.endsOn,
+        scorecardRef: round.scorecardRef.trim(),
+        scorecard: normalizeScorecard(round.scorecard, round.scorecardRef.trim()),
+        anonymization: round.anonymization ?? "none",
+        reviewerPool: [...new Set(round.reviewerPool.map((id) => id.trim()).filter(Boolean))],
+        createdAt: previous?.created_at ?? now,
+      };
+    });
+    const nextVersion = (existing ? Number(existing.version) : 0) + 1;
+    const enabled = existing ? Boolean(existing.enabled) : (input.enabled ?? true);
+
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        `INSERT INTO evaluation_plans (event_id, enabled, version, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(event_id) DO UPDATE SET
+           enabled = excluded.enabled, version = excluded.version, updated_at = excluded.updated_at`,
+        event.id,
+        enabled ? 1 : 0,
+        nextVersion,
+        now,
+      );
+      this.ctx.storage.sql.exec(
+        "DELETE FROM evaluation_round_reviewer_pools WHERE event_id = ?",
+        event.id,
+      );
+      this.ctx.storage.sql.exec("DELETE FROM evaluation_rounds WHERE event_id = ?", event.id);
+      const preparedRoundIds = preparedRounds.map((round) => round.id);
+      const roundPlaceholders = preparedRoundIds.map(() => "?").join(", ");
+      this.ctx.storage.sql.exec(
+        `DELETE FROM evaluation_round_assignments
+         WHERE event_id = ? AND round_id NOT IN (${roundPlaceholders})`,
+        event.id,
+        ...preparedRoundIds,
+      );
+      for (const round of preparedRounds) {
+        this.ctx.storage.sql.exec(
+          `INSERT INTO evaluation_rounds
+            (id, event_id, name, position, state, starts_on, ends_on, scorecard_ref,
+             scorecard_json, anonymization, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          round.id,
+          event.id,
+          round.name,
+          round.position,
+          round.state,
+          round.startsOn,
+          round.endsOn,
+          round.scorecardRef,
+          JSON.stringify(round.scorecard),
+          round.anonymization,
+          round.createdAt,
+          now,
+        );
+        for (const reviewerId of round.reviewerPool) {
+          this.ctx.storage.sql.exec(
+            `INSERT INTO evaluation_round_reviewer_pools (event_id, round_id, reviewer_id)
+             VALUES (?, ?, ?)`,
+            event.id,
+            round.id,
+            reviewerId,
+          );
+        }
+        if (round.reviewerPool.length > 0) {
+          const reviewerPlaceholders = round.reviewerPool.map(() => "?").join(", ");
+          this.ctx.storage.sql.exec(
+            `DELETE FROM evaluation_round_assignments
+             WHERE event_id = ? AND round_id = ?
+               AND reviewer_id NOT IN (${reviewerPlaceholders})`,
+            event.id,
+            round.id,
+            ...round.reviewerPool,
+          );
+        } else {
+          this.ctx.storage.sql.exec(
+            `DELETE FROM evaluation_round_assignments WHERE event_id = ? AND round_id = ?`,
+            event.id,
+            round.id,
+          );
+        }
+      }
+      this.ctx.storage.sql.exec(
+        `INSERT INTO evaluation_plan_audit_events
+          (id, event_id, round_id, action, actor_id, actor_name, detail_json, created_at)
+         VALUES (?, ?, NULL, 'evaluation_plan.saved', ?, ?, ?, ?)`,
+        `evaluation-plan-audit-${crypto.randomUUID()}`,
+        event.id,
+        input.actorId,
+        input.actorName,
+        JSON.stringify({ version: nextVersion, roundIds: preparedRounds.map((round) => round.id) }),
+        now,
+      );
+    });
+    const plan = this.getEvaluationPlan();
+    if (!plan) throw new Error("Evaluation plan was not saved.");
+    return plan;
+  }
+
+  setEvaluationPlanEnabled(input: {
+    enabled: boolean;
+    expectedVersion?: number;
+    actorId: string;
+    actorName: string;
+  }): EvaluationPlan | null {
+    const plan = this.getEvaluationPlan();
+    if (!plan) return null;
+    if (input.expectedVersion !== undefined && input.expectedVersion !== plan.version) {
+      throw new Error("Evaluation plan changed since you last loaded it.");
+    }
+    const now = new Date().toISOString();
+    const nextVersion = plan.version + 1;
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        `UPDATE evaluation_plans SET enabled = ?, version = ?, updated_at = ?
+         WHERE event_id = ?`,
+        input.enabled ? 1 : 0,
+        nextVersion,
+        now,
+        plan.eventId,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT INTO evaluation_plan_audit_events
+          (id, event_id, round_id, action, actor_id, actor_name, detail_json, created_at)
+         VALUES (?, ?, NULL, ?, ?, ?, ?, ?)`,
+        `evaluation-plan-audit-${crypto.randomUUID()}`,
+        plan.eventId,
+        input.enabled ? "evaluation_plan.enabled" : "evaluation_plan.disabled",
+        input.actorId,
+        input.actorName,
+        JSON.stringify({ version: nextVersion }),
+        now,
+      );
+    });
+    return this.getEvaluationPlan();
+  }
+
+  getEvaluationRoundAccess(
+    roundId: string,
+    reviewerId: string,
+    nowIso = new Date().toISOString(),
+  ): EvaluationRoundAccess {
+    const plan = this.getEvaluationPlan();
+    if (!plan?.enabled) {
+      return { allowed: false, reason: "plan_disabled", round: null };
+    }
+    const round = plan.rounds.find((candidate) => candidate.id === roundId) ?? null;
+    if (!round) return { allowed: false, reason: "round_not_found", round: null };
+    if (!round.reviewerPool.includes(reviewerId)) {
+      return { allowed: false, reason: "reviewer_not_assigned", round };
+    }
+    if (round.state !== "open") {
+      return { allowed: false, reason: "round_not_open", round };
+    }
+    const date = nowIso.slice(0, 10);
+    if (date < round.startsOn || date > round.endsOn) {
+      return { allowed: false, reason: "outside_date_window", round };
+    }
+    return { allowed: true, reason: "allowed", round };
+  }
+
+  private requireEvaluationRoundForAssignment(roundId: string): {
+    event: EventRecord;
+    round: EvaluationRound;
+  } {
+    const event = this.getEvent();
+    if (!event) throw new Error("Event is not initialized.");
+    const plan = this.getEvaluationPlan();
+    const round = plan?.rounds.find((candidate) => candidate.id === roundId);
+    if (!plan || !round) throw new Error("Evaluation round not found.");
+    return { event, round };
+  }
+
+  listEvaluationRoundAssignments(roundId: string): EvaluationRoundAssignment[] {
+    const event = this.getEvent();
+    if (!event) return [];
+    return this.ctx.storage.sql
+      .exec<EvaluationAssignmentRow>(
+        `SELECT event_id, round_id, proposal_id, reviewer_id, created_at
+         FROM evaluation_round_assignments
+         WHERE event_id = ? AND round_id = ?
+         ORDER BY reviewer_id, proposal_id`,
+        event.id,
+        roundId,
+      )
+      .toArray()
+      .map(mapEvaluationRoundAssignment);
+  }
+
+  listEvaluationRoundProposalIds(roundId: string, reviewerId: string): string[] {
+    const event = this.getEvent();
+    if (!event) return [];
+    return this.ctx.storage.sql
+      .exec<{ proposal_id: string }>(
+        `SELECT proposal_id FROM evaluation_round_assignments
+         WHERE event_id = ? AND round_id = ? AND reviewer_id = ?
+         ORDER BY proposal_id`,
+        event.id,
+        roundId,
+        reviewerId,
+      )
+      .toArray()
+      .map((row) => row.proposal_id);
+  }
+
+  hasEvaluationRoundProposalAssignment(input: {
+    roundId: string;
+    reviewerId: string;
+    proposalId: string;
+  }): boolean {
+    const event = this.getEvent();
+    if (!event) return false;
+    const row = this.ctx.storage.sql
+      .exec<{ found: number }>(
+        `SELECT 1 AS found FROM evaluation_round_assignments
+         WHERE event_id = ? AND round_id = ? AND reviewer_id = ? AND proposal_id = ?
+         LIMIT 1`,
+        event.id,
+        input.roundId,
+        input.reviewerId,
+        input.proposalId,
+      )
+      .toArray()[0];
+    return Boolean(row);
+  }
+
+  setEvaluationRoundAssignment(input: {
+    roundId: string;
+    proposalId: string;
+    reviewerId: string;
+    assigned: boolean;
+    actorId: string;
+    actorName: string;
+  }): EvaluationRoundAssignment[] {
+    const { event, round } = this.requireEvaluationRoundForAssignment(input.roundId);
+    if (!round.reviewerPool.includes(input.reviewerId)) {
+      throw new Error("Reviewer is not in this round's reviewer pool.");
+    }
+    const proposal = this.getProposal(input.proposalId);
+    if (!proposal) throw new Error("Proposal not found.");
+    const now = new Date().toISOString();
+    this.ctx.storage.transactionSync(() => {
+      if (input.assigned) {
+        this.ctx.storage.sql.exec(
+          `INSERT INTO evaluation_round_assignments
+            (event_id, round_id, proposal_id, reviewer_id, created_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(event_id, round_id, proposal_id, reviewer_id) DO NOTHING`,
+          event.id,
+          input.roundId,
+          input.proposalId,
+          input.reviewerId,
+          now,
+        );
+      } else {
+        this.ctx.storage.sql.exec(
+          `DELETE FROM evaluation_round_assignments
+           WHERE event_id = ? AND round_id = ? AND proposal_id = ? AND reviewer_id = ?`,
+          event.id,
+          input.roundId,
+          input.proposalId,
+          input.reviewerId,
+        );
+      }
+      this.ctx.storage.sql.exec(
+        `INSERT INTO evaluation_plan_audit_events
+          (id, event_id, round_id, action, actor_id, actor_name, detail_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `evaluation-plan-audit-${crypto.randomUUID()}`,
+        event.id,
+        input.roundId,
+        input.assigned ? "evaluation_assignment.assigned" : "evaluation_assignment.unassigned",
+        input.actorId,
+        input.actorName,
+        JSON.stringify({ proposalId: input.proposalId, reviewerId: input.reviewerId }),
+        now,
+      );
+    });
+    return this.listEvaluationRoundAssignments(input.roundId);
+  }
+
+  previewEvaluationRoundDistribution(input: {
+    roundId: string;
+    trackIds?: string[];
+    reviewerIds?: string[];
+    maxAssignmentsPerReviewer?: number | null;
+  }): EvaluationRoundDistributionPreview {
+    const { event, round } = this.requireEvaluationRoundForAssignment(input.roundId);
+    const trackIds = [
+      ...new Set((input.trackIds ?? []).map((trackId) => trackId.trim()).filter(Boolean)),
+    ];
+    const validTrackIds = new Set(event.tracks.map((track) => track.id));
+    if (trackIds.some((trackId) => !validTrackIds.has(trackId))) {
+      throw new Error("One or more tracks do not belong to this event.");
+    }
+    const reviewerIds = [
+      ...new Set(
+        (input.reviewerIds?.length ? input.reviewerIds : round.reviewerPool)
+          .map((reviewerId) => reviewerId.trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (reviewerIds.length === 0) {
+      throw new Error("Choose at least one reviewer for distribution.");
+    }
+    for (const reviewerId of reviewerIds) {
+      if (!round.reviewerPool.includes(reviewerId)) {
+        throw new Error("Reviewer is not in this round's reviewer pool.");
+      }
+    }
+    const maxAssignmentsPerReviewer = input.maxAssignmentsPerReviewer ?? null;
+    if (
+      maxAssignmentsPerReviewer !== null &&
+      (!Number.isInteger(maxAssignmentsPerReviewer) || maxAssignmentsPerReviewer < 1)
+    ) {
+      throw new Error("Reviewer caps must be whole numbers of at least 1.");
+    }
+
+    const proposals = this.listProposals({
+      trackIds: trackIds.length ? trackIds : undefined,
+      sort: "track-asc",
+    }).sort((left, right) =>
+      left.trackId.localeCompare(right.trackId) || left.id.localeCompare(right.id),
+    );
+    const byReviewer = new Map<string, string[]>(reviewerIds.map((reviewerId) => [reviewerId, []]));
+    const unassignedProposalIds: string[] = [];
+    for (const proposal of proposals) {
+      const eligible = reviewerIds
+        .map((reviewerId) => ({
+          reviewerId,
+          count: byReviewer.get(reviewerId)?.length ?? 0,
+        }))
+        .filter((candidate) =>
+          maxAssignmentsPerReviewer === null || candidate.count < maxAssignmentsPerReviewer,
+        )
+        .sort((left, right) => left.count - right.count || left.reviewerId.localeCompare(right.reviewerId));
+      const target = eligible[0];
+      if (!target) {
+        unassignedProposalIds.push(proposal.id);
+        continue;
+      }
+      byReviewer.get(target.reviewerId)?.push(proposal.id);
+    }
+
+    return {
+      roundId: input.roundId,
+      trackIds,
+      reviewerIds,
+      maxAssignmentsPerReviewer,
+      totalCandidates: proposals.length,
+      assignments: reviewerIds.map((reviewerId) => {
+        const proposalIds = byReviewer.get(reviewerId) ?? [];
+        return { reviewerId, proposalIds, count: proposalIds.length };
+      }),
+      unassignedProposalIds,
+    };
+  }
+
+  applyEvaluationRoundDistribution(input: {
+    roundId: string;
+    trackIds?: string[];
+    reviewerIds?: string[];
+    maxAssignmentsPerReviewer?: number | null;
+    actorId: string;
+    actorName: string;
+  }): {
+    preview: EvaluationRoundDistributionPreview;
+    assignments: EvaluationRoundAssignment[];
+  } {
+    const { event } = this.requireEvaluationRoundForAssignment(input.roundId);
+    const preview = this.previewEvaluationRoundDistribution(input);
+    const assignedProposalIds = preview.assignments.flatMap((assignment) => assignment.proposalIds);
+    const candidateProposalIds = [...assignedProposalIds, ...preview.unassignedProposalIds];
+    const now = new Date().toISOString();
+    this.ctx.storage.transactionSync(() => {
+      if (candidateProposalIds.length > 0) {
+        const proposalPlaceholders = candidateProposalIds.map(() => "?").join(", ");
+        this.ctx.storage.sql.exec(
+          `DELETE FROM evaluation_round_assignments
+           WHERE event_id = ? AND round_id = ? AND proposal_id IN (${proposalPlaceholders})`,
+          event.id,
+          input.roundId,
+          ...candidateProposalIds,
+        );
+      }
+      for (const assignment of preview.assignments) {
+        for (const proposalId of assignment.proposalIds) {
+          this.ctx.storage.sql.exec(
+            `INSERT INTO evaluation_round_assignments
+              (event_id, round_id, proposal_id, reviewer_id, created_at)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(event_id, round_id, proposal_id, reviewer_id) DO NOTHING`,
+            event.id,
+            input.roundId,
+            proposalId,
+            assignment.reviewerId,
+            now,
+          );
+        }
+      }
+      this.ctx.storage.sql.exec(
+        `INSERT INTO evaluation_plan_audit_events
+          (id, event_id, round_id, action, actor_id, actor_name, detail_json, created_at)
+         VALUES (?, ?, ?, 'evaluation_assignment.distributed', ?, ?, ?, ?)`,
+        `evaluation-plan-audit-${crypto.randomUUID()}`,
+        event.id,
+        input.roundId,
+        input.actorId,
+        input.actorName,
+        JSON.stringify({
+          trackIds: preview.trackIds,
+          reviewerIds: preview.reviewerIds,
+          maxAssignmentsPerReviewer: preview.maxAssignmentsPerReviewer,
+          totalCandidates: preview.totalCandidates,
+          assignedCount: assignedProposalIds.length,
+          unassignedCount: preview.unassignedProposalIds.length,
+        }),
+        now,
+      );
+    });
+    return { preview, assignments: this.listEvaluationRoundAssignments(input.roundId) };
+  }
+  getReviewerRecusal(input: {
+    proposalId: string;
+    roundId: string;
+    reviewerId: string;
+  }): ProposalReviewerRecusal | null {
+    const event = this.getEvent();
+    if (!event) return null;
+    const row = this.ctx.storage.sql
+      .exec<ProposalReviewRecusalRow>(
+        `SELECT id, proposal_id, review_round_id, reviewer_id, reviewer_name, reason, created_at
+         FROM proposal_review_recusals
+         WHERE event_id = ? AND proposal_id = ? AND review_round_id = ? AND reviewer_id = ?
+         LIMIT 1`,
+        event.id,
+        input.proposalId,
+        input.roundId,
+        input.reviewerId,
+      )
+      .toArray()[0];
+    return row ? mapProposalReviewRecusal(row) : null;
+  }
+
+  listProposalReviewRecusals(proposalId: string): ProposalReviewerRecusal[] {
+    const event = this.getEvent();
+    if (!event) return [];
+    return this.ctx.storage.sql
+      .exec<ProposalReviewRecusalRow>(
+        `SELECT id, proposal_id, review_round_id, reviewer_id, reviewer_name, reason, created_at
+         FROM proposal_review_recusals
+         WHERE event_id = ? AND proposal_id = ?
+         ORDER BY created_at DESC, id DESC`,
+        event.id,
+        proposalId,
+      )
+      .toArray()
+      .map(mapProposalReviewRecusal);
+  }
+
+  recuseProposalReview(input: {
+    proposalId: string;
+    roundId: string;
+    reviewerId: string;
+    reviewerName: string;
+    reason?: string;
+  }): ProposalReviewerRecusal {
+    const event = this.getEvent();
+    if (!event) throw new Error("Event is not initialized.");
+    const existing = this.getProposal(input.proposalId);
+    if (!existing) throw new Error(`Proposal ${input.proposalId} not found.`);
+    const current = this.getReviewerRecusal(input);
+    if (current) return current;
+
+    const now = new Date().toISOString();
+    const recusalId = `proposal-review-recusal-${crypto.randomUUID()}`;
+    const auditId = crypto.randomUUID();
+    const reason = (input.reason ?? "").trim().slice(0, 2000);
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        `INSERT INTO proposal_review_recusals
+          (id, event_id, proposal_id, review_round_id, reviewer_id, reviewer_name, reason, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        recusalId,
+        event.id,
+        input.proposalId,
+        input.roundId,
+        input.reviewerId,
+        input.reviewerName,
+        reason,
+        now,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT INTO audit_events
+          (id, proposal_id, review_round_id, type, actor_id, actor_name, from_status,
+           to_status, committee_note_changed, created_at)
+          VALUES (?, ?, ?, 'proposal.review.recused', ?, ?, ?, ?, 0, ?)`,
+        auditId,
+        input.proposalId,
+        input.roundId,
+        input.reviewerId,
+        input.reviewerName,
+        existing.status,
+        "recused",
+        now,
+      );
+    });
+    const created = this.getReviewerRecusal(input);
+    if (!created) throw new Error("Review recusal was not saved.");
+    return created;
+  }
+
+
+  listEvaluationPlanAuditEvents(): EvaluationPlanAuditEvent[] {
+    const event = this.getEvent();
+    if (!event) return [];
+    return this.ctx.storage.sql
+      .exec<EvaluationAuditRow>(
+        `SELECT id, round_id, action, actor_id, actor_name, detail_json, created_at
+         FROM evaluation_plan_audit_events WHERE event_id = ?
+         ORDER BY created_at DESC, id DESC`,
+        event.id,
+      )
+      .toArray()
+      .map(mapEvaluationAuditEvent);
+  }
+
+  listReviewEvidenceForRound(roundId: string | null): ReviewEvidence[] {
+    return this.ctx.storage.sql
+      .exec<ReviewEvidenceRow>(
+        `SELECT proposal_id, round_id, reviewer_id, reviewer_name, recommendation,
+                completion_status, aggregate_score, criteria_json, values_json,
+                completed_at, updated_at
+         FROM review_evidence
+         WHERE round_id = ?
+         ORDER BY updated_at DESC, proposal_id, reviewer_id`,
+        roundId ?? "",
+      )
+      .toArray()
+      .map(mapReviewEvidence);
+  }
+
+  listReviewRecusalsForRound(roundId: string): ProposalReviewerRecusal[] {
+    const event = this.getEvent();
+    if (!event) return [];
+    return this.ctx.storage.sql
+      .exec<ProposalReviewRecusalRow>(
+        `SELECT id, proposal_id, review_round_id, reviewer_id, reviewer_name, reason, created_at
+         FROM proposal_review_recusals
+         WHERE event_id = ? AND review_round_id = ?
+         ORDER BY created_at DESC, id DESC`,
+        event.id,
+        roundId,
+      )
+      .toArray()
+      .map(mapProposalReviewRecusal);
+  }
+
+  recordReviewProgressAudit(input: {
+    roundId: string | null;
+    action: string;
+    actorId: string;
+    actorName: string;
+    detail: Record<string, unknown>;
+  }): EvaluationPlanAuditEvent {
+    const event = this.getEvent();
+    if (!event) throw new Error("Event is not initialized.");
+    const now = new Date().toISOString();
+    const id = `evaluation-plan-audit-${crypto.randomUUID()}`;
+    this.ctx.storage.sql.exec(
+      `INSERT INTO evaluation_plan_audit_events
+        (id, event_id, round_id, action, actor_id, actor_name, detail_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      event.id,
+      input.roundId,
+      input.action,
+      input.actorId,
+      input.actorName,
+      JSON.stringify(input.detail),
+      now,
+    );
+    return {
+      id,
+      roundId: input.roundId,
+      action: input.action,
+      actorId: input.actorId,
+      actorName: input.actorName,
+      detail: input.detail,
+      createdAt: now,
+    };
+  }
+
   updateProposalReview(input: {
     proposalId: string;
     expectedVersion: number;
     status?: ProposalStatus;
     committeeNote?: string;
+    roundId?: string;
+    criterionScores?: ReviewCriterionResult[];
+    scorecardValues?: Record<string, ScorecardCriterionValue>;
     actorId: string;
     actorName: string;
   }): OrganizerProposal | null {
@@ -3056,9 +5319,31 @@ export class EventStore extends DurableObject<AppBindings> {
 
     const nextStatus = input.status ?? existing.status;
     const nextNote = input.committeeNote ?? existing.committeeNote;
+    if (input.scorecardValues !== undefined && !input.roundId) {
+      throw new Error("Scorecard responses require an evaluation round.");
+    }
+    const round = input.roundId
+      ? this.getEvaluationPlan()?.rounds.find((candidate) => candidate.id === input.roundId) ?? null
+      : null;
+    if (input.scorecardValues !== undefined && !round) {
+      throw new Error("Evaluation round not found.");
+    }
+    const values = input.scorecardValues !== undefined && round
+      ? normalizeScorecardValues(round.scorecard, input.scorecardValues)
+      : undefined;
+    const criteria =
+      input.criterionScores === undefined
+        ? values && round
+          ? scorecardCriteriaResults(round.scorecard, values)
+          : undefined
+        : normalizeCriterionScores(input.criterionScores);
+    const requiredComplete =
+      values && round ? scorecardRequiredComplete(round.scorecard, values) : null;
     const committeeNoteChanged = nextNote !== existing.committeeNote;
     const statusChanged = nextStatus !== existing.status;
-    if (!committeeNoteChanged && !statusChanged) return existing;
+    const evidenceChanged =
+      criteria !== undefined || input.status !== undefined || values !== undefined;
+    if (!committeeNoteChanged && !statusChanged && !evidenceChanged) return existing;
 
     const event = this.getEvent();
     if (!event) throw new Error("Event is not initialized.");
@@ -3102,11 +5387,12 @@ export class EventStore extends DurableObject<AppBindings> {
       }
       this.ctx.storage.sql.exec(
         `INSERT INTO audit_events
-          (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
-           committee_note_changed, created_at)
-         VALUES (?, ?, 'proposal.review.changed', ?, ?, ?, ?, ?, ?)`,
+          (id, proposal_id, review_round_id, type, actor_id, actor_name, from_status,
+           to_status, committee_note_changed, created_at)
+          VALUES (?, ?, ?, 'proposal.review.changed', ?, ?, ?, ?, ?, ?)`,
         auditId,
         input.proposalId,
+        input.roundId ?? null,
         input.actorId,
         input.actorName,
         existing.status,
@@ -3114,6 +5400,47 @@ export class EventStore extends DurableObject<AppBindings> {
         committeeNoteChanged ? 1 : 0,
         now,
       );
+      if (evidenceChanged) {
+        const evidenceCriteria = criteria ?? [];
+        const aggregateScore = aggregateCriterionScores(evidenceCriteria);
+        const completion: ReviewCompletionStatus =
+          requiredComplete === null
+            ? nextStatus === "unreviewed"
+              ? evidenceCriteria.length > 0
+                ? "incomplete"
+                : "not_started"
+              : "complete"
+            : requiredComplete
+              ? "complete"
+              : "incomplete";
+        const evidenceValues = values ?? emptyScorecardValues(round?.scorecard ?? DEFAULT_SCORECARD);
+        this.ctx.storage.sql.exec(
+          `INSERT INTO review_evidence
+            (proposal_id, round_id, reviewer_id, reviewer_name, recommendation,
+             completion_status, aggregate_score, criteria_json, values_json, completed_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(proposal_id, round_id, reviewer_id) DO UPDATE SET
+             reviewer_name = excluded.reviewer_name,
+             recommendation = excluded.recommendation,
+             completion_status = excluded.completion_status,
+             aggregate_score = excluded.aggregate_score,
+             criteria_json = excluded.criteria_json,
+             values_json = excluded.values_json,
+             completed_at = excluded.completed_at,
+             updated_at = excluded.updated_at`,
+          input.proposalId,
+          input.roundId ?? "",
+          input.actorId,
+          input.actorName,
+          nextStatus,
+          completion,
+          aggregateScore,
+          JSON.stringify(evidenceCriteria),
+          JSON.stringify(evidenceValues),
+          completion === "complete" ? now : null,
+          now,
+        );
+      }
     });
     if (conflicted) return null;
 
@@ -3122,10 +5449,180 @@ export class EventStore extends DurableObject<AppBindings> {
     return updated;
   }
 
+  listScorecardReviews(proposalId: string, roundId?: string): ReviewEvidence[] {
+    const rows = this.ctx.storage.sql
+      .exec<ReviewEvidenceRow>(
+        roundId
+          ? `SELECT proposal_id, round_id, reviewer_id, reviewer_name, recommendation,
+                    completion_status, aggregate_score, criteria_json, values_json,
+                    completed_at, updated_at
+             FROM review_evidence
+             WHERE proposal_id = ? AND round_id = ?
+             ORDER BY reviewer_name COLLATE NOCASE, reviewer_id`
+          : `SELECT proposal_id, round_id, reviewer_id, reviewer_name, recommendation,
+                    completion_status, aggregate_score, criteria_json, values_json,
+                    completed_at, updated_at
+             FROM review_evidence
+             WHERE proposal_id = ?
+             ORDER BY round_id, reviewer_name COLLATE NOCASE, reviewer_id`,
+        ...(roundId ? [proposalId, roundId] : [proposalId]),
+      )
+      .toArray();
+    return rows.map(mapReviewEvidence);
+  }
+
+  getScorecardAggregate(proposalId: string, roundId: string): ScorecardAggregate | null {
+    const round = this.getEvaluationPlan()?.rounds.find((candidate) => candidate.id === roundId);
+    if (!round) return null;
+    const reviews = this.listScorecardReviews(proposalId, roundId);
+    const scored = reviews.flatMap((review) =>
+      review.aggregateScore === null ? [] : [review.aggregateScore],
+    );
+    return {
+      roundId,
+      scorecardRef: round.scorecardRef,
+      responseCount: reviews.length,
+      completedResponseCount: reviews.filter((review) => review.completionStatus === "complete").length,
+      aggregateScore:
+        scored.length === 0
+          ? null
+          : Number((scored.reduce((sum, score) => sum + score, 0) / scored.length).toFixed(2)),
+      calculatedAt:
+        reviews.length === 0
+          ? null
+          : reviews
+              .map((review) => review.updatedAt)
+              .sort()
+              .at(-1) ?? null,
+    };
+  }
+
+  getProposalScorecardProjection(input: {
+    proposalId: string;
+    roundId?: string;
+    reviewerId?: string;
+  }): ProposalScorecardReviewProjection | null {
+    const plan = this.getEvaluationPlan();
+    const round = input.roundId
+      ? plan?.rounds.find((candidate) => candidate.id === input.roundId) ?? null
+      : null;
+    if (!round) return null;
+    const reviews = this.listScorecardReviews(input.proposalId, round.id);
+    return {
+      round,
+      reviewerResponse:
+        input.reviewerId
+          ? reviews.find((review) => review.reviewerId === input.reviewerId) ?? null
+          : null,
+      reviews,
+      aggregate: this.getScorecardAggregate(input.proposalId, round.id),
+      calculationDescription: round.scorecard.calculationDescription,
+    };
+  }
+
+  listReviewResults(): ReviewResultsResponse {
+    const event = this.getEvent();
+    if (!event) {
+      return { eventId: "", generatedAt: new Date().toISOString(), criteria: [], submissions: [] };
+    }
+    const proposals = this.listProposals({ sort: "oldest" });
+    const rows = this.ctx.storage.sql
+      .exec<ReviewEvidenceRow>(
+        `SELECT proposal_id, round_id, reviewer_id, reviewer_name, recommendation,
+                completion_status, aggregate_score, criteria_json, values_json, completed_at, updated_at
+         FROM review_evidence
+         ORDER BY proposal_id, round_id, reviewer_name COLLATE NOCASE, reviewer_id`,
+      )
+      .toArray();
+    const reviewsByProposal = new Map<string, ReviewEvidence[]>();
+    const criteriaCatalog = new Map<string, ReviewResultsCriterion>();
+    for (const row of rows) {
+      const evidence = mapReviewEvidence(row);
+      const bucket = reviewsByProposal.get(evidence.proposalId) ?? [];
+      bucket.push(evidence);
+      reviewsByProposal.set(evidence.proposalId, bucket);
+      for (const criterion of evidence.criteria) {
+        if (!criteriaCatalog.has(criterion.id)) {
+          criteriaCatalog.set(criterion.id, {
+            id: criterion.id,
+            label: criterion.label,
+            maxScore: criterion.maxScore,
+            weight: criterion.weight,
+            type: "numeric",
+            guidance: "",
+            required: false,
+            options: [],
+          });
+        }
+      }
+    }
+    const submissions = proposals.map((proposal) => {
+      const reviews = reviewsByProposal.get(proposal.id) ?? [];
+      const completed = reviews.filter((review) => review.completionStatus === "complete");
+      const completionStatus: ReviewCompletionStatus =
+        reviews.length === 0
+          ? "not_started"
+          : completed.length === reviews.length
+            ? "complete"
+            : "incomplete";
+      const scoredAggregates = completed.flatMap((review) =>
+        review.aggregateScore === null ? [] : [review.aggregateScore],
+      );
+      const aggregateScore =
+        scoredAggregates.length === 0
+          ? null
+          : Number(
+              (
+                scoredAggregates.reduce((sum, score) => sum + score, 0) /
+                scoredAggregates.length
+              ).toFixed(2),
+            );
+      const criteria: ReviewCriterionResult[] = [];
+      for (const catalogCriterion of criteriaCatalog.values()) {
+        const matches = completed.flatMap((review) =>
+          review.criteria.filter((criterion) => criterion.id === catalogCriterion.id),
+        );
+        if (matches.length === 0) continue;
+        const value =
+          matches.reduce((sum, criterion) => sum + criterion.value, 0) /
+          matches.length;
+        const weightedScore =
+          matches.reduce((sum, criterion) => sum + criterion.weightedScore, 0) /
+          matches.length;
+        criteria.push({
+          ...catalogCriterion,
+          value: Number(value.toFixed(4)),
+          weightedScore: Number(weightedScore.toFixed(4)),
+        });
+      }
+      return {
+        proposalId: proposal.id,
+        title: proposal.title,
+        trackId: proposal.trackId,
+        trackName: proposal.trackName,
+        submittedAt: proposal.submittedAt,
+        speakers: proposalSpeakersForResults(proposal),
+        recommendation: proposal.status,
+        completionStatus,
+        completedReviewCount: completed.length,
+        totalReviewCount: reviews.length,
+        aggregateScore,
+        criteria,
+        reviews,
+      };
+    });
+    return {
+      eventId: event.id,
+      generatedAt: new Date().toISOString(),
+      criteria: [...criteriaCatalog.values()].sort((a, b) => a.id.localeCompare(b.id)),
+      submissions,
+    };
+  }
+
   listProposalAuditEvents(proposalId: string): ProposalAuditEvent[] {
     return this.ctx.storage.sql
       .exec<AuditEventRow>(
-        `SELECT id, proposal_id, type, actor_id, actor_name, from_status,
+        `SELECT id, proposal_id, review_round_id, type, actor_id, actor_name, from_status,
                 to_status, committee_note_changed, created_at
          FROM audit_events
          WHERE proposal_id = ?
@@ -3546,6 +6043,69 @@ export class EventStore extends DurableObject<AppBindings> {
     );
   }
 
+  listPortalInvitationRecipients(
+    speakerIds: string[],
+    nowIso = new Date().toISOString(),
+  ): Array<{
+    speakerId: string;
+    name: string;
+    email: string;
+    tokenId: string;
+    expiresAt: string;
+    revokedAt: string | null;
+    signedToken: string | null;
+  }> {
+    const recipients: Array<{
+      speakerId: string;
+      name: string;
+      email: string;
+      tokenId: string;
+      expiresAt: string;
+      revokedAt: string | null;
+      signedToken: string | null;
+    }> = [];
+    for (const speakerId of [...new Set(speakerIds)]) {
+      const row = this.ctx.storage.sql
+        .exec<{
+          speaker_id: string;
+          name: string;
+          email: string;
+          token_id: string;
+          expires_at: string;
+          revoked_at: string | null;
+          signed_token: string | null;
+        }>(
+          `SELECT s.id AS speaker_id, s.name, s.email,
+                  t.token_id, t.expires_at, t.revoked_at, t.signed_token
+           FROM speakers AS s
+           JOIN portal_tokens AS t ON t.speaker_id = s.id
+           WHERE s.id = ?
+             AND t.revoked_at IS NULL
+             AND t.expires_at > ?
+             AND EXISTS (
+               SELECT 1 FROM event_participations AS ep
+               WHERE ep.speaker_id = s.id
+             )
+           ORDER BY t.created_at DESC
+           LIMIT 1`,
+          speakerId,
+          nowIso,
+        )
+        .toArray()[0];
+      if (!row) continue;
+      recipients.push({
+        speakerId: row.speaker_id,
+        name: row.name,
+        email: row.email,
+        tokenId: row.token_id,
+        expiresAt: row.expires_at,
+        revokedAt: row.revoked_at,
+        signedToken: row.signed_token,
+      });
+    }
+    return recipients;
+  }
+
   revokePortalToken(tokenId: string): void {
     this.ctx.storage.sql.exec(
       `UPDATE portal_tokens
@@ -3560,7 +6120,7 @@ export class EventStore extends DurableObject<AppBindings> {
     return (
       this.ctx.storage.sql
         .exec<SpeakerRow>(
-          `SELECT id, name, email, biography, headshot_asset_id, created_at
+          `SELECT id, name, email, biography, social_links_json, headshot_asset_id, created_at
            FROM speakers WHERE id = ?`,
           speakerId,
         )
@@ -3574,7 +6134,8 @@ export class EventStore extends DurableObject<AppBindings> {
         .exec<OnboardingTaskRow>(
           `SELECT id, speaker_id, session_id, proposal_id, course_check_plan_id, title, kind,
                   status, due_at, created_at, instructions, completion_requirement,
-                  readiness_flag, asset_id, completed_at, created_by
+                  readiness_flag, asset_id, completed_at, created_by,
+                  file_accept_mime_types_json, file_accept_extensions_json, file_max_bytes
            FROM onboarding_tasks
            WHERE speaker_id = ?
            ORDER BY
@@ -3590,7 +6151,8 @@ export class EventStore extends DurableObject<AppBindings> {
       .exec<OnboardingTaskRow>(
         `SELECT id, speaker_id, session_id, proposal_id, course_check_plan_id, title, kind,
                 status, due_at, created_at, instructions, completion_requirement,
-                readiness_flag, asset_id, completed_at, created_by
+                readiness_flag, asset_id, completed_at, created_by,
+                file_accept_mime_types_json, file_accept_extensions_json, file_max_bytes
          FROM onboarding_tasks
          ORDER BY
            CASE status WHEN 'open' THEN 0 ELSE 1 END,
@@ -3601,20 +6163,155 @@ export class EventStore extends DurableObject<AppBindings> {
       .toArray();
   }
 
-  private getTaskAsset(assetId: string | null): {
-    asset_id: string;
-    file_name: string;
-    mime: string;
-    size_bytes: number;
-  } | null {
+  private getTaskAsset(assetId: string | null): OnboardingTaskAsset | null {
     if (!assetId) return null;
     const row = this.getAsset(assetId);
     if (!row || row.status !== "complete") return null;
-    return {
-      asset_id: row.asset_id,
-      file_name: row.file_name,
+
+    if (
+      row.purpose === "portal_task" &&
+      row.owner_speaker_id &&
+      row.question_name.startsWith("task:")
+    ) {
+      const versions = this.listTaskAssetVersions(row, row.asset_id);
+      const current = versions.find((version) => version.assetId === row.asset_id);
+      if (current) return { ...current, versions, comments: current.comments };
+    }
+
+    const version: OnboardingTaskAssetVersion = {
+      assetId: row.asset_id,
+      version: 1,
+      isLatest: true,
+      fileName: row.file_name,
       mime: row.mime,
-      size_bytes: Number(row.size_bytes),
+      size: Number(row.size_bytes),
+      uploadedAt: row.completed_at ?? row.created_at,
+      comments: [],
+    };
+    return { ...version, versions: [version], comments: [] };
+  }
+
+  private listTaskAssetVersions(
+    row: AssetRow,
+    latestAssetId: string,
+  ): OnboardingTaskAssetVersion[] {
+    const rows = this.ctx.storage.sql
+      .exec<AssetRow>(
+        `SELECT asset_id, object_key, file_name, mime, size_bytes, status, created_at,
+                form_id, form_definition_version, question_name, max_bytes, claimed_proposal_id,
+                owner_speaker_id, purpose, completed_at
+         FROM assets
+         WHERE status = 'complete'
+           AND purpose = 'portal_task'
+           AND owner_speaker_id = ?
+           AND question_name = ?
+         ORDER BY COALESCE(completed_at, created_at) ASC, created_at ASC, asset_id ASC`,
+        row.owner_speaker_id,
+        row.question_name,
+      )
+      .toArray();
+    const comments = this.listDeliverableComments(rows.map((candidate) => candidate.asset_id));
+    return rows.map((candidate, index) => ({
+      assetId: candidate.asset_id,
+      version: index + 1,
+      isLatest: candidate.asset_id === latestAssetId,
+      fileName: candidate.file_name,
+      mime: candidate.mime,
+      size: Number(candidate.size_bytes),
+      uploadedAt: candidate.completed_at ?? candidate.created_at,
+      comments: comments.get(candidate.asset_id) ?? [],
+    }));
+  }
+
+  private listDeliverableComments(
+    assetIds: string[],
+  ): Map<string, OnboardingDeliverableComment[]> {
+    const result = new Map<string, OnboardingDeliverableComment[]>();
+    for (const assetId of [...new Set(assetIds)]) {
+      const comments = this.ctx.storage.sql
+        .exec<DeliverableVersionCommentRow>(
+          `SELECT id, asset_id, body, author_id, author_name, author_role, created_at
+           FROM deliverable_version_comments
+           WHERE asset_id = ?
+           ORDER BY created_at ASC, id ASC`,
+          assetId,
+        )
+        .toArray()
+        .map(mapDeliverableComment);
+      result.set(assetId, comments);
+    }
+    return result;
+  }
+
+  private getDeliverableVersionContext(assetId: string): {
+    asset: AssetRow;
+    speakerId: string;
+  } | null {
+    const asset = this.getAsset(assetId);
+    if (
+      !asset ||
+      asset.status !== "complete" ||
+      asset.purpose !== "portal_task" ||
+      !asset.owner_speaker_id ||
+      !asset.question_name.startsWith("task:")
+    ) {
+      return null;
+    }
+    return { asset, speakerId: asset.owner_speaker_id };
+  }
+
+  listDeliverableVersionComments(assetId: string): OnboardingDeliverableComment[] {
+    if (!this.getDeliverableVersionContext(assetId)) return [];
+    return this.listDeliverableComments([assetId]).get(assetId) ?? [];
+  }
+
+  addDeliverableVersionComment(input: {
+    assetId: string;
+    speakerId?: string;
+    body: string;
+    authorId: string;
+    authorName: string;
+    authorRole: "organizer" | "speaker";
+  }):
+    | { ok: true; comment: OnboardingDeliverableComment }
+    | { ok: false; status: 400 | 404; error: string } {
+    const context = this.getDeliverableVersionContext(input.assetId);
+    if (!context) return { ok: false, status: 404, error: "Deliverable version not found." };
+    if (input.speakerId && input.speakerId !== context.speakerId) {
+      return { ok: false, status: 404, error: "Deliverable version not found." };
+    }
+    const body = input.body.trim();
+    if (!body) return { ok: false, status: 400, error: "Comment text is required." };
+    if (body.length > 2_000) {
+      return { ok: false, status: 400, error: "Use 2000 characters or fewer for comments." };
+    }
+    const id = `dlv_cmt_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
+    const createdAt = new Date().toISOString();
+    this.ctx.storage.sql.exec(
+      `INSERT INTO deliverable_version_comments
+        (id, asset_id, body, author_id, author_name, author_role, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      input.assetId,
+      body,
+      input.authorId,
+      input.authorName,
+      input.authorRole,
+      createdAt,
+    );
+    return {
+      ok: true,
+      comment: {
+        id,
+        assetId: input.assetId,
+        body,
+        author: {
+          id: input.authorId,
+          name: input.authorName,
+          role: input.authorRole,
+        },
+        createdAt,
+      },
     };
   }
 
@@ -3627,6 +6324,7 @@ export class EventStore extends DurableObject<AppBindings> {
   appendOnboardingHistory(input: {
     speakerId: string;
     taskId: string | null;
+    assetId?: string | null;
     type: string;
     summary: string;
     actorId: string;
@@ -3636,11 +6334,12 @@ export class EventStore extends DurableObject<AppBindings> {
     const createdAt = new Date().toISOString();
     this.ctx.storage.sql.exec(
       `INSERT INTO onboarding_history
-        (id, speaker_id, task_id, type, summary, actor_id, actor_name, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        (id, speaker_id, task_id, asset_id, type, summary, actor_id, actor_name, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       input.speakerId,
       input.taskId,
+      input.assetId ?? null,
       input.type,
       input.summary,
       input.actorId,
@@ -3651,6 +6350,7 @@ export class EventStore extends DurableObject<AppBindings> {
       id,
       speakerId: input.speakerId,
       taskId: input.taskId,
+      assetId: input.assetId ?? null,
       type: input.type,
       summary: input.summary,
       actorId: input.actorId,
@@ -3759,8 +6459,9 @@ export class EventStore extends DurableObject<AppBindings> {
         name: speaker.name,
         email: speaker.email,
         biography: speaker.biography,
+        socialLinks: parseStoredSpeakerSocialLinks(speaker.social_links_json),
         headshotAssetId: speaker.headshot_asset_id,
-        headshotFileName: headshot?.file_name ?? null,
+        headshotFileName: headshot?.fileName ?? null,
       },
       participation: {
         id: participation.id,
@@ -3884,6 +6585,7 @@ export class EventStore extends DurableObject<AppBindings> {
     speakerId: string;
     biography?: string;
     name?: string;
+    socialLinks?: unknown;
     headshotAssetId?: string | null;
   }): { ok: true } | { ok: false; error: string } {
     const speaker = this.getSpeakerRow(input.speakerId);
@@ -3918,6 +6620,11 @@ export class EventStore extends DurableObject<AppBindings> {
       input.name !== undefined ? input.name.trim() : speaker.name;
     const biography =
       input.biography !== undefined ? input.biography.trim() : speaker.biography;
+    const socialLinks =
+      input.socialLinks !== undefined
+        ? normalizeSpeakerSocialLinks(input.socialLinks)
+        : { ok: true as const, value: parseStoredSpeakerSocialLinks(speaker.social_links_json) };
+    if (!socialLinks.ok) return socialLinks;
     if (!name) return { ok: false, error: "Name is required." };
     if (name.length > 200) return { ok: false, error: "Use 200 characters or fewer for name." };
     if (biography.length > 2_000) {
@@ -3926,10 +6633,11 @@ export class EventStore extends DurableObject<AppBindings> {
 
     this.ctx.storage.sql.exec(
       `UPDATE speakers
-       SET name = ?, biography = ?, headshot_asset_id = ?
+       SET name = ?, biography = ?, social_links_json = ?, headshot_asset_id = ?
        WHERE id = ?`,
       name,
       biography,
+      serializeSpeakerSocialLinks(socialLinks.value),
       headshotAssetId,
       input.speakerId,
     );
@@ -3988,6 +6696,7 @@ export class EventStore extends DurableObject<AppBindings> {
 
     const requirement =
       row.completion_requirement || defaultCompletionRequirement(row.kind);
+    const previousAssetId = row.asset_id;
     let assetId = row.asset_id;
 
     if (requirement === "file") {
@@ -4041,8 +6750,12 @@ export class EventStore extends DurableObject<AppBindings> {
     this.appendOnboardingHistory({
       speakerId: input.speakerId,
       taskId: input.taskId,
-      type: "task_completed",
-      summary: `Completed task: ${row.title}`,
+      assetId,
+      type: previousAssetId && previousAssetId !== assetId ? "task_attachment_replaced" : "task_completed",
+      summary:
+        previousAssetId && previousAssetId !== assetId
+          ? `Replaced attachment for task: ${row.title}`
+          : `Completed task: ${row.title}`,
       actorId: input.speakerId,
       actorName: this.getSpeakerRow(input.speakerId)?.name ?? "Speaker",
     });
@@ -4094,12 +6807,14 @@ export class EventStore extends DurableObject<AppBindings> {
     if (!title) return { error: "Task title is required." };
     if (title.length > 200) return { error: "Use 200 characters or fewer for the title." };
 
+    const fileConstraints = resolveOnboardingFileConstraints(kind);
     this.ctx.storage.sql.exec(
       `INSERT INTO onboarding_tasks
         (id, speaker_id, session_id, proposal_id, course_check_plan_id, title, kind,
          status, due_at, created_at, instructions, completion_requirement, readiness_flag,
-         asset_id, completed_at, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, NULL, NULL, ?)`,
+         asset_id, completed_at, created_by, file_accept_mime_types_json,
+         file_accept_extensions_json, file_max_bytes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)`,
       id,
       input.speakerId,
       session?.id ?? null,
@@ -4113,6 +6828,13 @@ export class EventStore extends DurableObject<AppBindings> {
       input.completionRequirement,
       input.readinessFlag ?? null,
       input.createdBy,
+      input.completionRequirement === "file"
+        ? JSON.stringify(fileConstraints.acceptMimeTypes)
+        : "",
+      input.completionRequirement === "file"
+        ? JSON.stringify(fileConstraints.acceptExtensions)
+        : "",
+      input.completionRequirement === "file" ? fileConstraints.maxBytes : 0,
     );
     this.appendOnboardingHistory({
       speakerId: input.speakerId,
@@ -4126,6 +6848,142 @@ export class EventStore extends DurableObject<AppBindings> {
     return mapPortalTask(created, null);
   }
 
+  createOnboardingTasks(input: {
+    speakerIds: string[];
+    title: string;
+    instructions: string;
+    kind: string;
+    completionRequirement: OnboardingCompletionRequirement;
+    readinessFlag?: string | null;
+    dueAt?: string | null;
+    createdBy: string;
+    idempotencyKey: string;
+  }):
+    | { ok: true; result: OnboardingTaskBatchResult; created: boolean }
+    | { ok: false; error: string } {
+    const idempotencyKey = input.idempotencyKey.trim();
+    if (!idempotencyKey) return { ok: false, error: "idempotencyKey is required." };
+    const existing = this.ctx.storage.sql
+      .exec<OnboardingTaskBatchRow>(
+        `SELECT idempotency_key, response_json, created_at
+         FROM onboarding_task_batches WHERE idempotency_key = ?`,
+        idempotencyKey,
+      )
+      .toArray()[0];
+    if (existing) {
+      return {
+        ok: true,
+        result: JSON.parse(existing.response_json) as OnboardingTaskBatchResult,
+        created: false,
+      };
+    }
+
+    const speakerIds = [...new Set(input.speakerIds.map((speakerId) => speakerId.trim()))].filter(Boolean);
+    if (speakerIds.length === 0) return { ok: false, error: "Choose at least one speaker." };
+    if (speakerIds.length > 100) {
+      return { ok: false, error: "Choose 100 speakers or fewer per task assignment." };
+    }
+
+    const title = input.title.trim();
+    const instructions = input.instructions.trim();
+    const kind = input.kind.trim() || "custom";
+    if (!title) return { ok: false, error: "Task title is required." };
+    if (title.length > 200) return { ok: false, error: "Use 200 characters or fewer for the title." };
+
+    type Assignment = {
+      speaker: SpeakerRow;
+      participation: { proposal_id: string | null; course_check_plan_id: string };
+      session: { id: string } | undefined;
+      id: string;
+    };
+    const assignments: Assignment[] = [];
+    for (const speakerId of speakerIds) {
+      const speaker = this.getSpeakerRow(speakerId);
+      if (!speaker) return { ok: false, error: "Speaker not found." };
+      const participation = this.ctx.storage.sql
+        .exec<{
+          proposal_id: string | null;
+          course_check_plan_id: string;
+        }>(
+          `SELECT proposal_id, course_check_plan_id
+           FROM event_participations
+           WHERE speaker_id = ?
+           ORDER BY created_at DESC
+           LIMIT 1`,
+          speakerId,
+        )
+        .toArray()[0];
+      if (!participation) return { ok: false, error: "Speaker is not part of this event." };
+      const session = this.ctx.storage.sql
+        .exec<{ id: string }>(
+          participation.proposal_id
+            ? `SELECT id FROM sessions WHERE proposal_id = ? LIMIT 1`
+            : `SELECT id FROM sessions WHERE course_check_plan_id = ? LIMIT 1`,
+          participation.proposal_id ?? participation.course_check_plan_id,
+        )
+        .toArray()[0];
+      assignments.push({
+        speaker,
+        participation,
+        session,
+        id: `tsk_org_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`,
+      });
+    }
+
+    const now = new Date().toISOString();
+    const tasks: PortalOnboardingTask[] = [];
+    this.ctx.storage.transactionSync(() => {
+      for (const assignment of assignments) {
+        this.ctx.storage.sql.exec(
+          `INSERT INTO onboarding_tasks
+            (id, speaker_id, session_id, proposal_id, course_check_plan_id, title, kind,
+             status, due_at, created_at, instructions, completion_requirement, readiness_flag,
+             asset_id, completed_at, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, NULL, NULL, ?)`,
+          assignment.id,
+          assignment.speaker.id,
+          assignment.session?.id ?? null,
+          assignment.participation.proposal_id,
+          assignment.participation.course_check_plan_id,
+          title,
+          kind,
+          input.dueAt ?? null,
+          now,
+          instructions,
+          input.completionRequirement,
+          input.readinessFlag ?? null,
+          input.createdBy,
+        );
+        this.appendOnboardingHistory({
+          speakerId: assignment.speaker.id,
+          taskId: assignment.id,
+          type: "task_created",
+          summary: `Organizer created task: ${title}`,
+          actorId: input.createdBy,
+          actorName: input.createdBy,
+        });
+        const created = this.listOnboardingTaskRows(assignment.speaker.id).find(
+          (row) => row.id === assignment.id,
+        );
+        if (!created) throw new Error("Assigned onboarding task was not persisted.");
+        tasks.push(mapPortalTask(created, null));
+      }
+      const result: OnboardingTaskBatchResult = { idempotencyKey, tasks };
+      this.ctx.storage.sql.exec(
+        `INSERT INTO onboarding_task_batches (idempotency_key, response_json, created_at)
+         VALUES (?, ?, ?)`,
+        idempotencyKey,
+        JSON.stringify(result),
+        now,
+      );
+    });
+    return {
+      ok: true,
+      result: { idempotencyKey, tasks },
+      created: true,
+    };
+  }
+
   private directoryIdentityMatches(input: {
     name: string;
     email: string;
@@ -4134,7 +6992,7 @@ export class EventStore extends DurableObject<AppBindings> {
     const normalizedName = input.name.trim().toLowerCase();
     const rows = this.ctx.storage.sql
       .exec<SpeakerRow>(
-        `SELECT id, name, email, biography, headshot_asset_id, created_at
+          `SELECT id, name, email, biography, social_links_json, headshot_asset_id, created_at
          FROM speakers
          WHERE lower(email) = ? OR lower(trim(name)) = ?
          ORDER BY name, email`,
@@ -4165,6 +7023,9 @@ export class EventStore extends DurableObject<AppBindings> {
     const name = input.name.trim();
     const email = input.email.trim().toLowerCase();
     const biography = (input.biography ?? "").trim();
+    const socialLinks = normalizeSpeakerSocialLinks(
+      input.socialLinks ?? EMPTY_SPEAKER_SOCIAL_LINKS,
+    );
     const titleSnapshot = input.titleSnapshot.trim();
     const organizationSnapshot = input.organizationSnapshot.trim();
     const role = (input.role ?? "invited").trim() || "invited";
@@ -4183,6 +7044,9 @@ export class EventStore extends DurableObject<AppBindings> {
     }
     if (biography.length > 2_000) {
       return { ok: false, status: 400, error: "Use 2000 characters or fewer for biography." };
+    }
+    if (!socialLinks.ok) {
+      return { ok: false, status: 400, error: socialLinks.error };
     }
 
     const matches = this.directoryIdentityMatches({ name, email });
@@ -4221,12 +7085,13 @@ export class EventStore extends DurableObject<AppBindings> {
       speakerId = `spk_dir_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
       const now = new Date().toISOString();
       this.ctx.storage.sql.exec(
-        `INSERT INTO speakers (id, name, email, biography, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO speakers (id, name, email, biography, social_links_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
         speakerId,
         name,
         email,
         biography,
+        serializeSpeakerSocialLinks(socialLinks.value),
         now,
       );
       reused = false;
@@ -4578,6 +7443,8 @@ export class EventStore extends DurableObject<AppBindings> {
     name?: string;
     email?: string;
     biography?: string;
+    socialLinks?: unknown;
+    headshotAssetId?: string | null;
     actorId: string;
     actorName: string;
   }):
@@ -4596,6 +7463,37 @@ export class EventStore extends DurableObject<AppBindings> {
     const name = input.name === undefined ? speaker.name : input.name.trim();
     const email = input.email === undefined ? speaker.email : input.email.trim().toLowerCase();
     const biography = input.biography === undefined ? speaker.biography : input.biography.trim();
+    const socialLinks =
+      input.socialLinks !== undefined
+        ? normalizeSpeakerSocialLinks(input.socialLinks)
+        : { ok: true as const, value: parseStoredSpeakerSocialLinks(speaker.social_links_json) };
+    if (!socialLinks.ok) {
+      return { ok: false, status: 400, error: socialLinks.error };
+    }
+    let headshotAssetId = speaker.headshot_asset_id;
+    if (input.headshotAssetId !== undefined) {
+      if (input.headshotAssetId === null) {
+        headshotAssetId = null;
+      } else {
+        const asset = this.getAsset(input.headshotAssetId);
+        if (
+          !asset ||
+          asset.status !== "complete" ||
+          asset.owner_speaker_id !== input.speakerId ||
+          asset.purpose !== "portal_headshot"
+        ) {
+          return { ok: false, status: 400, error: "That headshot upload is not available." };
+        }
+        this.ctx.storage.sql.exec(
+          `UPDATE assets
+           SET claimed_proposal_id = COALESCE(claimed_proposal_id, ?)
+           WHERE asset_id = ?`,
+          `organizer:${input.speakerId}`,
+          asset.asset_id,
+        );
+        headshotAssetId = asset.asset_id;
+      }
+    }
     if (!name || !email || !email.includes("@")) {
       return { ok: false, status: 400, error: "Name and a valid email are required." };
     }
@@ -4609,10 +7507,14 @@ export class EventStore extends DurableObject<AppBindings> {
       return { ok: false, status: 400, error: "One or more profile fields are too long." };
     }
     this.ctx.storage.sql.exec(
-      `UPDATE speakers SET name = ?, email = ?, biography = ? WHERE id = ?`,
+      `UPDATE speakers
+       SET name = ?, email = ?, biography = ?, social_links_json = ?, headshot_asset_id = ?
+       WHERE id = ?`,
       name,
       email,
       biography,
+      serializeSpeakerSocialLinks(socialLinks.value),
+      headshotAssetId,
       input.speakerId,
     );
     this.appendOnboardingHistory({
@@ -4620,6 +7522,73 @@ export class EventStore extends DurableObject<AppBindings> {
       taskId: null,
       type: "profile_updated",
       summary: "Organizer corrected current speaker profile fields.",
+      actorId: input.actorId,
+      actorName: input.actorName,
+    });
+    const updated = this.getOnboardingBoard().speakers.find(
+      (candidate) => candidate.speakerId === input.speakerId,
+    );
+    return updated
+      ? { ok: true, speaker: updated }
+      : { ok: false, status: 404, error: "Speaker not found in this event." };
+  }
+
+  updateParticipationWorkflow(input: {
+    speakerId: string;
+    workflowStatus: "invited" | "confirmed" | "preparing" | "ready" | "withdrawn";
+    travelPreferences: string;
+    logistics: Record<string, string>;
+    actorId: string;
+    actorName: string;
+  }):
+    | { ok: true; speaker: OnboardingBoardSpeaker }
+    | { ok: false; status: 400 | 404 | 409; error: string; code?: string; currentVersion?: number } {
+    const participation = this.ctx.storage.sql
+      .exec<{ id: string }>(
+        `SELECT id FROM event_participations
+         WHERE speaker_id = ?
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        input.speakerId,
+      )
+      .toArray()[0];
+    if (!participation) {
+      return { ok: false, status: 404, error: "Speaker not found in this event." };
+    }
+
+    const travelPreferences = input.travelPreferences.trim();
+    if (travelPreferences.length > 2_000) {
+      return { ok: false, status: 400, error: "Use 2000 characters or fewer for travel preferences." };
+    }
+    const logistics = Object.fromEntries(
+      Object.entries(input.logistics).map(([key, value]) => [key.trim(), value.trim()]),
+    );
+    if (
+      Object.keys(logistics).some((key) => !key || key.length > 100) ||
+      Object.values(logistics).some((value) => value.length > 500) ||
+      Object.keys(logistics).length > 20
+    ) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Use up to 20 logistics fields with labels under 100 and values under 500 characters.",
+      };
+    }
+
+    this.ctx.storage.sql.exec(
+      `UPDATE event_participations
+       SET workflow_status = ?, travel_preferences = ?, logistics_json = ?
+       WHERE id = ?`,
+      input.workflowStatus,
+      travelPreferences,
+      JSON.stringify(logistics),
+      participation.id,
+    );
+    this.appendOnboardingHistory({
+      speakerId: input.speakerId,
+      taskId: null,
+      type: "participation_updated",
+      summary: `Organizer set event workflow to ${input.workflowStatus.replaceAll("_", " ")}.`,
       actorId: input.actorId,
       actorName: input.actorName,
     });
@@ -4641,12 +7610,16 @@ export class EventStore extends DurableObject<AppBindings> {
       .exec<{
         id: string;
         speaker_id: string;
-        proposal_id: string | null;
-        title_snapshot: string;
-        organization_snapshot: string;
-        role: string;
-      }>(
-        `SELECT id, speaker_id, proposal_id, title_snapshot, organization_snapshot, role
+         proposal_id: string | null;
+         title_snapshot: string;
+         organization_snapshot: string;
+         role: string;
+         workflow_status: "invited" | "confirmed" | "preparing" | "ready" | "withdrawn";
+         travel_preferences: string;
+         logistics_json: string;
+       }>(
+        `SELECT id, speaker_id, proposal_id, title_snapshot, organization_snapshot, role,
+                workflow_status, travel_preferences, logistics_json
          FROM event_participations
          ORDER BY created_at DESC`,
       )
@@ -4699,7 +7672,7 @@ export class EventStore extends DurableObject<AppBindings> {
       ];
       const history = this.ctx.storage.sql
         .exec<OnboardingHistoryRow>(
-          `SELECT id, speaker_id, task_id, type, summary, actor_id, actor_name, created_at
+          `SELECT id, speaker_id, task_id, asset_id, type, summary, actor_id, actor_name, created_at
            FROM onboarding_history
            WHERE speaker_id = ?
            ORDER BY created_at DESC
@@ -4708,6 +7681,56 @@ export class EventStore extends DurableObject<AppBindings> {
         )
         .toArray()
         .map(mapOnboardingHistory);
+      const taskRows = this.listOnboardingTaskRows(participation.speaker_id);
+      const sessionRows = this.ctx.storage.sql
+        .exec<{
+          id: string;
+          title: string;
+          format: string;
+          room_id: string | null;
+          starts_at: string | null;
+          ends_at: string | null;
+        }>(`SELECT id, title, format, room_id, starts_at, ends_at FROM sessions`)
+        .toArray();
+      const sessionsById = new Map(sessionRows.map((row) => [row.id, row]));
+      const taskAttachments: OrganizerTaskAttachment[] = taskRows.flatMap((task) => {
+        const asset = this.getTaskAsset(task.asset_id);
+        if (!asset || !asset.uploadedAt) return [];
+        const session = task.session_id ? sessionsById.get(task.session_id) : null;
+        return [{
+          assetId: asset.assetId,
+          version: asset.version,
+          isLatest: asset.isLatest,
+          versions: asset.versions,
+          comments: asset.comments,
+          fileName: asset.fileName,
+          mime: asset.mime,
+          fileType: fileTypeLabel(asset.mime, asset.fileName),
+          size: asset.size,
+          uploadedAt: asset.uploadedAt,
+          previewable: isPreviewableMime(asset.mime),
+          dueState: deliverableDueState(task),
+          uploader: { id: speaker.id, name: speaker.name, email: speaker.email },
+          task: {
+            id: task.id,
+            title: task.title,
+            status: task.status,
+            dueAt: task.due_at,
+            completedAt: task.completed_at,
+          },
+          speaker: { id: speaker.id, name: speaker.name, email: speaker.email },
+          session: session
+            ? {
+                id: session.id,
+                title: session.title,
+                format: session.format,
+                roomId: session.room_id,
+                startsAt: session.starts_at,
+                endsAt: session.ends_at,
+              }
+            : null,
+        }];
+      });
 
       const lastContact = history.find(
         (entry) =>
@@ -4715,23 +7738,44 @@ export class EventStore extends DurableObject<AppBindings> {
           entry.type === "reminder_send_failed" ||
           entry.type === "reminder_queued",
       );
+      let logistics: Record<string, string> = {};
+      try {
+        const parsed = JSON.parse(participation.logistics_json) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          logistics = Object.fromEntries(
+            Object.entries(parsed).filter(
+              (entry): entry is [string, string] =>
+                typeof entry[0] === "string" && typeof entry[1] === "string",
+            ),
+          );
+        }
+      } catch {
+        logistics = {};
+      }
 
       speakers.push({
         speakerId: speaker.id,
         name: speaker.name,
         email: speaker.email,
         biography: speaker.biography,
+        socialLinks: parseStoredSpeakerSocialLinks(speaker.social_links_json),
+        headshotAssetId: speaker.headshot_asset_id,
+        headshotFileName: this.getTaskAsset(speaker.headshot_asset_id)?.fileName ?? null,
         participationId: participation.id,
         titleSnapshot: participation.title_snapshot,
         organizationSnapshot: participation.organization_snapshot,
         proposalId: participation.proposal_id,
         proposalTitle,
         role: participation.role,
+        workflowStatus: participation.workflow_status,
+        travelPreferences: participation.travel_preferences,
+        logistics,
         openTaskCount: openTasks.length,
         overdueCount,
         nextDueAt,
         daysUntilNextDue: daysUntil(nextDueAt, nowMs),
         readinessFlags,
+        taskAttachments,
         missingWork,
         lastContactAt: lastContact?.createdAt ?? null,
         lastContactStatus: lastContact
@@ -4768,11 +7812,61 @@ export class EventStore extends DurableObject<AppBindings> {
     return { eventId: event.id, speakers, drafts };
   }
 
+  getOnboardingFilesLibrary(nowMs = Date.now()): FilesLibraryResponse {
+    const board = this.getOnboardingBoard(nowMs);
+    const files: FilesLibraryItem[] = board.speakers
+      .flatMap((speaker) => speaker.taskAttachments ?? [])
+      .filter((attachment) => attachment.isLatest)
+      .map((attachment) => {
+        const sessionSegment = attachment.session
+          ? safeExportSegment(attachment.session.title, attachment.session.id)
+          : "No-session";
+        const speakerSegment = safeExportSegment(attachment.speaker.name, attachment.speaker.id);
+        const taskSegment = safeExportSegment(attachment.task.title, attachment.task.id);
+        const fileSegment = safeExportSegment(attachment.fileName, "file");
+        return {
+          ...attachment,
+          currentVersion: attachment.version,
+          versionCount: attachment.versions.length,
+          safeExportPath: `${sessionSegment}/${speakerSegment}/${taskSegment}/v${attachment.version}-${fileSegment}`,
+        };
+      })
+      .sort((a, b) => {
+        const sessionCompare = (a.session?.title ?? "").localeCompare(b.session?.title ?? "");
+        if (sessionCompare !== 0) return sessionCompare;
+        const speakerCompare = a.speaker.name.localeCompare(b.speaker.name);
+        if (speakerCompare !== 0) return speakerCompare;
+        const taskCompare = a.task.title.localeCompare(b.task.title);
+        if (taskCompare !== 0) return taskCompare;
+        return a.fileName.localeCompare(b.fileName);
+      });
+    return {
+      eventId: board.eventId,
+      generatedAt: new Date(nowMs).toISOString(),
+      files,
+      filters: {
+        speakers: [...new Map(files.map((file) => [file.speaker.id, {
+          id: file.speaker.id,
+          name: file.speaker.name,
+        }])).values()].sort((a, b) => a.name.localeCompare(b.name)),
+        sessions: [...new Map(files.filter((file) => file.session).map((file) => [
+          file.session!.id,
+          { id: file.session!.id, title: file.session!.title },
+        ])).values()].sort((a, b) => a.title.localeCompare(b.title)),
+        taskStatuses: [...new Set(files.map((file) => file.task.status))].sort(),
+        fileTypes: [...new Set(files.map((file) => file.fileType))].sort(),
+        dueStates: [...new Set(files.map((file) => file.dueState))].sort(),
+      },
+    };
+  }
+
   prepareOnboardingReminder(input: {
     speakerId: string;
     actorId: string;
     actorName: string;
     nowMs?: number;
+    taskIds?: string[];
+    reason?: string;
   }): OnboardingReminderDraft | { error: string } {
     const event = this.getEvent();
     if (!event) return { error: "Event not found." };
@@ -4790,8 +7884,9 @@ export class EventStore extends DurableObject<AppBindings> {
     if (!participation) return { error: "Speaker is not part of this event." };
 
     const nowMs = input.nowMs ?? Date.now();
+    const taskFilter = input.taskIds?.length ? new Set(input.taskIds) : null;
     const openTasks = this.mapTasksForSpeaker(input.speakerId).filter(
-      (task) => task.status === "open",
+      (task) => task.status === "open" && (!taskFilter || taskFilter.has(task.id)),
     );
 
     const lines = openTasks.map((task) => {
@@ -4843,7 +7938,7 @@ export class EventStore extends DurableObject<AppBindings> {
       .join("");
 
     const id = `rem_${crypto.randomUUID().replaceAll("-", "").slice(0, 18)}`;
-    const now = new Date().toISOString();
+    const now = new Date(nowMs).toISOString();
     this.ctx.storage.sql.exec(
       `INSERT INTO reminder_drafts
         (id, speaker_id, proposal_id, to_email, subject, body_text, body_html, status,
@@ -4867,7 +7962,9 @@ export class EventStore extends DurableObject<AppBindings> {
       speakerId: input.speakerId,
       taskId: null,
       type: "reminder_draft_created",
-      summary: `Prepared reminder draft covering ${openTasks.length} open task(s).`,
+      summary: input.reason
+        ? `Prepared reminder draft covering ${openTasks.length} open task(s): ${input.reason}`
+        : `Prepared reminder draft covering ${openTasks.length} open task(s).`,
       actorId: input.actorId,
       actorName: input.actorName,
     });
@@ -5004,6 +8101,315 @@ export class EventStore extends DurableObject<AppBindings> {
     return { draft: this.getReminderDraft(id)!, outboxId };
   }
 
+  private reminderStatusFromDraft(
+    draft: OnboardingReminderDraft,
+  ): OnboardingReminderRecipientResult["status"] {
+    if (draft.status === "draft") return "prepared";
+    if (draft.status === "queued") {
+      const outbox = draft.outboxId ? this.getOutboxMessage(draft.outboxId) : null;
+      if (outbox?.status === "sent") return "sent";
+      if (outbox?.status === "failed" && outbox.nextAttemptAt) return "retry_scheduled";
+      if (outbox?.status === "failed") return "failed";
+      return "queued";
+    }
+    if (draft.status === "sent") return "sent";
+    return draft.status === "failed" ? "failed" : "skipped";
+  }
+
+  private ensureReminderBatchTable(): void {
+    this.ctx.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS onboarding_reminder_batches (
+        idempotency_key TEXT PRIMARY KEY,
+        response_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    `);
+  }
+
+  private readReminderBatch(idempotencyKey: string): OnboardingBulkReminderResult | null {
+    this.ensureReminderBatchTable();
+    const row = this.ctx.storage.sql
+      .exec<{ response_json: string }>(
+        `SELECT response_json FROM onboarding_reminder_batches WHERE idempotency_key = ?`,
+        idempotencyKey,
+      )
+      .toArray()[0];
+    return row ? JSON.parse(row.response_json) as OnboardingBulkReminderResult : null;
+  }
+
+  private writeReminderBatch(result: OnboardingBulkReminderResult): void {
+    this.ensureReminderBatchTable();
+    this.ctx.storage.sql.exec(
+      `INSERT INTO onboarding_reminder_batches (idempotency_key, response_json, created_at)
+       VALUES (?, ?, ?)`,
+      result.idempotencyKey,
+      JSON.stringify(result),
+      result.processedAt,
+    );
+  }
+
+  private recentReminderDraftForTasks(
+    speakerId: string,
+    taskIds: string[],
+    cutoffIso: string,
+  ): OnboardingReminderDraft | null {
+    const rows = this.ctx.storage.sql
+      .exec<ReminderDraftRow>(
+        `SELECT id, speaker_id, proposal_id, to_email, subject, body_text, body_html,
+                status, missing_task_ids_json, outbox_id, last_error, created_by_id,
+                created_by_name, created_at, updated_at, sent_at
+         FROM reminder_drafts
+         WHERE speaker_id = ? AND updated_at >= ? AND status != 'discarded'
+         ORDER BY updated_at DESC`,
+        speakerId,
+        cutoffIso,
+      )
+      .toArray()
+      .map(mapReminderDraft);
+    const taskSet = new Set(taskIds);
+    return rows.find((draft) => draft.missingTaskIds.some((id) => taskSet.has(id))) ?? null;
+  }
+
+  prepareBulkOnboardingReminders(input: {
+    speakerIds: string[];
+    mode: "draft" | "send";
+    actorId: string;
+    actorName: string;
+    idempotencyKey: string;
+    nowMs?: number;
+    reasonsBySpeakerId?: Record<string, string>;
+    taskIdsBySpeakerId?: Record<string, string[]>;
+  }): OnboardingBulkReminderResult | { error: string } {
+    const idempotencyKey = input.idempotencyKey.trim();
+    if (!idempotencyKey) return { error: "idempotencyKey is required." };
+    const existing = this.readReminderBatch(idempotencyKey);
+    if (existing) return existing;
+
+    const nowMs = input.nowMs ?? Date.now();
+    const processedAt = new Date(nowMs).toISOString();
+    const speakerIds = [...new Set(input.speakerIds.map((id) => id.trim()))].filter(Boolean);
+    if (speakerIds.length === 0) return { error: "Choose at least one speaker." };
+    if (speakerIds.length > 100) return { error: "Choose 100 speakers or fewer per reminder operation." };
+
+    const board = this.getOnboardingBoard(nowMs);
+    const rowsById = new Map(board.speakers.map((speaker) => [speaker.speakerId, speaker]));
+    const recipients: OnboardingReminderRecipientResult[] = [];
+
+    for (const speakerId of speakerIds) {
+      const row = rowsById.get(speakerId);
+      if (!row) return { error: "Speaker not found in this event." };
+      const selectedTaskIds = input.taskIdsBySpeakerId?.[speakerId];
+      const missing = row.missingWork.filter((task) =>
+        selectedTaskIds?.length ? selectedTaskIds.includes(task.taskId) : true,
+      );
+      const taskSummaries = missing.map((task) => ({
+        taskId: task.taskId,
+        title: task.title,
+        dueAt: task.dueAt,
+      }));
+      const reason =
+        input.reasonsBySpeakerId?.[speakerId] ??
+        `${missing.length} outstanding onboarding task(s) selected for reminder.`;
+      if (missing.length === 0) {
+        recipients.push({
+          speakerId,
+          speakerName: row.name,
+          email: row.email,
+          status: "skipped",
+          reason: "No open onboarding tasks matched this reminder operation.",
+          taskIds: [],
+          taskSummaries,
+          draftId: null,
+          outboxId: null,
+          lastError: null,
+        });
+        continue;
+      }
+
+      const prepared = this.prepareOnboardingReminder({
+        speakerId,
+        actorId: input.actorId,
+        actorName: input.actorName,
+        nowMs,
+        taskIds: missing.map((task) => task.taskId),
+        reason,
+      });
+      if ("error" in prepared) {
+        recipients.push({
+          speakerId,
+          speakerName: row.name,
+          email: row.email,
+          status: "failed",
+          reason: prepared.error,
+          taskIds: missing.map((task) => task.taskId),
+          taskSummaries,
+          draftId: null,
+          outboxId: null,
+          lastError: prepared.error,
+        });
+        continue;
+      }
+
+      let draft = prepared;
+      if (input.mode === "send") {
+        const queued = this.queueReminderSend(prepared.id);
+        if ("error" in queued) {
+          recipients.push({
+            speakerId,
+            speakerName: row.name,
+            email: row.email,
+            status: "failed",
+            reason: queued.error,
+            taskIds: missing.map((task) => task.taskId),
+            taskSummaries,
+            draftId: prepared.id,
+            outboxId: prepared.outboxId,
+            lastError: queued.error,
+          });
+          continue;
+        }
+        draft = queued.draft;
+      }
+
+      recipients.push({
+        speakerId,
+        speakerName: row.name,
+        email: row.email,
+        status: this.reminderStatusFromDraft(draft),
+        reason,
+        taskIds: missing.map((task) => task.taskId),
+        taskSummaries,
+        draftId: draft.id,
+        outboxId: draft.outboxId,
+        lastError: draft.lastError,
+      });
+    }
+
+    const counts = {
+      selected: speakerIds.length,
+      prepared: recipients.filter((recipient) => recipient.status === "prepared").length,
+      queued: recipients.filter((recipient) => recipient.status === "queued").length,
+      sent: recipients.filter((recipient) => recipient.status === "sent").length,
+      failed: recipients.filter((recipient) => recipient.status === "failed").length,
+      retryScheduled: recipients.filter((recipient) => recipient.status === "retry_scheduled").length,
+      skipped: recipients.filter((recipient) => recipient.status === "skipped").length,
+    };
+    const result: OnboardingBulkReminderResult = {
+      idempotencyKey,
+      mode: input.mode,
+      processedAt,
+      counts,
+      recipients,
+    };
+    this.writeReminderBatch(result);
+    return result;
+  }
+
+  processAutomaticOnboardingReminders(input: {
+    actorId?: string;
+    actorName?: string;
+    nowMs?: number;
+  } = {}): OnboardingAutomaticReminderResult {
+    const policy = this.getOnboardingReminderPolicy();
+    const nowMs = input.nowMs ?? Date.now();
+    const processedAt = new Date(nowMs).toISOString();
+    if (!policy.enabled) {
+      return {
+        idempotencyKey: `auto-onboarding-reminders-${processedAt}`,
+        mode: policy.mode,
+        processedAt,
+        counts: {
+          selected: 0,
+          prepared: 0,
+          queued: 0,
+          sent: 0,
+          failed: 0,
+          retryScheduled: 0,
+          skipped: 0,
+        },
+        recipients: [],
+        policy,
+      };
+    }
+
+    const thresholdMs = nowMs + policy.dueWindowDays * 24 * 60 * 60 * 1000;
+    const cutoffIso = new Date(nowMs - policy.suppressWithinHours * 60 * 60 * 1000).toISOString();
+    const board = this.getOnboardingBoard(nowMs);
+    const speakerIds: string[] = [];
+    const reasonsBySpeakerId: Record<string, string> = {};
+    const taskIdsBySpeakerId: Record<string, string[]> = {};
+
+    for (const speaker of board.speakers) {
+      const dueTasks = speaker.missingWork.filter((task) => {
+        if (!task.dueAt) return false;
+        const dueMs = Date.parse(task.dueAt);
+        return Number.isFinite(dueMs) && dueMs <= thresholdMs;
+      });
+      if (dueTasks.length === 0) continue;
+      const taskIds = dueTasks.map((task) => task.taskId);
+      const recent = this.recentReminderDraftForTasks(speaker.speakerId, taskIds, cutoffIso);
+      if (recent) continue;
+      speakerIds.push(speaker.speakerId);
+      taskIdsBySpeakerId[speaker.speakerId] = taskIds;
+      const dueLabels = dueTasks.map((task) => {
+        const due = task.dueAt ? new Date(task.dueAt).toISOString().slice(0, 10) : "no due date";
+        return `${task.title} due ${due}`;
+      });
+      reasonsBySpeakerId[speaker.speakerId] =
+        `Automatic policy qualified ${speaker.name}: ${dueLabels.join("; ")} within ${policy.dueWindowDays} day(s) of due date. Duplicate suppression window: ${policy.suppressWithinHours} hour(s).`;
+    }
+
+    if (speakerIds.length === 0) {
+      return {
+        idempotencyKey: `auto-onboarding-reminders-${processedAt}`,
+        mode: policy.mode,
+        processedAt,
+        counts: {
+          selected: 0,
+          prepared: 0,
+          queued: 0,
+          sent: 0,
+          failed: 0,
+          retryScheduled: 0,
+          skipped: 0,
+        },
+        recipients: [],
+        policy,
+      };
+    }
+
+    const mode = policy.mode === "send" && policy.unattendedSendAuthorized ? "send" : "draft";
+    const bulk = this.prepareBulkOnboardingReminders({
+      speakerIds,
+      mode,
+      actorId: input.actorId ?? "system:onboarding-reminders",
+      actorName: input.actorName ?? "Onboarding reminder policy",
+      idempotencyKey: `auto-onboarding-reminders-${processedAt}`,
+      nowMs,
+      reasonsBySpeakerId,
+      taskIdsBySpeakerId,
+    });
+    if ("error" in bulk) {
+      return {
+        idempotencyKey: `auto-onboarding-reminders-${processedAt}`,
+        mode,
+        processedAt,
+        counts: {
+          selected: 0,
+          prepared: 0,
+          queued: 0,
+          sent: 0,
+          failed: 1,
+          retryScheduled: 0,
+          skipped: 0,
+        },
+        recipients: [],
+        policy,
+      };
+    }
+    return { ...bulk, policy };
+  }
+
   updateSessionForTest(
     sessionId: string,
     patch: {
@@ -5051,6 +8457,457 @@ export class EventStore extends DurableObject<AppBindings> {
         row.id,
       );
     }
+  }
+
+  private backfillSessionContentFields(): void {
+    this.ctx.storage.sql.exec(
+      `UPDATE sessions
+       SET content_abstract = CASE
+             WHEN content_abstract = '' AND proposal_id IS NOT NULL
+             THEN COALESCE((SELECT abstract FROM proposals WHERE proposals.id = sessions.proposal_id), '')
+             ELSE content_abstract
+           END,
+           public_content = CASE
+             WHEN public_content = '' AND proposal_id IS NOT NULL
+             THEN COALESCE((SELECT abstract FROM proposals WHERE proposals.id = sessions.proposal_id), '')
+             ELSE public_content
+           END,
+           content_updated_at = COALESCE(content_updated_at, created_at),
+           content_updated_by_json = COALESCE(
+             content_updated_by_json,
+             '{"id":"system:content-import","name":"Imported session content"}'
+           )`,
+    );
+  }
+
+  private contentSnapshot(row: {
+    title: string;
+    content_abstract: string;
+    public_content: string;
+    content_status: string;
+  }): SessionContentSnapshot {
+    return {
+      title: row.title,
+      abstract: row.content_abstract ?? "",
+      publicContent: row.public_content ?? "",
+      status: row.content_status as SessionContentStatus,
+    };
+  }
+
+  private contentEditor(
+    value: string | null,
+  ): { id: string; name: string } | null {
+    if (!value) return null;
+    try {
+      const parsed = JSON.parse(value) as { id?: unknown; name?: unknown };
+      if (typeof parsed.id === "string" && typeof parsed.name === "string") {
+        return { id: parsed.id, name: parsed.name };
+      }
+    } catch {
+      // Treat malformed legacy metadata as unavailable rather than exposing it.
+    }
+    return null;
+  }
+
+  private ensureSessionContentHistory(sessionId?: string): void {
+    const rows = this.ctx.storage.sql
+      .exec<{
+        id: string;
+        title: string;
+        content_abstract: string;
+        public_content: string;
+        content_status: string;
+        content_version: number;
+        content_updated_at: string | null;
+        created_at: string;
+      }>(
+        `SELECT id, title, content_abstract, public_content, content_status,
+                COALESCE(content_version, 1) AS content_version,
+                content_updated_at, created_at
+         FROM sessions
+         ${sessionId ? "WHERE id = ?" : ""}`,
+        ...(sessionId ? [sessionId] : []),
+      )
+      .toArray();
+    for (const row of rows) {
+      this.ctx.storage.sql.exec(
+        `INSERT OR IGNORE INTO session_content_history
+          (id, session_id, version, title, abstract, public_content, status,
+           changed_fields_json, previous_json, actor_id, actor_name, created_at, change_kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'system:content-history',
+                 'Session content history', ?, 'initial')`,
+        `sch_${row.id}_${Number(row.content_version) || 1}`,
+        row.id,
+        Number(row.content_version) || 1,
+        row.title,
+        row.content_abstract ?? "",
+        row.public_content ?? "",
+        row.content_status,
+        JSON.stringify(["title", "abstract", "publicContent", "status"]),
+        row.content_updated_at ?? row.created_at,
+      );
+    }
+  }
+
+  private listSessionContentHistory(sessionId: string): SessionContentHistoryEntry[] {
+    return this.ctx.storage.sql
+      .exec<{
+        id: string;
+        session_id: string;
+        version: number;
+        title: string;
+        abstract: string;
+        public_content: string;
+        status: string;
+        changed_fields_json: string;
+        previous_json: string | null;
+        actor_id: string;
+        actor_name: string;
+        created_at: string;
+        change_kind: string;
+      }>(
+        `SELECT id, session_id, version, title, abstract, public_content, status,
+                changed_fields_json, previous_json, actor_id, actor_name, created_at,
+                change_kind
+         FROM session_content_history
+         WHERE session_id = ?
+         ORDER BY version DESC`,
+        sessionId,
+      )
+      .toArray()
+      .map((row) => {
+        let changedFields: SessionContentField[] = [];
+        try {
+          changedFields = JSON.parse(row.changed_fields_json) as SessionContentField[];
+        } catch {
+          changedFields = [];
+        }
+        let previous: SessionContentSnapshot | null = null;
+        if (row.previous_json) {
+          try {
+            previous = JSON.parse(row.previous_json) as SessionContentSnapshot;
+          } catch {
+            previous = null;
+          }
+        }
+        return {
+          id: row.id,
+          sessionId: row.session_id,
+          version: Number(row.version),
+          title: row.title,
+          abstract: row.abstract,
+          publicContent: row.public_content,
+          status: row.status as SessionContentStatus,
+          changedFields,
+          previous,
+          actorId: row.actor_id,
+          actorName: row.actor_name,
+          createdAt: row.created_at,
+          changeKind: row.change_kind as SessionContentHistoryEntry["changeKind"],
+        };
+      });
+  }
+
+  private toSessionContentRecord(row: {
+    id: string;
+    proposal_id: string | null;
+    course_check_plan_id: string;
+    title: string;
+    content_abstract: string;
+    public_content: string;
+    content_status: string;
+    content_version: number;
+    content_updated_at: string | null;
+    content_updated_by_json: string | null;
+    format: string;
+    track_id: string;
+    room_id: string | null;
+    starts_at: string | null;
+    ends_at: string | null;
+    created_at: string;
+    calendar_uid: string;
+    calendar_sequence: number;
+    calendar_invite_recorded: number;
+  }): SessionContentRecord {
+    const session = this.toOrganizerSession(row);
+    return {
+      ...session,
+      abstract: row.content_abstract ?? "",
+      publicContent: row.public_content ?? "",
+      contentStatus: row.content_status as SessionContentStatus,
+      contentVersion: Number(row.content_version) || 1,
+      contentUpdatedAt: row.content_updated_at ?? row.created_at,
+      contentUpdatedBy: this.contentEditor(row.content_updated_by_json),
+      contentHistory: this.listSessionContentHistory(row.id),
+    };
+  }
+
+  getSessionContentWorkspace(): SessionContentWorkspaceResponse {
+    this.backfillSessionContentFields();
+    this.ensureSessionContentHistory();
+    const event = this.ctx.storage.sql
+      .exec<{ id: string }>(`SELECT id FROM events LIMIT 1`)
+      .toArray()[0];
+    return {
+      eventId: event?.id ?? "",
+      sessions: this.loadSessionRows().map((row) => this.toSessionContentRecord(row)),
+    };
+  }
+
+  updateSessionContent(
+    sessionId: string,
+    patch: SessionContentPatch,
+    actor: { id: string; name: string },
+  ):
+    | { ok: true; result: { session: SessionContentRecord } }
+    | {
+        ok: false;
+        status: 400 | 404 | 409;
+        code: string;
+        error: string;
+      } {
+    this.backfillSessionContentFields();
+    this.ensureSessionContentHistory(sessionId);
+    if (!Number.isInteger(patch.expectedVersion) || patch.expectedVersion < 1) {
+      return {
+        ok: false,
+        status: 400,
+        code: "invalid_content_version",
+        error: "expectedVersion must be a positive integer.",
+      };
+    }
+    if (
+      patch.status !== undefined &&
+      patch.status !== "draft" &&
+      patch.status !== "needs-changes" &&
+      patch.status !== "approved"
+    ) {
+      return {
+        ok: false,
+        status: 400,
+        code: "invalid_content_status",
+        error: "status must be draft, needs-changes, or approved.",
+      };
+    }
+
+    let conflict = false;
+    let changed = false;
+    this.ctx.storage.transactionSync(() => {
+      const current = this.loadSessionRows().find((row) => row.id === sessionId);
+      if (!current) return;
+      if (Number(current.content_version) !== patch.expectedVersion) {
+        conflict = true;
+        return;
+      }
+      const nextTitle = patch.title === undefined ? current.title : patch.title.trim();
+      if (!nextTitle) {
+        throw new Error("Session title cannot be empty.");
+      }
+      const nextAbstract =
+        patch.abstract === undefined ? current.content_abstract : patch.abstract.trim();
+      const nextPublicContent =
+        patch.publicContent === undefined
+          ? current.public_content
+          : patch.publicContent.trim();
+      const contentFields: SessionContentField[] = [];
+      if (nextTitle !== current.title) contentFields.push("title");
+      if (nextAbstract !== current.content_abstract) contentFields.push("abstract");
+      if (nextPublicContent !== current.public_content) contentFields.push("publicContent");
+      const nextStatus =
+        patch.status ??
+        (contentFields.length > 0
+          ? ("draft" as SessionContentStatus)
+          : (current.content_status as SessionContentStatus));
+      if (nextStatus !== current.content_status) contentFields.push("status");
+      if (contentFields.length === 0) return;
+      changed = true;
+      const previous = this.contentSnapshot(current);
+      const nextVersion = Number(current.content_version) + 1;
+      const now = new Date().toISOString();
+      const changeKind: SessionContentHistoryEntry["changeKind"] =
+        contentFields.length === 1 && contentFields[0] === "status" ? "status" : "edit";
+      this.ctx.storage.sql.exec(
+        `UPDATE sessions
+         SET title = ?, content_abstract = ?, public_content = ?, content_status = ?,
+             content_version = ?, content_updated_at = ?, content_updated_by_json = ?
+         WHERE id = ? AND content_version = ?`,
+        nextTitle,
+        nextAbstract,
+        nextPublicContent,
+        nextStatus,
+        nextVersion,
+        now,
+        JSON.stringify(actor),
+        sessionId,
+        patch.expectedVersion,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT INTO session_content_history
+          (id, session_id, version, title, abstract, public_content, status,
+           changed_fields_json, previous_json, actor_id, actor_name, created_at, change_kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        crypto.randomUUID(),
+        sessionId,
+        nextVersion,
+        nextTitle,
+        nextAbstract,
+        nextPublicContent,
+        nextStatus,
+        JSON.stringify(contentFields),
+        JSON.stringify(previous),
+        actor.id,
+        actor.name,
+        now,
+        changeKind,
+      );
+    });
+    if (!this.loadSessionRows().some((row) => row.id === sessionId)) {
+      return { ok: false, status: 404, code: "session_not_found", error: "Session not found." };
+    }
+    if (conflict) {
+      return {
+        ok: false,
+        status: 409,
+        code: "content_version_mismatch",
+        error: "Session content changed since you loaded it.",
+      };
+    }
+    const session = this.getSessionContentWorkspace().sessions.find(
+      (item) => item.id === sessionId,
+    );
+    if (!session) {
+      return { ok: false, status: 404, code: "session_not_found", error: "Session not found." };
+    }
+    return { ok: true, result: { session } };
+  }
+
+  restoreSessionContent(
+    sessionId: string,
+    expectedVersion: number,
+    restoreVersion: number,
+    actor: { id: string; name: string },
+  ):
+    | { ok: true; result: { session: SessionContentRecord } }
+    | {
+        ok: false;
+        status: 400 | 404 | 409;
+        code: string;
+        error: string;
+      } {
+    this.backfillSessionContentFields();
+    this.ensureSessionContentHistory(sessionId);
+    if (
+      !Number.isInteger(expectedVersion) ||
+      expectedVersion < 1 ||
+      !Number.isInteger(restoreVersion) ||
+      restoreVersion < 1
+    ) {
+      return {
+        ok: false,
+        status: 400,
+        code: "invalid_content_version",
+        error: "expectedVersion and restoreVersion must be positive integers.",
+      };
+    }
+    let conflict = false;
+    let missing = false;
+    let invalidTarget = false;
+    this.ctx.storage.transactionSync(() => {
+      const current = this.loadSessionRows().find((row) => row.id === sessionId);
+      if (!current) {
+        missing = true;
+        return;
+      }
+      if (Number(current.content_version) !== expectedVersion) {
+        conflict = true;
+        return;
+      }
+      const target = this.ctx.storage.sql
+        .exec<{
+          title: string;
+          abstract: string;
+          public_content: string;
+          status: string;
+        }>(
+          `SELECT title, abstract, public_content, status
+           FROM session_content_history
+           WHERE session_id = ? AND version = ?`,
+          sessionId,
+          restoreVersion,
+        )
+        .toArray()[0];
+      if (!target || restoreVersion >= expectedVersion) {
+        invalidTarget = true;
+        return;
+      }
+      const previous = this.contentSnapshot(current);
+      const nextVersion = expectedVersion + 1;
+      const now = new Date().toISOString();
+      const changedFields: SessionContentField[] = [];
+      if (target.title !== current.title) changedFields.push("title");
+      if (target.abstract !== current.content_abstract) changedFields.push("abstract");
+      if (target.public_content !== current.public_content) changedFields.push("publicContent");
+      if (target.status !== current.content_status) changedFields.push("status");
+      this.ctx.storage.sql.exec(
+        `UPDATE sessions
+         SET title = ?, content_abstract = ?, public_content = ?, content_status = ?,
+             content_version = ?, content_updated_at = ?, content_updated_by_json = ?
+         WHERE id = ? AND content_version = ?`,
+        target.title,
+        target.abstract,
+        target.public_content,
+        target.status,
+        nextVersion,
+        now,
+        JSON.stringify(actor),
+        sessionId,
+        expectedVersion,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT INTO session_content_history
+          (id, session_id, version, title, abstract, public_content, status,
+           changed_fields_json, previous_json, actor_id, actor_name, created_at, change_kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'restore')`,
+        crypto.randomUUID(),
+        sessionId,
+        nextVersion,
+        target.title,
+        target.abstract,
+        target.public_content,
+        target.status,
+        JSON.stringify(changedFields),
+        JSON.stringify(previous),
+        actor.id,
+        actor.name,
+        now,
+      );
+    });
+    if (missing) {
+      return { ok: false, status: 404, code: "session_not_found", error: "Session not found." };
+    }
+    if (conflict) {
+      return {
+        ok: false,
+        status: 409,
+        code: "content_version_mismatch",
+        error: "Session content changed since you loaded it.",
+      };
+    }
+    if (invalidTarget) {
+      return {
+        ok: false,
+        status: 400,
+        code: "invalid_restore_version",
+        error: "Restore must target an earlier content version.",
+      };
+    }
+    const session = this.getSessionContentWorkspace().sessions.find(
+      (item) => item.id === sessionId,
+    );
+    if (!session) {
+      return { ok: false, status: 404, code: "session_not_found", error: "Session not found." };
+    }
+    return { ok: true, result: { session } };
   }
 
   private roomNameMap(): Map<string, string> {
@@ -5108,6 +8965,12 @@ export class EventStore extends DurableObject<AppBindings> {
     proposal_id: string | null;
     course_check_plan_id: string;
     title: string;
+    content_abstract: string;
+    public_content: string;
+    content_status: string;
+    content_version: number;
+    content_updated_at: string | null;
+    content_updated_by_json: string | null;
     format: string;
     track_id: string;
     room_id: string | null;
@@ -5126,6 +8989,12 @@ export class EventStore extends DurableObject<AppBindings> {
       proposalId: row.proposal_id,
       courseCheckPlanId: row.course_check_plan_id,
       title: row.title,
+      abstract: row.content_abstract ?? "",
+      publicContent: row.public_content ?? "",
+      contentStatus: row.content_status as SessionContentStatus,
+      contentVersion: Number(row.content_version) || 1,
+      contentUpdatedAt: row.content_updated_at ?? row.created_at,
+      contentUpdatedBy: this.contentEditor(row.content_updated_by_json),
       format: row.format,
       trackId: row.track_id,
       trackName: tracks.get(row.track_id) ?? row.track_id,
@@ -5153,6 +9022,12 @@ export class EventStore extends DurableObject<AppBindings> {
         proposal_id: string | null;
         course_check_plan_id: string;
         title: string;
+        content_abstract: string;
+        public_content: string;
+        content_status: string;
+        content_version: number;
+        content_updated_at: string | null;
+        content_updated_by_json: string | null;
         format: string;
         track_id: string;
         room_id: string | null;
@@ -5163,7 +9038,13 @@ export class EventStore extends DurableObject<AppBindings> {
         calendar_sequence: number;
         calendar_invite_recorded: number;
       }>(
-        `SELECT id, proposal_id, course_check_plan_id, title, format, track_id,
+        `SELECT id, proposal_id, course_check_plan_id, title,
+                COALESCE(content_abstract, '') AS content_abstract,
+                COALESCE(public_content, '') AS public_content,
+                COALESCE(content_status, 'approved') AS content_status,
+                COALESCE(content_version, 1) AS content_version,
+                content_updated_at, content_updated_by_json,
+                format, track_id,
                 room_id, starts_at, ends_at, created_at,
                 COALESCE(calendar_uid, '') AS calendar_uid,
                 COALESCE(calendar_sequence, 0) AS calendar_sequence,
@@ -5294,6 +9175,221 @@ export class EventStore extends DurableObject<AppBindings> {
     return recipients;
   }
 
+
+  private getAgendaVersion(): number {
+    return Number(
+      this.ctx.storage.sql
+        .exec<{ agenda_version: number }>(
+          `SELECT COALESCE(agenda_version, 0) AS agenda_version FROM events LIMIT 1`,
+        )
+        .toArray()[0]?.agenda_version ?? 0,
+    );
+  }
+
+  private listAgendaAuditEvents(): AgendaAuditEvent[] {
+    return this.ctx.storage.sql
+      .exec<{
+        id: string;
+        type: string;
+        actor_id: string;
+        actor_name: string;
+        session_ids_json: string;
+        summary: string;
+        created_at: string;
+      }>(
+        `SELECT id, type, actor_id, actor_name, session_ids_json, summary, created_at
+         FROM agenda_audit_events
+         ORDER BY created_at DESC, id DESC
+         LIMIT 100`,
+      )
+      .toArray()
+      .map((row) => {
+        let sessionIds: string[] = [];
+        try {
+          const parsed = JSON.parse(row.session_ids_json) as unknown;
+          if (Array.isArray(parsed)) {
+            sessionIds = parsed.filter((value): value is string => typeof value === "string");
+          }
+        } catch {
+          sessionIds = [];
+        }
+        return {
+          id: row.id,
+          type: row.type as AgendaAuditEvent["type"],
+          actorId: row.actor_id,
+          actorName: row.actor_name,
+          sessionIds,
+          summary: row.summary,
+          createdAt: row.created_at,
+        };
+      });
+  }
+
+  private appendAgendaAuditEvent(input: {
+    type: AgendaAuditEvent["type"];
+    actorId: string;
+    actorName: string;
+    sessionIds: string[];
+    summary: string;
+    createdAt: string;
+  }): AgendaAuditEvent {
+    const audit: AgendaAuditEvent = {
+      id: `agenda_audit_${input.createdAt}_${crypto.randomUUID()}`,
+      type: input.type,
+      actorId: input.actorId,
+      actorName: input.actorName,
+      sessionIds: [...input.sessionIds],
+      summary: input.summary,
+      createdAt: input.createdAt,
+    };
+    this.ctx.storage.sql.exec(
+      `INSERT INTO agenda_audit_events
+        (id, type, actor_id, actor_name, session_ids_json, summary, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      audit.id,
+      audit.type,
+      audit.actorId,
+      audit.actorName,
+      JSON.stringify(audit.sessionIds),
+      audit.summary,
+      audit.createdAt,
+    );
+    return audit;
+  }
+
+  private applySessionPlacementRow(
+    current: {
+      id: string;
+      room_id: string | null;
+      starts_at: string | null;
+      ends_at: string | null;
+      calendar_uid: string;
+      calendar_sequence: number;
+      calendar_invite_recorded: number;
+    },
+    next: {
+      roomId: string | null;
+      startsAt: string | null;
+      endsAt: string | null;
+    },
+    now: string,
+    createdIntents: CalendarIntentRecord[],
+  ): boolean {
+    const scheduleChanged =
+      next.roomId !== current.room_id ||
+      next.startsAt !== current.starts_at ||
+      next.endsAt !== current.ends_at;
+    const calendarUid = current.calendar_uid || `cal_${current.id}`;
+    let calendarSequence = Number(current.calendar_sequence) || 0;
+    let calendarInviteRecorded = Number(current.calendar_invite_recorded) === 1;
+    const hasTimedSchedule = Boolean(next.startsAt && next.endsAt);
+    const wasTimed = Boolean(current.starts_at && current.ends_at);
+    const clearedSchedule =
+      calendarInviteRecorded &&
+      wasTimed &&
+      !hasTimedSchedule &&
+      (next.startsAt === null || next.endsAt === null);
+
+    this.ctx.storage.sql.exec(
+      `UPDATE sessions
+       SET room_id = ?, starts_at = ?, ends_at = ?, calendar_uid = ?
+       WHERE id = ?`,
+      next.roomId,
+      next.startsAt,
+      next.endsAt,
+      calendarUid,
+      current.id,
+    );
+
+    if (!scheduleChanged) return false;
+
+    const insertIntent = (intent: CalendarIntentRecord) => {
+      this.ctx.storage.sql.exec(
+        `INSERT INTO calendar_intents
+          (id, session_id, kind, uid, sequence, room_id, starts_at, ends_at, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+        intent.id,
+        intent.sessionId,
+        intent.kind,
+        intent.uid,
+        intent.sequence,
+        intent.roomId,
+        intent.startsAt,
+        intent.endsAt,
+        intent.createdAt,
+      );
+      createdIntents.push(intent);
+    };
+
+    if (clearedSchedule) {
+      calendarSequence += 1;
+      insertIntent({
+        id: `cint_${current.id}_cancel_${calendarSequence}_${now}`,
+        sessionId: current.id,
+        kind: "cancel",
+        uid: calendarUid,
+        sequence: calendarSequence,
+        roomId: next.roomId,
+        startsAt: current.starts_at,
+        endsAt: current.ends_at,
+        status: "pending",
+        createdAt: now,
+      });
+      this.ctx.storage.sql.exec(
+        `UPDATE sessions SET calendar_sequence = ? WHERE id = ?`,
+        calendarSequence,
+        current.id,
+      );
+      return true;
+    }
+
+    if (!hasTimedSchedule) return true;
+
+    if (!calendarInviteRecorded) {
+      calendarSequence = 0;
+      insertIntent({
+        id: `cint_${current.id}_create_${now}`,
+        sessionId: current.id,
+        kind: "create",
+        uid: calendarUid,
+        sequence: calendarSequence,
+        roomId: next.roomId,
+        startsAt: next.startsAt,
+        endsAt: next.endsAt,
+        status: "pending",
+        createdAt: now,
+      });
+      this.ctx.storage.sql.exec(
+        `UPDATE sessions
+         SET calendar_sequence = ?, calendar_invite_recorded = 1
+         WHERE id = ?`,
+        calendarSequence,
+        current.id,
+      );
+      return true;
+    }
+
+    calendarSequence += 1;
+    insertIntent({
+      id: `cint_${current.id}_update_${calendarSequence}_${now}`,
+      sessionId: current.id,
+      kind: "update",
+      uid: calendarUid,
+      sequence: calendarSequence,
+      roomId: next.roomId,
+      startsAt: next.startsAt,
+      endsAt: next.endsAt,
+      status: "pending",
+      createdAt: now,
+    });
+    this.ctx.storage.sql.exec(
+      `UPDATE sessions SET calendar_sequence = ? WHERE id = ?`,
+      calendarSequence,
+      current.id,
+    );
+    return true;
+  }
+
   private agendaCounts(sessions: OrganizerSession[]) {
     let unplaced = 0;
     let partial = 0;
@@ -5335,6 +9431,7 @@ export class EventStore extends DurableObject<AppBindings> {
       .toArray()[0];
     return {
       eventId: event?.id ?? "",
+      version: this.getAgendaVersion(),
       sessions,
       unplacedSessions: sessions.filter(
         (session) => session.placementStatus !== "placed",
@@ -5345,16 +9442,330 @@ export class EventStore extends DurableObject<AppBindings> {
         conflicts: conflicts.length,
       },
       calendarIntents: this.listCalendarIntentRecords(),
+      auditEvents: this.listAgendaAuditEvents(),
     };
+  }
+
+  async previewAutoPlace(input: {
+    selectedSessionIds?: string[];
+    includeManual?: boolean;
+    actorId: string;
+    actorName: string;
+  }): Promise<AgendaAutoPlacePreview> {
+    const event = this.getEvent();
+    if (!event) throw new Error("Event is not initialized.");
+
+    const agenda = this.getAgendaWorkspace();
+    const selectedSessionIds =
+      input.selectedSessionIds === undefined
+        ? agenda.sessions
+            .filter((session) => placementStatus(session) === "unplaced")
+            .map((session) => session.id)
+        : [...new Set(input.selectedSessionIds)].sort();
+    const knownSessionIds = new Set(agenda.sessions.map((session) => session.id));
+    const unknownSessionIds = selectedSessionIds.filter(
+      (sessionId) => !knownSessionIds.has(sessionId),
+    );
+    if (unknownSessionIds.length > 0) {
+      throw new Error(
+        `Cannot preview auto-place: session not found (${unknownSessionIds.join(", ")}).`,
+      );
+    }
+
+    const includeManual = input.includeManual === true;
+    const plan = planAutoPlace({
+      event,
+      sessions: agenda.sessions,
+      selectedSessionIds,
+      includeManual,
+    });
+    const digest = await digestPayload({
+      eventId: event.id,
+      agendaVersion: agenda.version,
+      selectedSessionIds,
+      includeManual,
+      proposals: plan.proposals,
+      leftovers: plan.leftovers,
+      conflicts: agenda.conflicts,
+      assumptions: plan.assumptions,
+      manualPlacementPreserved: plan.manualPlacementPreserved,
+    });
+    const existing = this.ctx.storage.sql
+      .exec<{
+        preview_id: string;
+        preview_digest: string;
+        agenda_version: number;
+        selected_session_ids_json: string;
+        include_manual: number;
+        proposals_json: string;
+        leftovers_json: string;
+        conflicts_json: string;
+        assumptions_json: string;
+        manual_placement_preserved_json: string;
+        created_at: string;
+      }>(
+        `SELECT preview_id, preview_digest, agenda_version,
+                selected_session_ids_json, include_manual, proposals_json,
+                leftovers_json, conflicts_json, assumptions_json,
+                manual_placement_preserved_json, created_at
+         FROM agenda_auto_place_previews
+         WHERE preview_digest = ?`,
+        digest,
+      )
+      .toArray()[0];
+
+    if (existing) {
+      return {
+        previewId: existing.preview_id,
+        previewDigest: existing.preview_digest,
+        agendaVersion: Number(existing.agenda_version),
+        selectedSessionIds: JSON.parse(existing.selected_session_ids_json) as string[],
+        includeManual: Number(existing.include_manual) === 1,
+        proposals: JSON.parse(existing.proposals_json) as AgendaAutoPlaceProposal[],
+        leftovers: JSON.parse(existing.leftovers_json) as AgendaAutoPlaceLeftover[],
+        conflicts: JSON.parse(existing.conflicts_json) as AgendaWorkspaceResponse["conflicts"],
+        assumptions: JSON.parse(existing.assumptions_json) as string[],
+        manualPlacementPreserved: JSON.parse(
+          existing.manual_placement_preserved_json,
+        ) as string[],
+        createdAt: existing.created_at,
+      };
+    }
+
+    const createdAt = new Date().toISOString();
+    const preview: AgendaAutoPlacePreview = {
+      previewId: `agenda_preview_${digest.slice(0, 24)}`,
+      previewDigest: digest,
+      agendaVersion: agenda.version,
+      selectedSessionIds,
+      includeManual,
+      proposals: plan.proposals,
+      leftovers: plan.leftovers,
+      conflicts: agenda.conflicts,
+      assumptions: plan.assumptions,
+      manualPlacementPreserved: plan.manualPlacementPreserved,
+      createdAt,
+    };
+    this.ctx.storage.sql.exec(
+      `INSERT INTO agenda_auto_place_previews
+        (preview_digest, preview_id, agenda_version, selected_session_ids_json,
+         include_manual, proposals_json, leftovers_json, conflicts_json,
+         assumptions_json, manual_placement_preserved_json, created_at,
+         created_by_id, created_by_name, applied_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+      preview.previewDigest,
+      preview.previewId,
+      preview.agendaVersion,
+      JSON.stringify(preview.selectedSessionIds),
+      preview.includeManual ? 1 : 0,
+      JSON.stringify(preview.proposals),
+      JSON.stringify(preview.leftovers),
+      JSON.stringify(preview.conflicts),
+      JSON.stringify(preview.assumptions),
+      JSON.stringify(preview.manualPlacementPreserved),
+      preview.createdAt,
+      input.actorId,
+      input.actorName,
+    );
+    return preview;
+  }
+
+  applyAutoPlace(input: {
+    previewId: string;
+    previewDigest: string;
+    agendaVersion: number;
+    idempotencyKey: string;
+    actorId: string;
+    actorName: string;
+  }):
+    | { ok: true; result: AgendaAutoPlaceApplyResponse }
+    | {
+        ok: false;
+        status: 400 | 404 | 409;
+        error: string;
+        code?: string;
+        currentVersion?: number;
+      } {
+    const existingApply = this.ctx.storage.sql
+      .exec<{ preview_digest: string; response_json: string }>(
+        `SELECT preview_digest, response_json
+         FROM agenda_auto_place_applies WHERE idempotency_key = ?`,
+        input.idempotencyKey,
+      )
+      .toArray()[0];
+    if (existingApply) {
+      if (existingApply.preview_digest !== input.previewDigest) {
+        return {
+          ok: false,
+          status: 409,
+          code: "idempotency_key_reused",
+          error: "This idempotency key was already used for a different auto-place preview.",
+        };
+      }
+      return {
+        ok: true,
+        result: {
+          ...(JSON.parse(existingApply.response_json) as AgendaAutoPlaceApplyResponse),
+          idempotent: true,
+        },
+      };
+    }
+
+    const preview = this.ctx.storage.sql
+      .exec<{
+        preview_id: string;
+        preview_digest: string;
+        agenda_version: number;
+        proposals_json: string;
+        leftovers_json: string;
+        applied_at: string | null;
+      }>(
+        `SELECT preview_id, preview_digest, agenda_version, proposals_json,
+                leftovers_json, applied_at
+         FROM agenda_auto_place_previews
+         WHERE preview_digest = ?`,
+        input.previewDigest,
+      )
+      .toArray()[0];
+    if (!preview) {
+      return {
+        ok: false,
+        status: 404,
+        code: "preview_not_found",
+        error: "Auto-place preview not found. Run preview again before applying.",
+      };
+    }
+    if (preview.preview_id !== input.previewId) {
+      return {
+        ok: false,
+        status: 409,
+        code: "preview_mismatch",
+        error: "The preview ID does not match the preview digest. Reload and preview again.",
+      };
+    }
+    if (preview.applied_at) {
+      return {
+        ok: false,
+        status: 409,
+        code: "preview_already_applied",
+        error: "This auto-place preview was already applied. Run a new preview for the current agenda.",
+      };
+    }
+
+    const currentVersion = this.getAgendaVersion();
+    if (
+      input.agendaVersion !== Number(preview.agenda_version) ||
+      currentVersion !== Number(preview.agenda_version)
+    ) {
+      return {
+        ok: false,
+        status: 409,
+        code: "agenda_version_mismatch",
+        currentVersion,
+        error: "The agenda changed since this preview. Reload the agenda and preview again.",
+      };
+    }
+
+    const proposals = JSON.parse(preview.proposals_json) as AgendaAutoPlaceProposal[];
+    const leftovers = JSON.parse(preview.leftovers_json) as AgendaAutoPlaceLeftover[];
+    let response: AgendaAutoPlaceApplyResponse | null = null;
+    const now = new Date().toISOString();
+
+    this.ctx.storage.transactionSync(() => {
+      const currentRows = this.loadSessionRows();
+      const appliedSessionIds: string[] = [];
+      const unchangedSessionIds: string[] = [];
+      const createdIntents: CalendarIntentRecord[] = [];
+
+      for (const proposal of proposals) {
+        const current = currentRows.find((row) => row.id === proposal.sessionId);
+        if (!current) {
+          throw new Error(`Auto-place preview references missing session ${proposal.sessionId}.`);
+        }
+        const changed = this.applySessionPlacementRow(
+          current,
+          {
+            roomId: proposal.roomId,
+            startsAt: proposal.startsAt,
+            endsAt: proposal.endsAt,
+          },
+          now,
+          createdIntents,
+        );
+        (changed ? appliedSessionIds : unchangedSessionIds).push(proposal.sessionId);
+      }
+
+      if (appliedSessionIds.length > 0) {
+        this.ctx.storage.sql.exec(
+          `UPDATE events SET agenda_version = COALESCE(agenda_version, 0) + 1`,
+        );
+      }
+      const audit = this.appendAgendaAuditEvent({
+        type: "auto_place.applied",
+        actorId: input.actorId,
+        actorName: input.actorName,
+        sessionIds: appliedSessionIds,
+        summary: `Auto-placed ${appliedSessionIds.length} session(s); ${leftovers.length} left for manual placement.`,
+        createdAt: now,
+      });
+      this.ctx.storage.sql.exec(
+        `UPDATE agenda_auto_place_previews SET applied_at = ? WHERE preview_digest = ?`,
+        now,
+        input.previewDigest,
+      );
+
+      const agenda = this.getAgendaWorkspace();
+      response = {
+        previewDigest: input.previewDigest,
+        agendaVersion: agenda.version,
+        appliedSessionIds,
+        unchangedSessionIds,
+        audit,
+        agenda,
+        idempotent: false,
+      };
+      this.ctx.storage.sql.exec(
+        `INSERT INTO agenda_auto_place_applies
+          (idempotency_key, preview_digest, response_json, created_at)
+         VALUES (?, ?, ?, ?)`,
+        input.idempotencyKey,
+        input.previewDigest,
+        JSON.stringify(response),
+        now,
+      );
+    });
+
+    if (!response) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Auto-place apply did not produce a result. Preview again and retry.",
+      };
+    }
+    return { ok: true, result: response };
   }
 
   updateSessionPlacement(
     sessionId: string,
     patch: SessionPlacementPatch,
+    actor: { id: string; name: string } = { id: "system", name: "System" },
   ):
     | { ok: true; result: SessionPlacementResponse }
-    | { ok: false; status: 400 | 404; error: string } {
+    | { ok: false; status: 400 | 404 | 409; error: string; code?: string; currentVersion?: number } {
     this.backfillSessionCalendarUids();
+    const agendaVersion = this.getAgendaVersion();
+    if (
+      patch.expectedAgendaVersion !== undefined &&
+      patch.expectedAgendaVersion !== agendaVersion
+    ) {
+      return {
+        ok: false,
+        status: 409,
+        code: "agenda_version_mismatch",
+        currentVersion: agendaVersion,
+        error: "The agenda changed since you opened this placement. Reload and try again.",
+      };
+    }
     const current = this.loadSessionRows().find((row) => row.id === sessionId);
     if (!current) {
       return { ok: false, status: 404, error: "Session not found" };
@@ -5406,129 +9817,30 @@ export class EventStore extends DurableObject<AppBindings> {
       };
     }
 
-    const scheduleChanged =
-      nextRoomId !== current.room_id ||
-      nextStartsAt !== current.starts_at ||
-      nextEndsAt !== current.ends_at;
-
     const now = new Date().toISOString();
-    const calendarUid = current.calendar_uid || `cal_${current.id}`;
-    let calendarSequence = Number(current.calendar_sequence) || 0;
-    let calendarInviteRecorded = Number(current.calendar_invite_recorded) === 1;
     const createdIntents: CalendarIntentRecord[] = [];
+    let changed = false;
 
     // Timed invites may proceed before room assignment (location pending).
-    const hasTimedSchedule = Boolean(nextStartsAt && nextEndsAt);
-    const wasTimed = Boolean(current.starts_at && current.ends_at);
-    const clearedSchedule =
-      calendarInviteRecorded &&
-      wasTimed &&
-      !hasTimedSchedule &&
-      (nextStartsAt === null || nextEndsAt === null);
-
     this.ctx.storage.transactionSync(() => {
-      this.ctx.storage.sql.exec(
-        `UPDATE sessions
-         SET room_id = ?, starts_at = ?, ends_at = ?, calendar_uid = ?
-         WHERE id = ?`,
-        nextRoomId,
-        nextStartsAt,
-        nextEndsAt,
-        calendarUid,
-        sessionId,
+      changed = this.applySessionPlacementRow(
+        current,
+        { roomId: nextRoomId, startsAt: nextStartsAt, endsAt: nextEndsAt },
+        now,
+        createdIntents,
       );
-
-      if (!scheduleChanged) {
-        return;
-      }
-
-      const insertIntent = (intent: CalendarIntentRecord) => {
-        this.ctx.storage.sql.exec(
-          `INSERT INTO calendar_intents
-            (id, session_id, kind, uid, sequence, room_id, starts_at, ends_at, status, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-          intent.id,
-          intent.sessionId,
-          intent.kind,
-          intent.uid,
-          intent.sequence,
-          intent.roomId,
-          intent.startsAt,
-          intent.endsAt,
-          intent.createdAt,
-        );
-        createdIntents.push(intent);
-      };
-
-      if (clearedSchedule) {
-        calendarSequence += 1;
-        insertIntent({
-          id: `cint_${sessionId}_cancel_${calendarSequence}_${now}`,
-          sessionId,
-          kind: "cancel",
-          uid: calendarUid,
-          sequence: calendarSequence,
-          roomId: nextRoomId,
-          startsAt: current.starts_at,
-          endsAt: current.ends_at,
-          status: "pending",
-          createdAt: now,
-        });
-        this.ctx.storage.sql.exec(
-          `UPDATE sessions SET calendar_sequence = ? WHERE id = ?`,
-          calendarSequence,
-          sessionId,
-        );
-        return;
-      }
-
-      if (!hasTimedSchedule) {
-        return;
-      }
-
-      if (!calendarInviteRecorded) {
-        calendarSequence = 0;
-        insertIntent({
-          id: `cint_${sessionId}_create_${now}`,
-          sessionId,
-          kind: "create",
-          uid: calendarUid,
-          sequence: calendarSequence,
-          roomId: nextRoomId,
-          startsAt: nextStartsAt,
-          endsAt: nextEndsAt,
-          status: "pending",
-          createdAt: now,
-        });
-        this.ctx.storage.sql.exec(
-          `UPDATE sessions
-           SET calendar_sequence = ?, calendar_invite_recorded = 1
-           WHERE id = ?`,
-          calendarSequence,
-          sessionId,
-        );
-        calendarInviteRecorded = true;
-        return;
-      }
-
-      calendarSequence += 1;
-      insertIntent({
-        id: `cint_${sessionId}_update_${calendarSequence}_${now}`,
-        sessionId,
-        kind: "update",
-        uid: calendarUid,
-        sequence: calendarSequence,
-        roomId: nextRoomId,
-        startsAt: nextStartsAt,
-        endsAt: nextEndsAt,
-        status: "pending",
+      if (!changed) return;
+      this.ctx.storage.sql.exec(
+        `UPDATE events SET agenda_version = COALESCE(agenda_version, 0) + 1`,
+      );
+      this.appendAgendaAuditEvent({
+        type: "manual_placement",
+        actorId: actor.id,
+        actorName: actor.name,
+        sessionIds: [sessionId],
+        summary: `Manually updated placement for "${current.title}".`,
         createdAt: now,
       });
-      this.ctx.storage.sql.exec(
-        `UPDATE sessions SET calendar_sequence = ? WHERE id = ?`,
-        calendarSequence,
-        sessionId,
-      );
     });
 
     const agenda = this.getAgendaWorkspace();
@@ -5588,6 +9900,7 @@ export class EventStore extends DurableObject<AppBindings> {
       name: event.name,
       startsOn: event.startsOn,
       endsOn: event.endsOn,
+      timezone: event.timezone,
       themeAccent: normalizeThemeAccent(event.themeAccent),
       tracks: event.tracks.map((track) => ({ id: track.id, name: track.name })),
       rooms: event.rooms.map((room) => ({
@@ -5614,7 +9927,10 @@ export class EventStore extends DurableObject<AppBindings> {
     id: string;
     name: string;
     role: string;
+    title: string;
+    company: string;
     biography: string;
+    socialLinks: SpeakerSocialLinks;
     headshotAssetId: string | null;
   }> {
     return this.ctx.storage.sql
@@ -5622,14 +9938,20 @@ export class EventStore extends DurableObject<AppBindings> {
         id: string;
         name: string;
         role: string;
+        title_snapshot: string;
+        organization_snapshot: string;
         biography: string;
+        social_links_json: string;
         headshot_asset_id: string | null;
       }>(
         `SELECT s.id AS id,
                 s.name AS name,
-                p.role AS role,
-                COALESCE(s.biography, '') AS biography,
-                s.headshot_asset_id AS headshot_asset_id
+                 p.role AS role,
+                 p.title_snapshot AS title_snapshot,
+                 p.organization_snapshot AS organization_snapshot,
+                 COALESCE(s.biography, '') AS biography,
+                 s.social_links_json AS social_links_json,
+                 s.headshot_asset_id AS headshot_asset_id
          FROM event_participations p
          JOIN speakers s ON s.id = p.speaker_id
          WHERE (
@@ -5648,7 +9970,10 @@ export class EventStore extends DurableObject<AppBindings> {
         id: row.id,
         name: row.name.trim(),
         role: row.role,
+        title: (row.title_snapshot ?? "").trim(),
+        company: (row.organization_snapshot ?? "").trim(),
         biography: (row.biography ?? "").trim(),
+        socialLinks: parseStoredSpeakerSocialLinks(row.social_links_json),
         headshotAssetId: row.headshot_asset_id ?? null,
       }));
   }
@@ -5679,16 +10004,16 @@ export class EventStore extends DurableObject<AppBindings> {
     for (const row of this.loadSessionRows()) {
       const speakers = this.listPublicSessionSpeakers(row);
       if (speakers.length === 0) continue;
-      const description = row.proposal_id
-        ? (abstracts.get(row.proposal_id) ?? "").trim()
-        : row.title.trim()
-          ? row.title.trim()
-          : "";
+      const description =
+        (row.public_content || row.content_abstract ||
+          (row.proposal_id ? (abstracts.get(row.proposal_id) ?? "") : "") ||
+          (row.title.trim() ? row.title.trim() : "")).trim();
       const roomId = row.room_id;
       const session: PublicProgramSession = {
         id: row.id,
         title: row.title,
         description,
+        contentStatus: row.content_status as SessionContentStatus,
         format: row.format || "talk",
         trackId: row.track_id,
         trackName: tracks.get(row.track_id) ?? row.track_id,
@@ -5703,6 +10028,8 @@ export class EventStore extends DurableObject<AppBindings> {
         speakers: speakers.map((speaker) => ({
           id: speaker.id,
           name: speaker.name,
+          title: speaker.title,
+          company: speaker.company,
           role: speaker.role,
         })),
       };
@@ -5713,18 +10040,27 @@ export class EventStore extends DurableObject<AppBindings> {
           if (!existing.sessionIds.includes(session.id)) {
             existing.sessionIds.push(session.id);
           }
-          if (!existing.biography && speaker.biography) {
-            existing.biography = speaker.biography;
-          }
-          if (!existing.headshotAssetId && speaker.headshotAssetId) {
-            existing.headshotAssetId = speaker.headshotAssetId;
-          }
+           if (!existing.biography && speaker.biography) {
+             existing.biography = speaker.biography;
+           }
+           if (
+             Object.values(existing.socialLinks ?? {}).every((value) => !value) &&
+             Object.values(speaker.socialLinks).some(Boolean)
+           ) {
+             existing.socialLinks = speaker.socialLinks;
+           }
+           if (!existing.headshotAssetId && speaker.headshotAssetId) {
+             existing.headshotAssetId = speaker.headshotAssetId;
+           }
         } else {
           speakerAcc.set(speaker.id, {
             id: speaker.id,
-            name: speaker.name,
-            biography: speaker.biography,
-            headshotAssetId: speaker.headshotAssetId,
+             name: speaker.name,
+             title: speaker.title,
+             company: speaker.company,
+             biography: speaker.biography,
+             socialLinks: speaker.socialLinks,
+             headshotAssetId: speaker.headshotAssetId,
             sessionIds: [session.id],
           });
         }
@@ -5759,6 +10095,7 @@ export class EventStore extends DurableObject<AppBindings> {
         id: speaker.id,
         name: speaker.name,
         biography: speaker.biography,
+        socialLinks: speaker.socialLinks,
         headshotAssetId: speaker.headshotAssetId,
         sessionIds: [...speaker.sessionIds].sort(),
       })),
@@ -5861,6 +10198,184 @@ export class EventStore extends DurableObject<AppBindings> {
     return { id: row.id, version: Number(row.version) };
   }
 
+  private publicEmbedConfigUrls(eventId: string, embedId: string, name: string): {
+    publicUrl: string;
+    embedCode: string;
+    feedUrl: string;
+  } {
+    const publicUrl = `/e/${encodeURIComponent(eventId)}/embed/${encodeURIComponent(embedId)}`;
+    const feedUrl = `/api/events/${encodeURIComponent(eventId)}/public-embeds/${encodeURIComponent(embedId)}/feed.json`;
+    const title = name.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+    return {
+      publicUrl,
+      feedUrl,
+      embedCode: `<iframe title="${title}" src="${publicUrl}" loading="lazy" style="width:100%;min-height:560px;border:0;" referrerpolicy="no-referrer-when-downgrade"></iframe>`,
+    };
+  }
+
+  private publicEmbedConfigFromRow(row: {
+    id: string;
+    event_id: string;
+    name: string;
+    widget: string;
+    theme: string;
+    filters_json: string;
+    fields_json: string;
+    revision_id: string | null;
+    disabled: number;
+    created_at: string;
+    updated_at: string;
+  }): PublicEmbedConfig {
+    let filters: unknown = {};
+    let fields: Partial<PublicEmbedFieldVisibility> | null = null;
+    try {
+      filters = JSON.parse(row.filters_json);
+    } catch {
+      filters = {};
+    }
+    try {
+      fields = JSON.parse(row.fields_json) as Partial<PublicEmbedFieldVisibility>;
+    } catch {
+      fields = null;
+    }
+    const name = row.name.trim() || "Untitled embed";
+    return {
+      id: row.id,
+      eventId: row.event_id,
+      name,
+      widget: isPublicEmbedWidget(row.widget) ? row.widget : "agenda",
+      theme: normalizePublicEmbedTheme(row.theme),
+      filters: normalizePublicProgramFilters(filters),
+      fields: normalizePublicEmbedFields(fields),
+      revisionId: row.revision_id,
+      disabled: Number(row.disabled) === 1,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      ...this.publicEmbedConfigUrls(row.event_id, row.id, name),
+    };
+  }
+
+  listPublicEmbedConfigs(): PublicEmbedConfig[] {
+    const event = this.getEvent();
+    if (!event) return [];
+    return this.ctx.storage.sql
+      .exec<{
+        id: string;
+        event_id: string;
+        name: string;
+        widget: string;
+        theme: string;
+        filters_json: string;
+        fields_json: string;
+        revision_id: string | null;
+        disabled: number;
+        created_at: string;
+        updated_at: string;
+      }>(
+        `SELECT id, event_id, name, widget, theme, filters_json, fields_json,
+                revision_id, disabled, created_at, updated_at
+         FROM public_embed_configs
+         ORDER BY updated_at DESC`,
+      )
+      .toArray()
+      .map((row) => this.publicEmbedConfigFromRow(row));
+  }
+
+  getPublicEmbedConfig(
+    embedId: string,
+    options?: { includeDisabled?: boolean },
+  ): PublicEmbedConfig | null {
+    const row = this.ctx.storage.sql
+      .exec<{
+        id: string;
+        event_id: string;
+        name: string;
+        widget: string;
+        theme: string;
+        filters_json: string;
+        fields_json: string;
+        revision_id: string | null;
+        disabled: number;
+        created_at: string;
+        updated_at: string;
+      }>(
+        `SELECT id, event_id, name, widget, theme, filters_json, fields_json,
+                revision_id, disabled, created_at, updated_at
+         FROM public_embed_configs
+         WHERE id = ?
+         LIMIT 1`,
+        embedId,
+      )
+      .toArray()[0];
+    if (!row) return null;
+    const config = this.publicEmbedConfigFromRow(row);
+    if (config.disabled && !options?.includeDisabled) return null;
+    return config;
+  }
+
+  savePublicEmbedConfig(
+    input: PublicEmbedConfigInput & { id?: string | null },
+  ): { ok: true; config: PublicEmbedConfig } | { ok: false; error: string } {
+    const event = this.getEvent();
+    if (!event) return { ok: false, error: "Event is not initialized." };
+    if (!isPublicEmbedWidget(input.widget)) {
+      return { ok: false, error: "Unsupported embed widget." };
+    }
+    const name = input.name.trim();
+    if (!name) return { ok: false, error: "Embed name is required." };
+    if (input.revisionId && !this.getPublicProgramRevisionSnapshot(input.revisionId)) {
+      return { ok: false, error: "Pinned public revision was not found." };
+    }
+
+    const now = new Date().toISOString();
+    const existing = input.id ? this.getPublicEmbedConfig(input.id, { includeDisabled: true }) : null;
+    const id = existing?.id ?? `embed_${crypto.randomUUID().replaceAll("-", "").slice(0, 18)}`;
+    const createdAt = existing?.createdAt ?? now;
+    const filters = normalizePublicProgramFilters(input.filters);
+    const fields = normalizePublicEmbedFields(input.fields);
+    this.ctx.storage.sql.exec(
+      `INSERT OR REPLACE INTO public_embed_configs
+        (id, event_id, name, widget, theme, filters_json, fields_json, revision_id,
+         disabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      event.id,
+      name.slice(0, 100),
+      input.widget,
+      normalizePublicEmbedTheme(input.theme),
+      JSON.stringify(filters),
+      JSON.stringify(fields),
+      input.revisionId || null,
+      input.disabled ? 1 : 0,
+      createdAt,
+      now,
+    );
+    const config = this.getPublicEmbedConfig(id, { includeDisabled: true });
+    if (!config) return { ok: false, error: "Unable to save embed configuration." };
+    return { ok: true, config };
+  }
+
+  resolvePublicEmbed(embedId: string): { config: PublicEmbedConfig; program: PublicProgramResponse } | null {
+    const config = this.getPublicEmbedConfig(embedId);
+    if (!config) return null;
+    const program = this.getPublicProgram(config.revisionId ?? undefined);
+    if (!program) return null;
+    const sessions = filterPublicSessions(
+      program.sessions,
+      config.filters,
+      program.event.timezone ?? "UTC",
+    );
+    const visibleSessionIds = new Set(sessions.map((session) => session.id));
+    return {
+      config,
+      program: {
+        ...program,
+        sessions,
+        speakers: filterPublicSpeakers(program.speakers, visibleSessionIds),
+      },
+    };
+  }
+
   seedPublicProgramDemoIfEmpty(): void {
     const existing = this.ctx.storage.sql
       .exec<{ total: number }>(
@@ -5896,7 +10411,7 @@ export class EventStore extends DurableObject<AppBindings> {
         day: day1,
         calendarUid: "cal_demo-ses-keynote",
         calendarSequence: 0,
-        speakers: [{ id: "demo-sp-ada", name: "Ada Lovelace", role: "primary" }],
+        speakers: [{ id: "demo-sp-ada", name: "Ada Lovelace", title: "Program Systems Lead", company: "Analytical Engines", role: "primary" }],
       },
       {
         id: "demo-ses-ops",
@@ -5915,8 +10430,8 @@ export class EventStore extends DurableObject<AppBindings> {
         calendarUid: "cal_demo-ses-ops",
         calendarSequence: 0,
         speakers: [
-          { id: "demo-sp-grace", name: "Grace Hopper", role: "primary" },
-          { id: "demo-sp-ada", name: "Ada Lovelace", role: "co" },
+          { id: "demo-sp-grace", name: "Grace Hopper", title: "Schedule Debugger", company: "Compiler Labs", role: "primary" },
+          { id: "demo-sp-ada", name: "Ada Lovelace", title: "Program Systems Lead", company: "Analytical Engines", role: "co" },
         ],
       },
       {
@@ -5935,7 +10450,7 @@ export class EventStore extends DurableObject<AppBindings> {
         day: null,
         calendarUid: "cal_demo-ses-workshop",
         calendarSequence: 0,
-        speakers: [{ id: "demo-sp-katherine", name: "Katherine Johnson", role: "primary" }],
+        speakers: [{ id: "demo-sp-katherine", name: "Katherine Johnson", title: "Placement Analyst", company: "Orbital Program Office", role: "primary" }],
       },
       {
         id: "demo-ses-day2",
@@ -5952,7 +10467,7 @@ export class EventStore extends DurableObject<AppBindings> {
         day: day2,
         calendarUid: "cal_demo-ses-day2",
         calendarSequence: 0,
-        speakers: [{ id: "demo-sp-grace", name: "Grace Hopper", role: "primary" }],
+        speakers: [{ id: "demo-sp-grace", name: "Grace Hopper", title: "Schedule Debugger", company: "Compiler Labs", role: "primary" }],
       },
     ];
 
@@ -5960,6 +10475,8 @@ export class EventStore extends DurableObject<AppBindings> {
       {
         id: "demo-sp-ada",
         name: "Ada Lovelace",
+        title: "Program Systems Lead",
+        company: "Analytical Engines",
         biography:
           "Writes analytical engines for conference operations and keeps the public story honest.",
         headshotAssetId: null,
@@ -5968,6 +10485,8 @@ export class EventStore extends DurableObject<AppBindings> {
       {
         id: "demo-sp-grace",
         name: "Grace Hopper",
+        title: "Schedule Debugger",
+        company: "Compiler Labs",
         biography:
           "Debugs schedules the way she debugged compilers — patiently, and with receipts.",
         headshotAssetId: null,
@@ -5976,6 +10495,8 @@ export class EventStore extends DurableObject<AppBindings> {
       {
         id: "demo-sp-katherine",
         name: "Katherine Johnson",
+        title: "Placement Analyst",
+        company: "Orbital Program Office",
         biography: "Turns incomplete placement into clear public TBD states.",
         headshotAssetId: null,
         sessionIds: ["demo-ses-workshop"],
@@ -6052,11 +10573,36 @@ export class EventStore extends DurableObject<AppBindings> {
       isCurrent: Number(row.is_current) === 1,
     };
 
+    const speakers = (Array.isArray(snapshot.speakers) ? snapshot.speakers : []).map(
+      (speaker) => {
+        const socialLinks = normalizeSpeakerSocialLinks(
+          speaker.socialLinks ?? EMPTY_SPEAKER_SOCIAL_LINKS,
+        );
+        return {
+          id: speaker.id,
+          name: speaker.name,
+          title: speaker.title,
+          company: speaker.company,
+          biography: speaker.biography,
+          socialLinks: socialLinks.ok
+            ? socialLinks.value
+            : { ...EMPTY_SPEAKER_SOCIAL_LINKS },
+          headshotAssetId: speaker.headshotAssetId ?? null,
+          headshotUrl: speaker.headshotAssetId
+            ? `/api/events/${encodeURIComponent(event.id)}/program/assets/${encodeURIComponent(speaker.headshotAssetId)}?revision=${encodeURIComponent(row.id)}`
+            : null,
+          sessionIds: Array.isArray(speaker.sessionIds) ? speaker.sessionIds : [],
+        };
+      },
+    );
+
     return {
       event: this.toPublicEventSlice(event),
       revision,
-      sessions: Array.isArray(snapshot.sessions) ? snapshot.sessions : [],
-      speakers: Array.isArray(snapshot.speakers) ? snapshot.speakers : [],
+      sessions: (Array.isArray(snapshot.sessions) ? snapshot.sessions : []).map(
+        ({ contentStatus: _contentStatus, ...session }) => session,
+      ),
+      speakers,
       revisions: this.listPublicProgramRevisionMeta(),
     };
   }
@@ -6089,8 +10635,37 @@ export class EventStore extends DurableObject<AppBindings> {
     };
   }
 
-  isPublicProgramHeadshot(assetId: string): boolean {
-    const program = this.getPublicProgram();
+  getPublicProgramCalendarIcs(
+    sessionIds: string[],
+    revisionId?: string,
+  ): { ok: true; ics: string; filename: string } | { ok: false; status: 400 | 404 } {
+    const program = this.getPublicProgram(revisionId);
+    if (!program) return { ok: false, status: 404 };
+    const ids = [...new Set(sessionIds)];
+    if (ids.length === 0) return { ok: false, status: 400 };
+    const selected = ids.map((id) => program.sessions.find((session) => session.id === id));
+    if (selected.some((session) => !session)) return { ok: false, status: 404 };
+    const sessions = groupPublicSessionsByDay(
+      selected.filter((session): session is PublicProgramSession => Boolean(session)),
+      program.event.timezone ?? "UTC",
+    ).flatMap((group) => group.sessions);
+    const ics = buildCombinedIcs(
+      sessions.map((session) => ({
+        uid: session.calendarUid,
+        sequence: session.calendarSequence,
+        title: session.title,
+        description: session.description,
+        location: session.roomName ?? (session.roomPending ? "Location pending" : ""),
+        startsAt: session.startsAt,
+        endsAt: session.endsAt,
+        eventName: program.event.name,
+      })),
+    );
+    return { ok: true, ics, filename: `${program.event.id}-personal-schedule.ics` };
+  }
+
+  isPublicProgramHeadshot(assetId: string, revisionId?: string): boolean {
+    const program = this.getPublicProgram(revisionId);
     if (!program) return false;
     return program.speakers.some((speaker) => speaker.headshotAssetId === assetId);
   }
@@ -6201,13 +10776,14 @@ export class EventStore extends DurableObject<AppBindings> {
   }): UploadedAssetAnswer | null {
     const updated = this.ctx.storage.sql.exec(
       `UPDATE assets
-       SET status = 'complete', size_bytes = ?, mime = ?, file_name = ?
+       SET status = 'complete', size_bytes = ?, mime = ?, file_name = ?, completed_at = ?
        WHERE asset_id = ?
          AND status IN ('pending', 'failed')
          AND claimed_proposal_id IS NULL`,
       input.sizeBytes,
       input.mime,
       input.fileName,
+      new Date().toISOString(),
       input.assetId,
     );
     if (updated.rowsWritten === 0) {
@@ -6230,8 +10806,8 @@ export class EventStore extends DurableObject<AppBindings> {
       this.ctx.storage.sql
         .exec<AssetRow>(
           `SELECT asset_id, object_key, file_name, mime, size_bytes, status, created_at,
-                  form_id, form_definition_version, question_name, max_bytes, claimed_proposal_id,
-                  owner_speaker_id, purpose
+                   form_id, form_definition_version, question_name, max_bytes, claimed_proposal_id,
+                   owner_speaker_id, purpose, completed_at
            FROM assets WHERE asset_id = ?`,
           assetId,
         )
@@ -6295,6 +10871,7 @@ export class EventStore extends DurableObject<AppBindings> {
     formId: string;
     formDefinitionVersion: number;
     mode: "create" | "update";
+    allowedExistingClaimId?: string | null;
   }): Record<string, string> | null {
     const errors: Record<string, string> = {};
     const claimedIds = new Set<string>();
@@ -6323,7 +10900,11 @@ export class EventStore extends DurableObject<AppBindings> {
 
       const claimedBy = row.claimed_proposal_id;
       if (input.mode === "create") {
-        if (claimedBy) {
+        if (
+          claimedBy &&
+          claimedBy !== input.allowedExistingClaimId &&
+          claimedBy !== input.proposalId
+        ) {
           errors[claim.path] = `Upload a valid file for ${claim.path}.`;
         }
       } else if (claimedBy && claimedBy !== input.proposalId) {
@@ -6355,10 +10936,15 @@ export class EventStore extends DurableObject<AppBindings> {
              status = 'complete'
          WHERE asset_id = ?
            AND status IN ('complete', 'abandoned')
-           AND (claimed_proposal_id IS NULL OR claimed_proposal_id = ?)`,
+           AND (
+             claimed_proposal_id IS NULL
+             OR claimed_proposal_id = ?
+             OR claimed_proposal_id = ?
+           )`,
         input.proposalId,
         claim.answer.assetId,
         input.proposalId,
+        input.allowedExistingClaimId ?? input.proposalId,
       );
       // Throw so transactionSync rolls back any partial claim writes.
       if (updated.rowsWritten === 0) {
@@ -6490,6 +11076,46 @@ export class EventStore extends DurableObject<AppBindings> {
       JSON.stringify(merged),
     );
     return merged;
+  }
+
+  getOnboardingReminderPolicy(): OnboardingReminderAutomationPolicy {
+    const row = this.ctx.storage.sql
+      .exec<{ onboarding_reminder_policy_json: string | null }>(
+        `SELECT onboarding_reminder_policy_json FROM events LIMIT 1`,
+      )
+      .toArray()[0];
+    if (!row?.onboarding_reminder_policy_json) {
+      return { ...DEFAULT_ONBOARDING_REMINDER_POLICY };
+    }
+    try {
+      return normalizeOnboardingReminderPolicy(
+        JSON.parse(row.onboarding_reminder_policy_json) as Partial<OnboardingReminderAutomationPolicy>,
+      );
+    } catch {
+      return { ...DEFAULT_ONBOARDING_REMINDER_POLICY };
+    }
+  }
+
+  setOnboardingReminderPolicy(input: {
+    policy: Partial<OnboardingReminderAutomationPolicy>;
+    actorId: string;
+    actorName: string;
+  }): OnboardingReminderAutomationPolicy {
+    const now = new Date().toISOString();
+    const policy = normalizeOnboardingReminderPolicy(
+      {
+        ...input.policy,
+        updatedAt: now,
+        updatedById: input.actorId,
+        updatedByName: input.actorName,
+      },
+      this.getOnboardingReminderPolicy(),
+    );
+    this.ctx.storage.sql.exec(
+      `UPDATE events SET onboarding_reminder_policy_json = ?`,
+      JSON.stringify(policy),
+    );
+    return policy;
   }
 
   private listPlanVersions(planId: string): CourseCheckPlanVersion[] {
@@ -7697,6 +12323,8 @@ export class EventStore extends DurableObject<AppBindings> {
     subject?: string;
     bodyText?: string;
     bodyHtml?: string;
+    portalInvitation?: boolean;
+    portalBaseUrl?: string;
     idempotencyKey: string;
     actor: CourseCheckActor;
   }): Promise<{ plan: CourseCheckPlan; created: boolean }> {
@@ -7718,6 +12346,31 @@ export class EventStore extends DurableObject<AppBindings> {
       throw new Error(
         "No proposals, sessions, speakers, or tasks resolved into a communication scope.",
       );
+    }
+    if (input.portalInvitation) {
+      const selectedSpeakerIds = [...new Set(input.speakerIds ?? [])];
+      const grants = new Map(
+        this.listPortalInvitationRecipients(selectedSpeakerIds).map((grant) => [
+          grant.speakerId,
+          grant,
+        ]),
+      );
+      for (const group of resolved.groups) {
+        group.speakers = group.speakers.map((speaker) => {
+          if (!speaker.speakerId) return speaker;
+          const grant = grants.get(speaker.speakerId);
+          if (!grant?.signedToken) return speaker;
+          return {
+            ...speaker,
+            portalTokenId: grant.tokenId,
+            portalUrl: `${input.portalBaseUrl ?? ""}/e/${this.eventIdOrThrow()}/portal/${encodeURIComponent(grant.signedToken)}`,
+          };
+        });
+      }
+      const missing = selectedSpeakerIds.filter((speakerId) => !grants.get(speakerId)?.signedToken);
+      if (missing.length > 0) {
+        throw new Error("Every portal invitation recipient needs active scoped portal access.");
+      }
     }
 
     const content = defaultCommunicationContent({
@@ -7789,6 +12442,7 @@ export class EventStore extends DurableObject<AppBindings> {
       eventName: eventMeta?.name,
       organizerEmail: "program@chartstead.events",
       organizerName: eventMeta?.name ? `${eventMeta.name} Program` : undefined,
+      portalInvitation: input.portalInvitation,
     });
 
     // Capture proposal revisions for stale detection.
@@ -8938,7 +13592,7 @@ export class EventStore extends DurableObject<AppBindings> {
       };
     }
 
-    await this.ctx.storage.setAlarm(Date.now());
+    await this.ctx.storage.setAlarm(Date.now() + COMMUNICATION_DISPATCH_GRACE_MS);
     const started = startedPlan ?? this.getCourseCheckPlan(plan.id);
     if (!started) throw new Error("Started communication plan is missing.");
     return { ok: true, plan: this.enrichPlan(started), created: true };
@@ -9059,7 +13713,7 @@ export class EventStore extends DurableObject<AppBindings> {
         response,
       });
     });
-    await this.ctx.storage.setAlarm(Date.now());
+    await this.ctx.storage.setAlarm(Date.now() + COMMUNICATION_DISPATCH_GRACE_MS);
     return { ok: true, plan: response!, created: true };
   }
 
@@ -10571,16 +15225,30 @@ export class EventStore extends DurableObject<AppBindings> {
 
     const session = input.session;
     if (session) {
+      const proposalContent = input.proposalId
+        ? this.ctx.storage.sql
+            .exec<{ abstract: string }>(
+              `SELECT abstract FROM proposals WHERE id = ? LIMIT 1`,
+              input.proposalId,
+            )
+            .toArray()[0]?.abstract ?? ""
+        : "";
       this.ctx.storage.sql.exec(
         `INSERT INTO sessions
-          (id, proposal_id, course_check_plan_id, title, format, track_id,
+          (id, proposal_id, course_check_plan_id, title, content_abstract,
+           public_content, content_status, content_version, content_updated_at,
+           content_updated_by_json, format, track_id,
            room_id, starts_at, ends_at, created_at, calendar_uid,
            calendar_sequence, calendar_invite_recorded)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`,
+         VALUES (?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`,
         session.plannedId,
         input.proposalId,
         input.planId,
         session.title,
+        proposalContent,
+        proposalContent,
+        input.now,
+        JSON.stringify({ id: "system:proposal-acceptance", name: "Proposal acceptance" }),
         session.format,
         session.trackId,
         session.roomId,
@@ -10589,6 +15257,7 @@ export class EventStore extends DurableObject<AppBindings> {
         input.now,
         `cal_${session.plannedId}`,
       );
+      this.ensureSessionContentHistory(session.plannedId);
     }
 
     const event = this.getEvent();
@@ -11841,6 +16510,15 @@ export class EventStore extends DurableObject<AppBindings> {
     email: string;
     biography: string;
     createdAt: string;
+    participation: {
+      id: string;
+      titleAtEvent: string;
+      organizationAtEvent: string;
+      role: string;
+      workflowStatus: "invited" | "confirmed" | "preparing" | "ready" | "withdrawn";
+      travelPreferences: string;
+      logistics: Record<string, string>;
+    } | null;
   }> {
     return this.ctx.storage.sql
       .exec<{
@@ -11849,19 +16527,61 @@ export class EventStore extends DurableObject<AppBindings> {
         email: string;
         biography: string;
         created_at: string;
+        participation_id: string | null;
+        title_snapshot: string | null;
+        organization_snapshot: string | null;
+        role: string | null;
+        workflow_status: "invited" | "confirmed" | "preparing" | "ready" | "withdrawn" | null;
+        travel_preferences: string | null;
+        logistics_json: string | null;
       }>(
-        `SELECT id, name, email, biography, created_at
-         FROM speakers
-         ORDER BY name ASC, id ASC`,
+        `SELECT s.id, s.name, s.email, s.biography, s.created_at,
+                p.id AS participation_id, p.title_snapshot, p.organization_snapshot, p.role,
+                p.workflow_status, p.travel_preferences, p.logistics_json
+         FROM speakers s
+         LEFT JOIN event_participations p ON p.id = (
+           SELECT id FROM event_participations
+           WHERE speaker_id = s.id
+           ORDER BY created_at DESC
+           LIMIT 1
+         )
+         ORDER BY s.name ASC, s.id ASC`,
       )
       .toArray()
-      .map((row) => ({
-        id: row.id,
-        name: row.name,
-        email: row.email,
-        biography: row.biography,
-        createdAt: row.created_at,
-      }));
+      .map((row) => {
+        let logistics: Record<string, string> = {};
+        try {
+          const parsed = row.logistics_json ? JSON.parse(row.logistics_json) : {};
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            logistics = Object.fromEntries(
+              Object.entries(parsed).filter(
+                (entry): entry is [string, string] =>
+                  typeof entry[0] === "string" && typeof entry[1] === "string",
+              ),
+            );
+          }
+        } catch {
+          logistics = {};
+        }
+        return {
+          id: row.id,
+          name: row.name,
+          email: row.email,
+          biography: row.biography,
+          createdAt: row.created_at,
+          participation: row.participation_id
+            ? {
+                id: row.participation_id,
+                titleAtEvent: row.title_snapshot ?? "",
+                organizationAtEvent: row.organization_snapshot ?? "",
+                role: row.role ?? "",
+                workflowStatus: row.workflow_status ?? "invited",
+                travelPreferences: row.travel_preferences ?? "",
+                logistics,
+              }
+            : null,
+        };
+      });
   }
 
   listApiTasks(): Array<{
@@ -11982,6 +16702,26 @@ export const ASSET_PURGE_AFTER_MS = 24 * 60 * 60_000;
 export type ProposalWriteResult =
   | { ok: true; proposal: OrganizerProposal }
   | { ok: false; errors: Record<string, string> };
+
+export type ProposalDraftWriteResult =
+  | { ok: true; draft: SubmitterProposalDraft; answers: SubmissionAnswers }
+  | { ok: false; errors: Record<string, string> }
+  | { ok: false; conflict: string };
+
+export function draftAssetOwnerId(draftId: string): string {
+  return `draft:${draftId}`;
+}
+
+function createDraftId(): string {
+  const bytes = new Uint8Array(4);
+  crypto.getRandomValues(bytes);
+  const token = Array.from(bytes, (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  )
+    .join("")
+    .toUpperCase();
+  return `DRF-${token}`;
+}
 
 function createFormId(name: string): string {
   const slug = name

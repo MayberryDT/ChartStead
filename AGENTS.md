@@ -14,7 +14,7 @@ Keep this file **minimal**. It only points agents at the right sources. Do not d
   2. **Ready for human QA** → `in-review` + demo URL + what-to-test.
   3. **Done** (after QA / merge as appropriate) → `done` + checklist `- [x]`.
   4. Always write the issue file on the **main checkout** board path **and** the worktree copy.
-  5. **Frontier maintenance on every start/finish/block (same rule as Masthead Pages):** re-scan **both** tracks. For every non-human-tandem ticket still `blocked`, if all declared blockers are `done`/`complete`, set it to `ready-for-agent` and comment why. Partially cleared blockers stay `blocked` (annotate remaining). Never leave Open empty when the graph has free agent work. Human-tandem tickets never auto-promote.
+  5. **Frontier maintenance on every start/finish/block (same rule as Masthead Pages):** re-scan **all** tracks. For every non-human-tandem ticket still `blocked`, if all declared blockers are `done`/`complete`, set it to `ready-for-agent` and comment why. Partially cleared blockers stay `blocked` (annotate remaining). Never leave Open empty when the graph has free agent work. Human-tandem tickets never auto-promote.
   6. Run `npm run issues:reconcile` (dry-run) then `npm run issues:reconcile:apply` on ticket closeout so dependents cannot stay stale.
 - **Whenever you finish a ticket (or claim it ready for human QA), always start or reuse a Tailscale-reachable demo and put in the final response: (1) the direct demo URL `http://100.105.117.93:<port>/…` — never localhost — and (2) a short “what to test” checklist for that ticket.** Bind with `--host 0.0.0.0` (or the host Tailscale IP) and confirm the listener is not loopback-only before linking.
 
@@ -25,6 +25,7 @@ Keep this file **minimal**. It only points agents at the right sources. Do not d
 3. [context/BUILD-PLAN.md](context/BUILD-PLAN.md) — locked competition architecture, spine order, spikes
 4. [design/DESIGN.md](design/DESIGN.md) + [design/README.md](design/README.md) — design system and assets
 5. [design/source-of-truth/](design/source-of-truth/) — locked visual UI (implement against this; not prototypes)
+6. [design/ORGANIZER-DESK-CHROME.md](design/ORGANIZER-DESK-CHROME.md) — cross-screen organizer shell and work-surface contract
 
 ## Research (decisions already made — don’t re-litigate casually)
 
@@ -43,6 +44,7 @@ Specs and tickets: [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
 
 - Competition: `/home/halla/ChartStead/.scratch/chartstead-competition-build/issues/`
 - Course Check: `/home/halla/ChartStead/.scratch/chartstead-course-check/issues/`
+- Rubric completion: `/home/halla/ChartStead/.scratch/chartstead-rubric-completion/issues/`
 
 ### Triage labels
 
@@ -59,8 +61,10 @@ Use the single-context domain-doc layout. See [docs/agents/domain.md](docs/agent
 - Cloudflare bindings and environments: [`wrangler.jsonc`](wrangler.jsonc)
 - Implementation work: [`.scratch/chartstead-competition-build/`](.scratch/chartstead-competition-build/)
 - Course Check specification and implementation work: [`.scratch/chartstead-course-check/`](.scratch/chartstead-course-check/)
+- Rubric completion specification and implementation work: [`.scratch/chartstead-rubric-completion/`](.scratch/chartstead-rubric-completion/)
 - Course Check killer walkthrough: [`docs/course-check-killer-walkthrough.md`](docs/course-check-killer-walkthrough.md) + seed fixtures in [`worker/seed-course-check-demo.ts`](worker/seed-course-check-demo.ts)
 - Competition walkthrough / submission package: [`docs/competition-walkthrough.md`](docs/competition-walkthrough.md), [`docs/competition-submission.md`](docs/competition-submission.md)
+- Full manual rubric audit handoff: [`docs/2026-08-12-chartstead-full-rubric-acceptance-audit-handoff.md`](docs/2026-08-12-chartstead-full-rubric-acceptance-audit-handoff.md)
 - Automation access (API keys + MCP): [`docs/ai-connections.md`](docs/ai-connections.md)
 
 ## Private / bulk source material

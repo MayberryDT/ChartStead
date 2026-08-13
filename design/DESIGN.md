@@ -642,6 +642,10 @@ Navigation groups use clear labels such as:
 
 The speaker portal should expose fewer choices: Dashboard, Submissions, Tasks, Messages, Session, and Resources.
 
+### Organizer desk chrome
+
+Cross-screen organizer shell and work-surface rules live in [`ORGANIZER-DESK-CHROME.md`](ORGANIZER-DESK-CHROME.md). Use the signed-in Submissions surface in [`source-of-truth/organizer-submissions.html`](source-of-truth/organizer-submissions.html) as the visual reference. New organizer workspaces extend that shell instead of adding a second toolbar or inventing duplicate action homes.
+
 ### Buttons
 
 - **Primary:** Steel Blue fill, white text. One visually dominant primary action per panel or page region.

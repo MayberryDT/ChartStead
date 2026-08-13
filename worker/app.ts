@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 
 import {
   canonicalizeCfpDefinition,
@@ -9,12 +9,34 @@ import { cfpLifecycleError } from "../shared/cfp-lifecycle";
 import type {
   CfpPublicLifecycle,
   EventRecord,
+  OnboardingFileConstraints,
+  EvaluationPlan,
+  EvaluationRoundAssignment,
+  EvaluationPlanAuditEvent,
+  EvaluationRound,
+  OnboardingReminderAutomationPolicy,
   OnboardingCompletionRequirement,
   OrganizerCfpForm,
   OrganizerCfpFormSummary,
   OrganizerPrincipal,
   OrganizerProposal,
+  ProposalAuditEvent,
+  ProposalReviewerRecusal,
   ProposalStatus,
+  ScorecardCriterionValue,
+  ReviewCriterionResult,
+  ReviewEvidence,
+  ReviewProgressReminderDraft,
+  ReviewProgressReminderPreview,
+  ReviewProgressReminderResult,
+  OutboxMessage,
+  ReviewProgressReminderSendResult,
+  ReviewProgressResponse,
+  ReviewProgressReviewer,
+  ReviewReminderDeliveryState,
+  ReviewReminderHistoryEntry,
+  ReviewResultsResponse,
+  PublicEmbedConfigInput,
   PublishedCfpForm,
   ReviewerAssignment,
   ReviewerInvitationPreview,
@@ -22,7 +44,12 @@ import type {
   SpeakerDirectoryCreateInput,
   SpeakerCsvColumnMapping,
   SpeakerCsvResolution,
+  SubmitterDashboardResponse,
 } from "../shared/events";
+import {
+  fileExtension,
+  isPreviewableOnboardingMime,
+} from "../shared/onboarding-tasks";
 import { parseCourseCheckUxEvent } from "../shared/course-check-ux";
 import { COURSE_CHECK_VALIDATION_SCENARIOS } from "../shared/course-check-validation";
 import {
@@ -44,12 +71,14 @@ import {
 import { flushCommunicationEffects } from "./course-check/communication-delivery";
 import { deliverOutboxMessage } from "./outbox";
 import {
+  collectAssetClaims,
   resolveFileQuestion,
   validateAndNormalizeSubmission,
 } from "./cfp-submissions";
 import { toPublicProposal, toSubmitterProposal } from "./proposals";
 import type {
   AssetUploadStartRequest,
+  FilesLibraryExportRequest,
   SubmissionAnswers,
 } from "../shared/events";
 import {
@@ -59,6 +88,7 @@ import {
   HEADSHOT_MAX_BYTES,
   HEADSHOT_MIME_TYPES,
   TASK_FILE_MAX_BYTES,
+  draftAssetOwnerId,
 } from "./event-store";
 import {
   enrichPrincipalMemberships,
@@ -132,6 +162,11 @@ import {
   projectReviewerInvitation,
   revokeReviewerInvitation,
 } from "./reviewer-invitations";
+import {
+  anonymizeEvaluationProposal,
+  evaluationRoundAccessError,
+  readEvaluationRoundInput,
+} from "./evaluation-plans";
 
 
 const MAX_PROPOSAL_BODY_BYTES = 64 * 1_024;
@@ -164,6 +199,469 @@ function deriveEventTrackChoices(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unexpected error.";
+}
+
+class ReviewCriteriaInputError extends Error {}
+
+function normalizeReviewCriterionScores(value: unknown): ReviewCriterionResult[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    throw new ReviewCriteriaInputError("Review criteria must be an array.");
+  }
+  return value.map((entry, index) => {
+    const record =
+      entry && typeof entry === "object" && !Array.isArray(entry)
+        ? (entry as Record<string, unknown>)
+        : null;
+    if (!record) {
+      throw new ReviewCriteriaInputError(`Criterion ${index + 1} must be an object.`);
+    }
+    const id =
+      typeof record.id === "string" && record.id.trim()
+        ? record.id.trim()
+        : typeof record.criterionId === "string" && record.criterionId.trim()
+          ? record.criterionId.trim()
+          : "";
+    const label =
+      typeof record.label === "string" && record.label.trim()
+        ? record.label.trim()
+        : typeof record.name === "string" && record.name.trim()
+          ? record.name.trim()
+          : id;
+    const valueNumber = Number(record.value);
+    const maxScoreNumber = Number(record.maxScore ?? record.max ?? 5);
+    const weightNumber = Number(record.weight ?? 1);
+    if (!id || id.length > 80) {
+      throw new ReviewCriteriaInputError("Each criterion needs a stable id up to 80 characters.");
+    }
+    if (!Number.isFinite(valueNumber) || valueNumber < 0) {
+      throw new ReviewCriteriaInputError(`Criterion ${id} needs a non-negative numeric value.`);
+    }
+    if (!Number.isFinite(maxScoreNumber) || maxScoreNumber <= 0) {
+      throw new ReviewCriteriaInputError(`Criterion ${id} needs a positive maxScore.`);
+    }
+    if (valueNumber > maxScoreNumber) {
+      throw new ReviewCriteriaInputError(`Criterion ${id} value cannot exceed maxScore.`);
+    }
+    if (!Number.isFinite(weightNumber) || weightNumber < 0) {
+      throw new ReviewCriteriaInputError(`Criterion ${id} needs a non-negative weight.`);
+    }
+    return {
+      id,
+      label,
+      value: valueNumber,
+      maxScore: maxScoreNumber,
+      weight: weightNumber,
+      weightedScore: valueNumber * weightNumber,
+    };
+  });
+}
+
+function csvCell(value: string | number | null | undefined): string {
+  const text = value === null || value === undefined ? "" : String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function reviewResultsCsv(results: ReviewResultsResponse): string {
+  const criterionHeaders = results.criteria.map((criterion) => `criterion:${criterion.id}`);
+  const headers = [
+    "proposal_id",
+    "title",
+    "track_id",
+    "track_name",
+    "submitted_at",
+    "speakers",
+    "speaker_emails",
+    "review_completion",
+    "completed_reviews",
+    "total_reviews",
+    "recommendation",
+    "aggregate_score",
+    "reviewers",
+    ...criterionHeaders,
+  ];
+  const lines = [headers.map(csvCell).join(",")];
+  for (const submission of results.submissions) {
+    const criterionValues = results.criteria.map((criterion) => {
+      const match = submission.criteria.find((candidate) => candidate.id === criterion.id);
+      return match ? match.value : "";
+    });
+    lines.push(
+      [
+        submission.proposalId,
+        submission.title,
+        submission.trackId,
+        submission.trackName,
+        submission.submittedAt,
+        submission.speakers
+          .map((speaker) => `${speaker.name} (${speaker.role})`)
+          .join("; "),
+        submission.speakers.map((speaker) => speaker.email).join("; "),
+        submission.completionStatus,
+        submission.completedReviewCount,
+        submission.totalReviewCount,
+        submission.recommendation,
+        submission.aggregateScore ?? "",
+        submission.reviews
+          .map(
+            (review) =>
+              `${review.reviewerName}:${review.completionStatus}:${review.recommendation}`,
+          )
+          .join("; "),
+        ...criterionValues,
+      ]
+        .map(csvCell)
+        .join(","),
+    );
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function readStringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? [...new Set(value.map((entry) => typeof entry === "string" ? entry.trim() : "").filter(Boolean))]
+    : [];
+}
+
+function percentComplete(completed: number, assigned: number, recused = 0): number {
+  const actionable = Math.max(0, assigned - recused);
+  if (actionable === 0) return 100;
+  return Math.round((completed / actionable) * 100);
+}
+
+function reviewReminderStatus(message: OutboxMessage | null): ReviewReminderDeliveryState {
+  if (!message) return "failed";
+  if (message.status === "sent") return "sent";
+  if (message.status === "failed") {
+    return message.nextAttemptAt ? "retryable" : "failed";
+  }
+  return "queued";
+}
+
+function safeIdSegment(value: string): string {
+  const safe = value.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-");
+  return safe.slice(0, 96) || crypto.randomUUID();
+}
+
+function reviewerReminderHistoryFromAudit(
+  auditEvents: EvaluationPlanAuditEvent[],
+  roundId: string | null,
+): ReviewReminderHistoryEntry[] {
+  return auditEvents
+    .filter(
+      (event) =>
+        event.action.startsWith("review_reminder.") &&
+        (roundId === undefined || (event.roundId ?? null) === roundId),
+    )
+    .map((event): ReviewReminderHistoryEntry => {
+      const detail = event.detail;
+      const status =
+        detail.status === "sent" ||
+        detail.status === "queued" ||
+        detail.status === "failed" ||
+        detail.status === "retryable"
+          ? detail.status
+          : "queued";
+      return {
+        id: event.id,
+        roundId: event.roundId ?? null,
+        reviewerId: typeof detail.reviewerId === "string" ? detail.reviewerId : "",
+        reviewerName:
+          typeof detail.reviewerName === "string" ? detail.reviewerName : "Reviewer",
+        toEmail: typeof detail.toEmail === "string" ? detail.toEmail : "",
+        pendingCount:
+          typeof detail.pendingCount === "number" && Number.isFinite(detail.pendingCount)
+            ? detail.pendingCount
+            : 0,
+        outboxId: typeof detail.outboxId === "string" ? detail.outboxId : null,
+        status,
+        actorName: event.actorName,
+        createdAt: event.createdAt,
+      };
+    });
+}
+
+function chooseReviewProgressRound(
+  event: EventRecord,
+  plan: EvaluationPlan | null,
+  requestedRoundId: string | null,
+  nowIso: string,
+): {
+  round: EvaluationRound | null;
+  id: string | null;
+  name: string;
+  state: EvaluationRound["state"] | "shared";
+  startsOn: string | null;
+  endsOn: string | null;
+} {
+  if (!plan?.enabled) {
+    return {
+      round: null,
+      id: null,
+      name: "Shared track queue",
+      state: "shared",
+      startsOn: null,
+      endsOn: event.endsOn,
+    };
+  }
+  const today = nowIso.slice(0, 10);
+  const round =
+    (requestedRoundId
+      ? plan.rounds.find((candidate) => candidate.id === requestedRoundId)
+      : plan.rounds.find(
+          (candidate) =>
+            candidate.state === "open" &&
+            candidate.startsOn <= today &&
+            today <= candidate.endsOn,
+        ) ??
+        plan.rounds.find((candidate) => candidate.state === "open") ??
+        plan.rounds[0]) ?? null;
+  if (!round) {
+    return {
+      round: null,
+      id: null,
+      name: "Shared track queue",
+      state: "shared",
+      startsOn: null,
+      endsOn: event.endsOn,
+    };
+  }
+  return {
+    round,
+    id: round.id,
+    name: round.name,
+    state: round.state,
+    startsOn: round.startsOn,
+    endsOn: round.endsOn,
+  };
+}
+
+async function loadReviewerAssignments(
+  db: D1Database,
+  eventId: string,
+): Promise<ReviewerAssignment[]> {
+  const rows = await db
+    .prepare(
+      `SELECT u.id, u.name, u.email, r.track_id
+       FROM event_memberships AS m
+       JOIN "user" AS u ON u.id = m.user_id
+       LEFT JOIN reviewer_track_assignments AS r
+         ON r.event_id = m.event_id AND r.user_id = m.user_id
+       WHERE m.event_id = ? AND m.role = 'reviewer'
+       ORDER BY u.name COLLATE NOCASE, u.id, r.track_id`,
+    )
+    .bind(eventId)
+    .all<{ id: string; name: string; email: string; track_id: string | null }>();
+  const reviewers = new Map<string, ReviewerAssignment>();
+  for (const row of rows.results) {
+    const reviewer = reviewers.get(row.id) ?? {
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      trackIds: [],
+    };
+    if (row.track_id) reviewer.trackIds.push(row.track_id);
+    reviewers.set(row.id, reviewer);
+  }
+  return [...reviewers.values()];
+}
+
+type ReviewProgressProposalListInput = {
+  sort?: "oldest";
+  trackIds?: string[];
+};
+
+type ReviewProgressStore = {
+  getEvaluationPlan(): Promise<EvaluationPlan | null> | EvaluationPlan | null;
+  listProposals(input?: ReviewProgressProposalListInput):
+    | Promise<OrganizerProposal[]>
+    | OrganizerProposal[];
+  listEvaluationRoundAssignments(
+    roundId: string,
+  ): Promise<EvaluationRoundAssignment[]> | EvaluationRoundAssignment[];
+  listReviewEvidenceForRound(roundId: string | null):
+    | Promise<ReviewEvidence[]>
+    | ReviewEvidence[];
+  listReviewRecusalsForRound(roundId: string):
+    | Promise<ProposalReviewerRecusal[]>
+    | ProposalReviewerRecusal[];
+  listEvaluationPlanAuditEvents():
+    | Promise<EvaluationPlanAuditEvent[]>
+    | EvaluationPlanAuditEvent[];
+};
+
+async function buildReviewProgress(input: {
+  event: EventRecord;
+  store: ReviewProgressStore;
+  reviewers: ReviewerAssignment[];
+  requestedRoundId?: string | null;
+  nowIso?: string;
+}): Promise<ReviewProgressResponse> {
+  const nowIso = input.nowIso ?? new Date().toISOString();
+  const plan = await input.store.getEvaluationPlan();
+  const selectedRound = chooseReviewProgressRound(
+    input.event,
+    plan,
+    input.requestedRoundId ?? null,
+    nowIso,
+  );
+  const roundId = selectedRound.id;
+  const allReviewers =
+    selectedRound.round && selectedRound.round.reviewerPool.length > 0
+      ? selectedRound.round.reviewerPool.map((reviewerId) => {
+          const known = input.reviewers.find((reviewer) => reviewer.id === reviewerId);
+          return known ?? { id: reviewerId, name: reviewerId, email: "", trackIds: [] };
+        })
+      : input.reviewers;
+  const proposals = await input.store.listProposals({ sort: "oldest" });
+  const proposalsById = new Map(proposals.map((proposal) => [proposal.id, proposal]));
+  const exactAssignments = roundId
+    ? await input.store.listEvaluationRoundAssignments(roundId)
+    : [];
+  const assignmentsByReviewer = new Map<string, Set<string>>();
+  if (exactAssignments.length > 0) {
+    for (const assignment of exactAssignments) {
+      const set = assignmentsByReviewer.get(assignment.reviewerId) ?? new Set<string>();
+      set.add(assignment.proposalId);
+      assignmentsByReviewer.set(assignment.reviewerId, set);
+    }
+  } else {
+    for (const reviewer of allReviewers) {
+      const trackSet = new Set(reviewer.trackIds);
+      assignmentsByReviewer.set(
+        reviewer.id,
+        new Set(
+          proposals
+            .filter((proposal) => trackSet.has(proposal.trackId))
+            .map((proposal) => proposal.id),
+        ),
+      );
+    }
+  }
+  const evidence = await input.store.listReviewEvidenceForRound(roundId);
+  const evidenceByReviewerProposal = new Map(
+    evidence.map((review) => [`${review.reviewerId}\u0000${review.proposalId}`, review]),
+  );
+  const recusalRows = roundId ? await input.store.listReviewRecusalsForRound(roundId) : [];
+  const recusals = new Set(
+    recusalRows.map((recusal) => `${recusal.reviewerId}\u0000${recusal.proposalId}`),
+  );
+  const history = reviewerReminderHistoryFromAudit(
+    await input.store.listEvaluationPlanAuditEvents(),
+    roundId,
+  );
+  const lastReminderByReviewer = new Map<string, string>();
+  for (const entry of history) {
+    const current = lastReminderByReviewer.get(entry.reviewerId);
+    if (!current || entry.createdAt > current) {
+      lastReminderByReviewer.set(entry.reviewerId, entry.createdAt);
+    }
+  }
+  const today = nowIso.slice(0, 10);
+  const reviewers = allReviewers.map((reviewer): ReviewProgressReviewer => {
+    const assignedIds = [...(assignmentsByReviewer.get(reviewer.id) ?? new Set<string>())]
+      .filter((proposalId) => proposalsById.has(proposalId))
+      .sort((left, right) => {
+        const leftProposal = proposalsById.get(left)!;
+        const rightProposal = proposalsById.get(right)!;
+        return (
+          leftProposal.trackName.localeCompare(rightProposal.trackName) ||
+          leftProposal.title.localeCompare(rightProposal.title) ||
+          left.localeCompare(right)
+        );
+      });
+    let completedCount = 0;
+    let recusedCount = 0;
+    let lastCompletedAt: string | null = null;
+    const outstandingAssignments = [];
+    for (const proposalId of assignedIds) {
+      const key = `${reviewer.id}\u0000${proposalId}`;
+      const review = evidenceByReviewerProposal.get(key);
+      const recused = recusals.has(key);
+      if (recused) {
+        recusedCount += 1;
+        continue;
+      }
+      if (review?.completionStatus === "complete") {
+        completedCount += 1;
+        if (review.completedAt && (!lastCompletedAt || review.completedAt > lastCompletedAt)) {
+          lastCompletedAt = review.completedAt;
+        }
+        continue;
+      }
+      const proposal = proposalsById.get(proposalId)!;
+      outstandingAssignments.push({
+        proposalId,
+        title: proposal.title,
+        trackId: proposal.trackId,
+        trackName: proposal.trackName,
+      });
+    }
+    const assignedCount = assignedIds.length;
+    const outstandingCount = outstandingAssignments.length;
+    return {
+      reviewerId: reviewer.id,
+      reviewerName: reviewer.name,
+      email: reviewer.email,
+      trackIds: reviewer.trackIds,
+      assignedCount,
+      completedCount,
+      outstandingCount,
+      recusedCount,
+      percentComplete: percentComplete(completedCount, assignedCount, recusedCount),
+      overdue: Boolean(selectedRound.endsOn && selectedRound.endsOn < today && outstandingCount > 0),
+      lastCompletedAt,
+      lastReminderAt: lastReminderByReviewer.get(reviewer.id) ?? null,
+      outstandingAssignments,
+    };
+  });
+  const assignedCount = reviewers.reduce((sum, reviewer) => sum + reviewer.assignedCount, 0);
+  const completedCount = reviewers.reduce((sum, reviewer) => sum + reviewer.completedCount, 0);
+  const outstandingCount = reviewers.reduce((sum, reviewer) => sum + reviewer.outstandingCount, 0);
+  const recusedCount = reviewers.reduce((sum, reviewer) => sum + reviewer.recusedCount, 0);
+  const incompleteReviewers = reviewers.filter((reviewer) => reviewer.outstandingCount > 0);
+  const overdueReviewers = incompleteReviewers.filter((reviewer) => reviewer.overdue);
+  return {
+    eventId: input.event.id,
+    generatedAt: nowIso,
+    round: {
+      roundId,
+      roundName: selectedRound.name,
+      roundState: selectedRound.state,
+      startsOn: selectedRound.startsOn,
+      endsOn: selectedRound.endsOn,
+      assignedCount,
+      completedCount,
+      outstandingCount,
+      recusedCount,
+      percentComplete: percentComplete(completedCount, assignedCount, recusedCount),
+      overdueReviewerCount: overdueReviewers.length,
+    },
+    reviewers,
+    incompleteReviewers,
+    overdueReviewers,
+    history,
+  };
+}
+
+function defaultReviewReminderDraft(input: {
+  event: EventRecord;
+  round: ReviewProgressResponse["round"];
+  reviewer: ReviewProgressReviewer;
+}): ReviewProgressReminderDraft {
+  const due = input.round.endsOn ? ` by ${input.round.endsOn}` : "";
+  const pendingLines = input.reviewer.outstandingAssignments
+    .map((assignment) => `- ${assignment.title} (${assignment.proposalId}, ${assignment.trackName})`)
+    .join("\n");
+  return {
+    reviewerId: input.reviewer.reviewerId,
+    reviewerName: input.reviewer.reviewerName,
+    toEmail: input.reviewer.email,
+    subject: `Reminder: ${input.reviewer.outstandingCount} ${input.event.name} review${input.reviewer.outstandingCount === 1 ? "" : "s"} due`,
+    bodyText: `Hi ${input.reviewer.reviewerName},\n\nYou have ${input.reviewer.outstandingCount} outstanding ${input.round.roundName} review${input.reviewer.outstandingCount === 1 ? "" : "s"} for ${input.event.name}${due}.\n\n${pendingLines}\n\nPlease complete only the assignments shown in your review queue. Thanks.`,
+    pendingCount: input.reviewer.outstandingCount,
+    pendingProposalIds: input.reviewer.outstandingAssignments.map((assignment) => assignment.proposalId),
+  };
 }
 
 function isDraftConflict(error: unknown): boolean {
@@ -218,6 +716,146 @@ export function sanitizeUploadFileName(fileName: string): string {
   const safe = stripped.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/_+/g, "_");
   const cleaned = safe.slice(0, MAX_UPLOAD_FILE_NAME_LENGTH).replace(/^\.+/, "");
   return cleaned.length > 0 ? cleaned : "file";
+}
+
+type ZipEntry = {
+  path: string;
+  bytes: Uint8Array;
+  modifiedAt: string;
+};
+
+const ZIP_CRC_TABLE = new Uint32Array(256);
+for (let i = 0; i < ZIP_CRC_TABLE.length; i += 1) {
+  let c = i;
+  for (let bit = 0; bit < 8; bit += 1) {
+    c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  }
+  ZIP_CRC_TABLE[i] = c >>> 0;
+}
+
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc = ZIP_CRC_TABLE[(crc ^ byte) & 0xff]! ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function dosTimeParts(iso: string): { time: number; date: number } {
+  const parsed = new Date(iso);
+  const date = Number.isNaN(parsed.getTime()) ? new Date("1980-01-01T00:00:00Z") : parsed;
+  const year = Math.max(1980, Math.min(2107, date.getUTCFullYear()));
+  return {
+    time:
+      (date.getUTCHours() << 11) |
+      (date.getUTCMinutes() << 5) |
+      Math.floor(date.getUTCSeconds() / 2),
+    date: ((year - 1980) << 9) | ((date.getUTCMonth() + 1) << 5) | date.getUTCDate(),
+  };
+}
+
+function writeUint16(target: Uint8Array, offset: number, value: number): void {
+  target[offset] = value & 0xff;
+  target[offset + 1] = (value >>> 8) & 0xff;
+}
+
+function writeUint32(target: Uint8Array, offset: number, value: number): void {
+  target[offset] = value & 0xff;
+  target[offset + 1] = (value >>> 8) & 0xff;
+  target[offset + 2] = (value >>> 16) & 0xff;
+  target[offset + 3] = (value >>> 24) & 0xff;
+}
+
+function buildStoredZip(entries: ZipEntry[]): Uint8Array<ArrayBuffer> {
+  const encoder = new TextEncoder();
+  const prepared = entries.map((entry) => ({
+    ...entry,
+    pathBytes: encoder.encode(entry.path),
+    crc: crc32(entry.bytes),
+    dos: dosTimeParts(entry.modifiedAt),
+  }));
+  const localSize = prepared.reduce(
+    (total, entry) => total + 30 + entry.pathBytes.byteLength + entry.bytes.byteLength,
+    0,
+  );
+  const centralSize = prepared.reduce(
+    (total, entry) => total + 46 + entry.pathBytes.byteLength,
+    0,
+  );
+  const zip = new Uint8Array(localSize + centralSize + 22);
+  let offset = 0;
+  const centralRecords: Array<{ entry: (typeof prepared)[number]; localOffset: number }> = [];
+  for (const entry of prepared) {
+    const localOffset = offset;
+    writeUint32(zip, offset, 0x04034b50);
+    writeUint16(zip, offset + 4, 20);
+    writeUint16(zip, offset + 6, 0x0800);
+    writeUint16(zip, offset + 8, 0);
+    writeUint16(zip, offset + 10, entry.dos.time);
+    writeUint16(zip, offset + 12, entry.dos.date);
+    writeUint32(zip, offset + 14, entry.crc);
+    writeUint32(zip, offset + 18, entry.bytes.byteLength);
+    writeUint32(zip, offset + 22, entry.bytes.byteLength);
+    writeUint16(zip, offset + 26, entry.pathBytes.byteLength);
+    writeUint16(zip, offset + 28, 0);
+    offset += 30;
+    zip.set(entry.pathBytes, offset);
+    offset += entry.pathBytes.byteLength;
+    zip.set(entry.bytes, offset);
+    offset += entry.bytes.byteLength;
+    centralRecords.push({ entry, localOffset });
+  }
+  const centralOffset = offset;
+  for (const { entry, localOffset } of centralRecords) {
+    writeUint32(zip, offset, 0x02014b50);
+    writeUint16(zip, offset + 4, 20);
+    writeUint16(zip, offset + 6, 20);
+    writeUint16(zip, offset + 8, 0x0800);
+    writeUint16(zip, offset + 10, 0);
+    writeUint16(zip, offset + 12, entry.dos.time);
+    writeUint16(zip, offset + 14, entry.dos.date);
+    writeUint32(zip, offset + 16, entry.crc);
+    writeUint32(zip, offset + 20, entry.bytes.byteLength);
+    writeUint32(zip, offset + 24, entry.bytes.byteLength);
+    writeUint16(zip, offset + 28, entry.pathBytes.byteLength);
+    writeUint16(zip, offset + 30, 0);
+    writeUint16(zip, offset + 32, 0);
+    writeUint16(zip, offset + 34, 0);
+    writeUint16(zip, offset + 36, 0);
+    writeUint32(zip, offset + 38, 0);
+    writeUint32(zip, offset + 42, localOffset);
+    offset += 46;
+    zip.set(entry.pathBytes, offset);
+    offset += entry.pathBytes.byteLength;
+  }
+  writeUint32(zip, offset, 0x06054b50);
+  writeUint16(zip, offset + 8, prepared.length);
+  writeUint16(zip, offset + 10, prepared.length);
+  writeUint32(zip, offset + 12, centralSize);
+  writeUint32(zip, offset + 16, centralOffset);
+  writeUint16(zip, offset + 20, 0);
+  return zip;
+}
+
+function uniqueZipPath(path: string, used: Set<string>): string {
+  const normalized = path
+    .split("/")
+    .map((segment) => sanitizeUploadFileName(segment).replace(/_+/g, "_"))
+    .filter(Boolean)
+    .join("/");
+  const safe = normalized || "file";
+  if (!used.has(safe)) {
+    used.add(safe);
+    return safe;
+  }
+  const dot = safe.lastIndexOf(".");
+  const base = dot > safe.lastIndexOf("/") ? safe.slice(0, dot) : safe;
+  const extension = dot > safe.lastIndexOf("/") ? safe.slice(dot) : "";
+  let index = 2;
+  while (used.has(`${base}-${index}${extension}`)) index += 1;
+  const next = `${base}-${index}${extension}`;
+  used.add(next);
+  return next;
 }
 
 type EditTokenRow = {
@@ -388,6 +1026,15 @@ function lifecycleUnavailable(
     ...context,
   };
 }
+
+function draftTitleFromAnswers(
+  form: PublishedCfpForm,
+  answers: SubmissionAnswers,
+): string {
+  const raw = answers[form.definition.chartstead.proposalTitleName];
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
 
 function publicBaseUrl(request: Request, env: AppBindings): string {
   return env.BETTER_AUTH_URL || new URL(request.url).origin;
@@ -1466,6 +2113,235 @@ export function createApp(options: AppOptions = {}) {
     },
   );
 
+  app.get("/api/events/:eventId/evaluation-plan", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const plan = await store.getEvaluationPlan();
+    if (!plan) return c.json({ plan: null, auditEvents: [] });
+    if (eventRole(principal, eventId) !== "admin") {
+      return c.json({
+        plan: {
+          ...plan,
+          rounds: plan.rounds.filter((round) => round.reviewerPool.includes(principal.id)),
+        },
+        auditEvents: [],
+      });
+    }
+    return c.json({ plan, auditEvents: await store.listEvaluationPlanAuditEvents() });
+  });
+
+  app.put("/api/events/:eventId/evaluation-plan", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const body = (await c.req.json().catch(() => null)) as {
+      rounds?: unknown;
+      expectedVersion?: unknown;
+      enabled?: unknown;
+    } | null;
+    if (!Array.isArray(body?.rounds)) {
+      return c.json({ error: "Evaluation plan rounds are required." }, 400);
+    }
+    try {
+      const store = c.env.EVENT_STORE.getByName(eventId);
+      const existing = await store.getEvaluationPlan();
+      const rounds = body.rounds.map((round) => {
+        const id =
+          round && typeof round === "object" && typeof (round as { id?: unknown }).id === "string"
+            ? (round as { id: string }).id
+            : undefined;
+        const previous = existing?.rounds.find((candidate) => candidate.id === id);
+        return readEvaluationRoundInput(round, previous);
+      });
+      const plan = await store.saveEvaluationPlan({
+        rounds,
+        expectedVersion:
+          typeof body.expectedVersion === "number" && Number.isInteger(body.expectedVersion)
+            ? body.expectedVersion
+            : undefined,
+        enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
+        actorId: principal.id,
+        actorName: principal.displayName,
+      });
+      return c.json({ plan, auditEvents: await store.listEvaluationPlanAuditEvents() });
+    } catch (error) {
+      return c.json({ error: errorMessage(error) }, 400);
+    }
+  });
+
+  app.patch("/api/events/:eventId/evaluation-plan", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const body = (await c.req.json().catch(() => null)) as {
+      enabled?: unknown;
+      expectedVersion?: unknown;
+    } | null;
+    if (typeof body?.enabled !== "boolean") {
+      return c.json({ error: "Evaluation plan enabled must be true or false." }, 400);
+    }
+    try {
+      const store = c.env.EVENT_STORE.getByName(eventId);
+      const plan = await store.setEvaluationPlanEnabled({
+        enabled: body.enabled,
+        expectedVersion:
+          typeof body.expectedVersion === "number" && Number.isInteger(body.expectedVersion)
+            ? body.expectedVersion
+            : undefined,
+        actorId: principal.id,
+        actorName: principal.displayName,
+      });
+      if (!plan) return c.json({ error: "Evaluation plan not found." }, 404);
+      return c.json({ plan, auditEvents: await store.listEvaluationPlanAuditEvents() });
+    } catch (error) {
+      return c.json({ error: errorMessage(error) }, 400);
+    }
+  });
+
+  app.get("/api/events/:eventId/evaluation-rounds/:roundId/assignments", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    return c.json({ assignments: await store.listEvaluationRoundAssignments(c.req.param("roundId")) });
+  });
+
+  app.patch("/api/events/:eventId/evaluation-rounds/:roundId/assignments", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const body = (await c.req.json().catch(() => null)) as {
+      proposalId?: unknown;
+      reviewerId?: unknown;
+      assigned?: unknown;
+    } | null;
+    const proposalId = typeof body?.proposalId === "string" ? body.proposalId.trim() : "";
+    const reviewerId = typeof body?.reviewerId === "string" ? body.reviewerId.trim() : "";
+    if (!proposalId || !reviewerId || typeof body?.assigned !== "boolean") {
+      return c.json({ error: "Proposal, reviewer, and assignment state are required." }, 400);
+    }
+    try {
+      const store = c.env.EVENT_STORE.getByName(eventId);
+      const assignments = await store.setEvaluationRoundAssignment({
+        roundId: c.req.param("roundId"),
+        proposalId,
+        reviewerId,
+        assigned: body.assigned,
+        actorId: principal.id,
+        actorName: principal.displayName,
+      });
+      return c.json({ assignments, auditEvents: await store.listEvaluationPlanAuditEvents() });
+    } catch (error) {
+      return c.json({ error: errorMessage(error) }, 400);
+    }
+  });
+
+  app.post("/api/events/:eventId/evaluation-rounds/:roundId/assignments/preview", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const maxAssignmentsPerReviewer =
+      typeof body.maxAssignmentsPerReviewer === "number" && Number.isInteger(body.maxAssignmentsPerReviewer)
+        ? body.maxAssignmentsPerReviewer
+        : body.maxAssignmentsPerReviewer == null || body.maxAssignmentsPerReviewer === ""
+          ? null
+          : Number.NaN;
+    try {
+      const preview = await c.env.EVENT_STORE.getByName(eventId).previewEvaluationRoundDistribution({
+        roundId: c.req.param("roundId"),
+        trackIds: readStringList(body.trackIds),
+        reviewerIds: readStringList(body.reviewerIds),
+        maxAssignmentsPerReviewer,
+      });
+      return c.json({ preview });
+    } catch (error) {
+      return c.json({ error: errorMessage(error) }, 400);
+    }
+  });
+
+  app.post("/api/events/:eventId/evaluation-rounds/:roundId/assignments/distribute", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const maxAssignmentsPerReviewer =
+      typeof body.maxAssignmentsPerReviewer === "number" && Number.isInteger(body.maxAssignmentsPerReviewer)
+        ? body.maxAssignmentsPerReviewer
+        : body.maxAssignmentsPerReviewer == null || body.maxAssignmentsPerReviewer === ""
+          ? null
+          : Number.NaN;
+    try {
+      const store = c.env.EVENT_STORE.getByName(eventId);
+      const result = await store.applyEvaluationRoundDistribution({
+        roundId: c.req.param("roundId"),
+        trackIds: readStringList(body.trackIds),
+        reviewerIds: readStringList(body.reviewerIds),
+        maxAssignmentsPerReviewer,
+        actorId: principal.id,
+        actorName: principal.displayName,
+      });
+      return c.json({ ...result, auditEvents: await store.listEvaluationPlanAuditEvents() });
+    } catch (error) {
+      return c.json({ error: errorMessage(error) }, 400);
+    }
+  });
+
   app.patch("/api/events/:eventId/reviewers/:reviewerId", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
     const eventId = c.req.param("eventId");
@@ -1514,6 +2390,246 @@ export function createApp(options: AppOptions = {}) {
 
     return c.json({
       reviewer: { ...reviewer, trackIds } satisfies ReviewerAssignment,
+    });
+  });
+
+  app.get("/api/events/:eventId/review-progress", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    const event = await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const progress = await buildReviewProgress({
+      event,
+      store,
+      reviewers: await loadReviewerAssignments(c.env.AUTH_DB, eventId),
+      requestedRoundId: c.req.query("roundId") ?? null,
+    });
+    return c.json(progress satisfies ReviewProgressResponse);
+  });
+
+  app.post("/api/events/:eventId/review-progress/reminders/preview", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const event = await loadEvent(c.env, seed);
+    const progress = await buildReviewProgress({
+      event,
+      store: c.env.EVENT_STORE.getByName(eventId),
+      reviewers: await loadReviewerAssignments(c.env.AUTH_DB, eventId),
+      requestedRoundId:
+        typeof body.roundId === "string" ? body.roundId : c.req.query("roundId") ?? null,
+    });
+    const selectedIds = new Set(readStringList(body.reviewerIds));
+    const candidates = progress.reviewers.filter(
+      (reviewer) =>
+        reviewer.outstandingCount > 0 &&
+        (selectedIds.size === 0 || selectedIds.has(reviewer.reviewerId)),
+    );
+    const preview: ReviewProgressReminderPreview = {
+      eventId,
+      roundId: progress.round.roundId,
+      generatedAt: new Date().toISOString(),
+      drafts: candidates.map((reviewer) =>
+        defaultReviewReminderDraft({ event, round: progress.round, reviewer }),
+      ),
+    };
+    return c.json(preview);
+  });
+
+  app.post("/api/events/:eventId/review-progress/reminders/send", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    const body = (await c.req.json().catch(() => null)) as {
+      idempotencyKey?: unknown;
+      roundId?: unknown;
+      drafts?: unknown;
+    } | null;
+    const idempotencyKey =
+      typeof body?.idempotencyKey === "string" ? body.idempotencyKey.trim() : "";
+    const drafts = Array.isArray(body?.drafts) ? body.drafts : [];
+    if (!idempotencyKey || drafts.length === 0) {
+      return c.json({ error: "Reminder drafts and an idempotency key are required." }, 400);
+    }
+    const event = await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const progress = await buildReviewProgress({
+      event,
+      store,
+      reviewers: await loadReviewerAssignments(c.env.AUTH_DB, eventId),
+      requestedRoundId: typeof body?.roundId === "string" ? body.roundId : null,
+    });
+    const reviewerById = new Map(
+      progress.reviewers.map((reviewer) => [reviewer.reviewerId, reviewer]),
+    );
+    const sender =
+      options.emailSender === undefined
+        ? createResendSender(c.env)
+        : options.emailSender;
+    const results: ReviewProgressReminderResult[] = [];
+    for (const draft of drafts) {
+      if (!draft || typeof draft !== "object" || Array.isArray(draft)) {
+        return c.json({ error: "Each reminder draft must be an object." }, 400);
+      }
+      const raw = draft as Record<string, unknown>;
+      const reviewerId = typeof raw.reviewerId === "string" ? raw.reviewerId : "";
+      const reviewer = reviewerById.get(reviewerId);
+      const subject = typeof raw.subject === "string" ? raw.subject.trim().slice(0, 200) : "";
+      const bodyText = typeof raw.bodyText === "string" ? raw.bodyText.trim().slice(0, 20_000) : "";
+      if (!reviewer || reviewer.outstandingCount === 0 || !reviewer.email || !subject || !bodyText) {
+        return c.json(
+          { error: "Every reminder needs a selected incomplete reviewer, email, subject, and body." },
+          400,
+        );
+      }
+      const outboxId = `reviewer-reminder-${safeIdSegment(idempotencyKey)}-${safeIdSegment(reviewerId)}`;
+      let message = await store.getOutboxMessage(outboxId);
+      const created = !message;
+      if (!message) {
+        const safeBody = escapeEmailHtml(bodyText);
+        message = await store.queueOutboxMessage({
+          id: outboxId,
+          kind: "reviewer_reminder",
+          toEmail: reviewer.email,
+          subject,
+          htmlBody: `<p>${safeBody.replace(/\n{2,}/g, "</p><p>").replace(/\n/g, "<br>")}</p>`,
+          textBody: bodyText,
+          proposalId: null,
+        });
+      }
+      if (sender && message.status === "queued") {
+        await deliverOutboxMessage({
+          store,
+          sender,
+          messageId: outboxId,
+          now: new Date(),
+        });
+        message = await store.getOutboxMessage(outboxId);
+      }
+      const status = reviewReminderStatus(message);
+      if (created) {
+        await store.recordReviewProgressAudit({
+          roundId: progress.round.roundId,
+          action: `review_reminder.${status}`,
+          actorId: principal.id,
+          actorName: principal.displayName,
+          detail: {
+            reviewerId,
+            reviewerName: reviewer.reviewerName,
+            toEmail: reviewer.email,
+            pendingCount: reviewer.outstandingCount,
+            outboxId,
+            status,
+          },
+        });
+      }
+      results.push({
+        reviewerId,
+        toEmail: reviewer.email,
+        outboxId,
+        status,
+        error: message?.error ?? null,
+      });
+    }
+    const result: ReviewProgressReminderSendResult = {
+      eventId,
+      roundId: progress.round.roundId,
+      idempotencyKey,
+      results,
+      history: reviewerReminderHistoryFromAudit(
+        await store.listEvaluationPlanAuditEvents(),
+        progress.round.roundId,
+      ),
+    };
+    return c.json(result, 202);
+  });
+
+  app.post("/api/events/:eventId/review-progress/reminders/:outboxId/retry", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const outboxId = c.req.param("outboxId");
+    const current = await store.getOutboxMessage(outboxId);
+    if (!current || current.kind !== "reviewer_reminder") {
+      return c.json({ error: "Review reminder not found." }, 404);
+    }
+    const sender =
+      options.emailSender === undefined
+        ? createResendSender(c.env)
+        : options.emailSender;
+    if (!sender) {
+      return c.json({ error: "Email delivery is not configured." }, 503);
+    }
+    if (current.status === "failed") {
+      await store.retryOutboxMessage(outboxId, new Date().toISOString());
+    }
+    await deliverOutboxMessage({ store, sender, messageId: outboxId, now: new Date() });
+    const message = await store.getOutboxMessage(outboxId);
+    const status = reviewReminderStatus(message);
+    const auditEvents: EvaluationPlanAuditEvent[] =
+      await store.listEvaluationPlanAuditEvents();
+    const previousReminder = auditEvents.find(
+      (event) =>
+        event.action.startsWith("review_reminder.") &&
+        event.detail.outboxId === outboxId,
+    );
+    const previousDetail = previousReminder?.detail ?? {};
+    await store.recordReviewProgressAudit({
+      roundId: previousReminder?.roundId ?? null,
+      action: `review_reminder.retry.${status}`,
+      actorId: principal.id,
+      actorName: principal.displayName,
+      detail: {
+        reviewerId:
+          typeof previousDetail.reviewerId === "string" ? previousDetail.reviewerId : "",
+        reviewerName:
+          typeof previousDetail.reviewerName === "string" ? previousDetail.reviewerName : "",
+        toEmail:
+          typeof previousDetail.toEmail === "string"
+            ? previousDetail.toEmail
+            : message?.toEmail ?? current.toEmail,
+        pendingCount:
+          typeof previousDetail.pendingCount === "number" ? previousDetail.pendingCount : 0,
+        outboxId,
+        status,
+      },
+    });
+    return c.json({
+      outboxId,
+      status,
+      error: message?.error ?? null,
     });
   });
 
@@ -1804,6 +2920,8 @@ export function createApp(options: AppOptions = {}) {
     const formId = bodyRecord.formId;
     const formDefinitionVersion = bodyRecord.formDefinitionVersion;
     const answersRaw = bodyRecord.answers;
+    const draftId =
+      typeof bodyRecord.draftId === "string" ? bodyRecord.draftId.trim() : "";
     if (
       typeof formId !== "string" ||
       typeof formDefinitionVersion !== "number" ||
@@ -1822,6 +2940,37 @@ export function createApp(options: AppOptions = {}) {
 
     const event = await loadEvent(c.env, seed);
     const store = c.env.EVENT_STORE.getByName(event.id);
+    const submitter = await resolveAuthenticatedUser(c.req.raw, c.env);
+    let draftSubmission: Awaited<ReturnType<typeof store.getSubmitterDraft>> | null = null;
+    if (draftId) {
+      if (!submitter) {
+        return c.json({ error: "Sign in to submit this draft." }, 401);
+      }
+      draftSubmission = await store.getSubmitterDraft({
+        draftId,
+        userId: submitter.id,
+      });
+      if (!draftSubmission) {
+        return c.json({ error: "Draft not found." }, 404);
+      }
+      if (draftSubmission.submittedProposalId) {
+        const existing = await store.getProposal(draftSubmission.submittedProposalId);
+        if (existing) return c.json({ proposal: toPublicProposal(existing) });
+        return c.json(
+          { error: "This draft was already submitted. Refresh your dashboard." },
+          409,
+        );
+      }
+      if (
+        draftSubmission.draft.formId !== formId ||
+        draftSubmission.draft.formDefinitionVersion !== formDefinitionVersion
+      ) {
+        return c.json(
+          { error: "Draft form version changed. Reload the draft and try again." },
+          409,
+        );
+      }
+    }
 
     const form = (await store.getFormVersion(
       formId,
@@ -1883,13 +3032,27 @@ export function createApp(options: AppOptions = {}) {
       );
     }
 
-    const created = await store.createProposal({
-      formId: form.id,
-      formDefinitionVersion: form.definitionVersion,
-      answers: validated.answers,
-      normalized: validated.normalized,
-      assetClaims: validated.assetClaims,
-    });
+    // Submitter accounts are optional. Accountless submissions retain the
+    // signed-edit-link flow; an active authenticated session binds ownership.
+    let created;
+    try {
+      created = await store.createProposal({
+        formId: form.id,
+        formDefinitionVersion: form.definitionVersion,
+        answers: validated.answers,
+        normalized: validated.normalized,
+        assetClaims: validated.assetClaims,
+        submitterUserId: submitter?.id ?? null,
+        assetClaimOwnerId: draftId ? draftAssetOwnerId(draftId) : null,
+        submittedDraft:
+          draftId && submitter ? { id: draftId, userId: submitter.id } : null,
+      });
+    } catch (error) {
+      if (isDraftConflict(error)) {
+        return c.json({ error: errorMessage(error), code: "draft_conflict" }, 409);
+      }
+      throw error;
+    }
     if (!created.ok) {
       return c.json(
         { errors: created.errors, values: validated.answers },
@@ -1958,6 +3121,207 @@ export function createApp(options: AppOptions = {}) {
     );
   });
 
+  app.get("/api/events/:eventId/submitter/proposals", async (c) => {
+    const user = await resolveAuthenticatedUser(c.req.raw, c.env);
+    if (!user) return c.json({ error: "Sign in to view your proposals." }, 401);
+
+    const eventId = c.req.param("eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const response: SubmitterDashboardResponse = {
+      user,
+      proposals: await store.listSubmitterProposals(user.id, user.email),
+      drafts: await store.listSubmitterDrafts(user.id),
+    };
+    return c.json(response);
+  });
+
+  app.get("/api/events/:eventId/submitter/drafts/:draftId", async (c) => {
+    const user = await resolveAuthenticatedUser(c.req.raw, c.env);
+    if (!user) return c.json({ error: "Sign in to resume this draft." }, 401);
+
+    const eventId = c.req.param("eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    const event = await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const session = await store.getSubmitterDraft({
+      draftId: c.req.param("draftId"),
+      userId: user.id,
+    });
+    if (!session) return c.json({ error: "Draft not found." }, 404);
+    if (session.submittedProposalId) {
+      const proposal = await store.getProposal(session.submittedProposalId);
+      return c.json(
+        {
+          error: "This draft was already submitted.",
+          proposal: proposal ? toPublicProposal(proposal) : undefined,
+        },
+        409,
+      );
+    }
+    const form = (await store.getFormVersion(
+      session.draft.formId,
+      session.draft.formDefinitionVersion,
+    )) as PublishedCfpForm | null;
+    if (!form) {
+      return c.json(
+        { error: "This draft uses a form version that is no longer available." },
+        409,
+      );
+    }
+    return c.json({
+      eventId,
+      event: {
+        id: event.id,
+        name: event.name,
+        startsOn: event.startsOn,
+        endsOn: event.endsOn,
+        timezone: eventTimezone(event),
+        themeAccent: event.themeAccent,
+      },
+      draft: session.draft,
+      form,
+      lifecycle: session.draft.lifecycle,
+      answers: session.answers,
+    });
+  });
+
+  async function saveSubmitterDraftResponse(
+    c: Context<{ Bindings: AppBindings }>,
+    draftId?: string,
+  ) {
+    const user = await resolveAuthenticatedUser(c.req.raw, c.env);
+    if (!user) return c.json({ error: "Sign in to save a draft." }, 401);
+    const eventId = param(c, "eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+
+    const declaredLength = Number(c.req.header("content-length") ?? "0");
+    if (declaredLength > MAX_PROPOSAL_BODY_BYTES) {
+      return c.json({ error: "Draft request is too large." }, 413);
+    }
+    const rawBody = await readProposalBody(c.req.raw);
+    if (rawBody === null) return c.json({ error: "Draft request is too large." }, 413);
+
+    let body: unknown;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return c.json({ error: "Draft request must be valid JSON." }, 400);
+    }
+    const bodyRecord =
+      body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+    const formId = bodyRecord.formId;
+    const formDefinitionVersion = bodyRecord.formDefinitionVersion;
+    const answersRaw = bodyRecord.answers;
+    if (
+      typeof formId !== "string" ||
+      typeof formDefinitionVersion !== "number" ||
+      !Number.isInteger(formDefinitionVersion) ||
+      !answersRaw ||
+      typeof answersRaw !== "object" ||
+      Array.isArray(answersRaw)
+    ) {
+      return c.json({ error: "A published form version and answers are required." }, 400);
+    }
+
+    await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const form = (await store.getFormVersion(
+      formId,
+      formDefinitionVersion,
+    )) as PublishedCfpForm | null;
+    if (!form) {
+      return c.json(
+        { error: "This form version is no longer available. Reload the form." },
+        409,
+      );
+    }
+    const answers = answersRaw as SubmissionAnswers;
+    const title = draftTitleFromAnswers(form, answers);
+    if (!title) {
+      return c.json(
+        {
+          error: "Enter a talk title before saving a draft.",
+          errors: { [form.definition.chartstead.proposalTitleName]: "Enter a talk title before saving a draft." },
+          values: answers,
+        },
+        400,
+      );
+    }
+    if (title.length > 160) {
+      return c.json(
+        {
+          error: "Use 160 characters or fewer for the title.",
+          errors: { [form.definition.chartstead.proposalTitleName]: "Use 160 characters or fewer." },
+          values: answers,
+        },
+        400,
+      );
+    }
+
+    const expectedUpdatedAt =
+      typeof bodyRecord.expectedUpdatedAt === "string"
+        ? bodyRecord.expectedUpdatedAt
+        : undefined;
+    try {
+      const saved = await store.saveSubmitterDraft({
+        draftId,
+        userId: user.id,
+        formId: form.id,
+        formDefinitionVersion: form.definitionVersion,
+        answers,
+        title,
+        assetClaims: collectAssetClaims(form.definition, answers),
+        expectedUpdatedAt,
+      });
+      if (!saved) return c.json({ error: "Draft not found." }, 404);
+      if (!saved.ok) {
+        if ("conflict" in saved) {
+          return c.json({ error: saved.conflict, code: "draft_conflict" }, 409);
+        }
+        return c.json({ errors: saved.errors, values: answers }, 400);
+      }
+      return c.json({ draft: saved.draft, answers: saved.answers }, draftId ? 200 : 201);
+    } catch (error) {
+      if (isDraftConflict(error)) {
+        return c.json({ error: errorMessage(error), code: "draft_conflict" }, 409);
+      }
+      throw error;
+    }
+  }
+
+  app.post("/api/events/:eventId/submitter/drafts", (c) =>
+    saveSubmitterDraftResponse(c),
+  );
+
+  app.patch("/api/events/:eventId/submitter/drafts/:draftId", (c) =>
+    saveSubmitterDraftResponse(c, c.req.param("draftId")),
+  );
+
+  app.post(
+    "/api/events/:eventId/submitter/proposals/:proposalId/claim",
+    async (c) => {
+      const user = await resolveAuthenticatedUser(c.req.raw, c.env);
+      if (!user) return c.json({ error: "Sign in to claim a proposal." }, 401);
+
+      const eventId = c.req.param("eventId");
+      const seed = findSeed(eventId);
+      if (!seed) return c.json({ error: "Event not found" }, 404);
+      await loadEvent(c.env, seed);
+      const proposal = await c.env.EVENT_STORE.getByName(eventId).claimSubmitterProposal({
+        proposalId: c.req.param("proposalId"),
+        userId: user.id,
+        email: user.email,
+      });
+      if (!proposal) return c.json({ error: "Proposal not found" }, 404);
+      return c.json({ proposal });
+    },
+  );
+
   app.get("/api/events/:eventId/proposals", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
     const eventId = c.req.param("eventId");
@@ -1983,10 +3347,25 @@ export function createApp(options: AppOptions = {}) {
       return c.json({ error: "Unknown review status" }, 400);
     }
     const requestedSort = c.req.query("sort") ?? "newest";
-    if (!["newest", "oldest", "title-asc", "speaker-asc"].includes(requestedSort)) {
+    if (
+      ![
+        "newest",
+        "oldest",
+        "title-asc",
+        "title-desc",
+        "track-asc",
+        "track-desc",
+        "status-asc",
+        "status-desc",
+        "speaker-asc",
+        "aggregate-asc",
+        "aggregate-desc",
+      ].includes(requestedSort)
+    ) {
       return c.json({ error: "Unknown proposal sort" }, 400);
     }
     const requestedTrack = c.req.query("track") ?? "";
+    const requestedRoundId = c.req.query("roundId") ?? "";
     const allowedTracks = assignedTrackIds(principal, eventId);
     if (
       requestedTrack &&
@@ -1998,13 +3377,102 @@ export function createApp(options: AppOptions = {}) {
     const trackIds = requestedTrack
       ? [requestedTrack]
       : (allowedTracks ?? undefined);
+    const plan = await store.getEvaluationPlan();
+    const advancedRound = plan?.enabled && eventRole(principal, eventId) !== "admin"
+      ? requestedRoundId
+        ? await store.getEvaluationRoundAccess(requestedRoundId, principal.id)
+        : null
+      : null;
+    if (plan?.enabled && eventRole(principal, eventId) !== "admin") {
+      if (!advancedRound) {
+        return c.json(
+          { error: "Select an assigned evaluation round.", code: "reviewer_not_assigned" },
+          403,
+        );
+      }
+      if (!advancedRound.allowed) {
+        const error = evaluationRoundAccessError(advancedRound);
+        return c.json(error.body, error.status);
+      }
+    }
+    const proposalIds = advancedRound?.round
+      ? await store.listEvaluationRoundProposalIds(advancedRound.round.id, principal.id)
+      : undefined;
     const proposals = await store.listProposals({
       query,
       status,
       trackIds,
-      sort: requestedSort as "newest" | "oldest" | "title-asc" | "speaker-asc",
+      proposalIds,
+      sort: requestedSort as
+        | "newest"
+        | "oldest"
+        | "title-asc"
+        | "title-desc"
+        | "track-asc"
+        | "track-desc"
+        | "status-asc"
+        | "status-desc"
+        | "speaker-asc"
+        | "aggregate-asc"
+        | "aggregate-desc",
+      roundId: requestedRoundId || advancedRound?.round?.id,
     });
-    return c.json({ proposals });
+    const projected = await Promise.all(
+      proposals.map(async (proposal) => {
+        if (eventRole(principal, eventId) === "admin") {
+          return {
+            ...proposal,
+            reviewerRecusals: await store.listProposalReviewRecusals(proposal.id),
+          };
+        }
+        const recusal = advancedRound?.round
+          ? await store.getReviewerRecusal({
+              proposalId: proposal.id,
+              roundId: advancedRound.round.id,
+              reviewerId: principal.id,
+            })
+          : null;
+        const withRecusal = { ...proposal, reviewerRecusal: recusal, reviewerRecusals: [] };
+        return advancedRound?.round?.anonymization === "blind"
+          ? anonymizeEvaluationProposal(withRecusal)
+          : withRecusal;
+      }),
+    );
+    return c.json({
+      proposals: projected,
+    });
+  });
+
+  app.get("/api/events/:eventId/review-results", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Event administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    return c.json(await c.env.EVENT_STORE.getByName(eventId).listReviewResults());
+  });
+
+  app.get("/api/events/:eventId/review-results.csv", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Event administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const csv = reviewResultsCsv(
+      await c.env.EVENT_STORE.getByName(eventId).listReviewResults(),
+    );
+    return new Response(csv, {
+      headers: {
+        "content-type": "text/csv; charset=utf-8",
+        "content-disposition": `attachment; filename="${eventId}-review-results.csv"`,
+      },
+    });
   });
 
   // Permanent speaker-facing detail: always public-safe fields (never committee data).
@@ -2049,9 +3517,60 @@ export function createApp(options: AppOptions = {}) {
       return c.json({ error: "Proposal not found" }, 404);
     }
 
+    const plan = await store.getEvaluationPlan();
+    const roundId = c.req.query("roundId") ?? "";
+    let round = null;
+    if (plan?.enabled && eventRole(principal, eventId) !== "admin") {
+      if (!roundId) {
+        return c.json(
+          { error: "Select an assigned evaluation round.", code: "reviewer_not_assigned" },
+          403,
+        );
+      }
+      const access = await store.getEvaluationRoundAccess(roundId, principal.id);
+      if (!access.allowed) {
+        const error = evaluationRoundAccessError(access);
+        return c.json(error.body, error.status);
+      }
+      if (!(await store.listEvaluationRoundProposalIds(roundId, principal.id)).includes(proposalId)) {
+        return c.json({ error: "Proposal not found" }, 404);
+      }
+      round = access.round;
+    }
+
+    const isAdmin = eventRole(principal, eventId) === "admin";
+    const reviewerRecusal =
+      !isAdmin && round
+        ? await store.getReviewerRecusal({
+            proposalId,
+            roundId: round.id,
+            reviewerId: principal.id,
+          })
+        : null;
+    const projected = isAdmin
+      ? {
+          ...proposal,
+          reviewerRecusals: await store.listProposalReviewRecusals(proposalId),
+        }
+      : {
+          ...(round?.anonymization === "blind" ? anonymizeEvaluationProposal(proposal) : proposal),
+          reviewerRecusal,
+          reviewerRecusals: [],
+        };
+    const auditEvents = (await store.listProposalAuditEvents(proposalId)).filter(
+      (audit: ProposalAuditEvent) => isAdmin || audit.actorId === principal.id,
+    );
+    const scorecard = await store.getProposalScorecardProjection({
+      proposalId,
+      roundId: round?.id ?? (isAdmin && roundId ? roundId : undefined),
+      reviewerId: isAdmin ? undefined : principal.id,
+    });
     return c.json({
-      proposal,
-      auditEvents: await store.listProposalAuditEvents(proposalId),
+      proposal: scorecard?.aggregate
+        ? { ...projected, scorecardAggregate: scorecard.aggregate }
+        : projected,
+      auditEvents,
+      scorecard,
     });
   });
 
@@ -2077,6 +3596,9 @@ export function createApp(options: AppOptions = {}) {
         status?: unknown;
         committeeNote?: unknown;
         expectedVersion?: unknown;
+        roundId?: unknown;
+        criteria?: unknown;
+        scorecardValues?: unknown;
       } | null;
       if (!body || !Number.isInteger(body.expectedVersion)) {
         return c.json({ error: "An expected review version is required" }, 400);
@@ -2101,8 +3623,70 @@ export function createApp(options: AppOptions = {}) {
       ) {
         return c.json({ error: "Committee note must be 10000 characters or fewer" }, 400);
       }
-      if (status === undefined && body.committeeNote === undefined) {
+      let criterionScores: ReviewCriterionResult[] | undefined;
+      try {
+        criterionScores = normalizeReviewCriterionScores(body.criteria);
+      } catch (error) {
+        if (error instanceof ReviewCriteriaInputError) {
+          return c.json({ error: error.message }, 400);
+        }
+        throw error;
+      }
+      const scorecardValues =
+        body.scorecardValues && typeof body.scorecardValues === "object" && !Array.isArray(body.scorecardValues)
+          ? (body.scorecardValues as Record<string, ScorecardCriterionValue>)
+          : undefined;
+      if (body.scorecardValues !== undefined && !scorecardValues) {
+        return c.json({ error: "Scorecard values must be an object." }, 400);
+      }
+      if (
+        status === undefined &&
+        body.committeeNote === undefined &&
+        criterionScores === undefined &&
+        scorecardValues === undefined
+      ) {
         return c.json({ error: "A review change is required" }, 400);
+      }
+
+      const plan = await store.getEvaluationPlan();
+      let roundId: string | undefined;
+      let round = null;
+      if (plan?.enabled && eventRole(principal, eventId) !== "admin") {
+        if (typeof body.roundId !== "string" || !body.roundId) {
+          return c.json(
+            { error: "Select an assigned evaluation round.", code: "reviewer_not_assigned" },
+            403,
+          );
+        }
+        const access = await store.getEvaluationRoundAccess(body.roundId, principal.id);
+        if (!access.allowed) {
+          const error = evaluationRoundAccessError(access);
+          return c.json(error.body, error.status);
+        }
+        round = access.round;
+        roundId = access.round!.id;
+        if (!(await store.listEvaluationRoundProposalIds(roundId, principal.id)).includes(proposalId)) {
+          return c.json({ error: "Proposal not found" }, 404);
+        }
+        const recusal = await store.getReviewerRecusal({
+          proposalId,
+          roundId,
+          reviewerId: principal.id,
+        });
+        if (recusal) {
+          return c.json(
+            {
+              error: "You have recused yourself from this review assignment.",
+              code: "reviewer_recused",
+            },
+            409,
+          );
+        }
+      }
+      if (plan?.enabled && eventRole(principal, eventId) === "admin" && typeof body.roundId === "string") {
+        round = plan.rounds.find((candidate) => candidate.id === body.roundId) ?? null;
+        if (!round) return c.json({ error: "Evaluation round not found." }, 404);
+        roundId = round.id;
       }
 
       const proposal = await store.updateProposalReview({
@@ -2115,6 +3699,9 @@ export function createApp(options: AppOptions = {}) {
             : undefined,
         actorId: principal.id,
         actorName: principal.displayName,
+        roundId,
+        criterionScores,
+        scorecardValues,
       });
       if (!proposal) {
         return c.json(
@@ -2122,9 +3709,98 @@ export function createApp(options: AppOptions = {}) {
           409,
         );
       }
+      const isAdmin = eventRole(principal, eventId) === "admin";
+      const projected = isAdmin
+        ? {
+            ...proposal,
+            reviewerRecusals: await store.listProposalReviewRecusals(proposalId),
+          }
+        : round?.anonymization === "blind"
+          ? anonymizeEvaluationProposal(proposal)
+          : proposal;
+      const scorecard = await store.getProposalScorecardProjection({
+        proposalId,
+        roundId,
+        reviewerId: isAdmin ? undefined : principal.id,
+      });
       return c.json({
-        proposal,
-        auditEvents: await store.listProposalAuditEvents(proposalId),
+        proposal: scorecard?.aggregate
+          ? { ...projected, scorecardAggregate: scorecard.aggregate }
+          : projected,
+        auditEvents: (await store.listProposalAuditEvents(proposalId)).filter(
+          (audit: ProposalAuditEvent) => isAdmin || audit.actorId === principal.id,
+        ),
+        scorecard,
+      });
+    },
+  );
+
+  app.post(
+    "/api/events/:eventId/organizer/proposals/:proposalId/recusal",
+    async (c) => {
+      const principal = await resolvePrincipal(c.req.raw, c.env);
+      const eventId = c.req.param("eventId");
+      const proposalId = c.req.param("proposalId");
+      if (!canAccessEvent(principal, eventId)) {
+        return c.json({ error: "Unauthorized" }, 401);
+      }
+      if (eventRole(principal, eventId) === "admin") {
+        return c.json({ error: "Reviewer access required.", code: "reviewer_not_assigned" }, 403);
+      }
+      const seed = findSeed(eventId);
+      if (!seed) return c.json({ error: "Event not found" }, 404);
+      await loadEvent(c.env, seed);
+      const store = c.env.EVENT_STORE.getByName(eventId);
+      const proposal = (await store.getProposal(proposalId)) as OrganizerProposal | null;
+      if (!proposal || !canReviewProposal(principal, eventId, proposal)) {
+        return c.json({ error: "Proposal not found" }, 404);
+      }
+      const body = (await c.req.json().catch(() => null)) as {
+        roundId?: unknown;
+        reason?: unknown;
+      } | null;
+      if (!body || typeof body.roundId !== "string" || !body.roundId) {
+        return c.json(
+          { error: "Select an assigned evaluation round.", code: "reviewer_not_assigned" },
+          403,
+        );
+      }
+      if (body.reason !== undefined && typeof body.reason !== "string") {
+        return c.json({ error: "Recusal reason must be text." }, 400);
+      }
+      if (typeof body.reason === "string" && body.reason.length > 2000) {
+        return c.json({ error: "Recusal reason must be 2000 characters or fewer." }, 400);
+      }
+      const access = await store.getEvaluationRoundAccess(body.roundId, principal.id);
+      if (!access.allowed) {
+        const error = evaluationRoundAccessError(access);
+        return c.json(error.body, error.status);
+      }
+      if (
+        !(await store.listEvaluationRoundProposalIds(access.round!.id, principal.id)).includes(
+          proposalId,
+        )
+      ) {
+        return c.json({ error: "Proposal not found" }, 404);
+      }
+      const recusal = await store.recuseProposalReview({
+        proposalId,
+        roundId: access.round!.id,
+        reviewerId: principal.id,
+        reviewerName: principal.displayName,
+        reason: body.reason,
+      });
+      const current = (await store.getProposal(proposalId)) as OrganizerProposal;
+      const projected = {
+        ...(access.round!.anonymization === "blind" ? anonymizeEvaluationProposal(current) : current),
+        reviewerRecusal: recusal,
+        reviewerRecusals: [],
+      };
+      return c.json({
+        proposal: projected,
+        auditEvents: (await store.listProposalAuditEvents(proposalId)).filter(
+          (audit: ProposalAuditEvent) => audit.actorId === principal.id,
+        ),
       });
     },
   );
@@ -2155,6 +3831,101 @@ export function createApp(options: AppOptions = {}) {
       return c.json(INVALID_PORTAL_LINK_ERROR, 401);
     }
     return c.json(session);
+  });
+
+  app.get("/api/events/:eventId/onboarding/files", async (c) => {
+    const eventId = c.req.param("eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    const event = await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can open the files library." }, 403);
+    }
+    const library = await c.env.EVENT_STORE.getByName(eventId).getOnboardingFilesLibrary();
+    return c.json({ ...library, eventId: event.id });
+  });
+
+  app.post("/api/events/:eventId/onboarding/files/export", async (c) => {
+    const eventId = c.req.param("eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    const event = await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can export deliverables." }, 403);
+    }
+    if (!c.env.ASSETS) return c.json({ error: "File uploads are not configured." }, 503);
+
+    const body = (await c.req.json().catch(() => ({}))) as FilesLibraryExportRequest | null;
+    const requestedAssetIds = new Set(
+      Array.isArray(body?.assetIds)
+        ? body.assetIds.filter((value): value is string => typeof value === "string" && value.trim() !== "")
+        : [],
+    );
+    const requestedSessionIds = new Set(
+      Array.isArray(body?.sessionIds)
+        ? body.sessionIds.filter((value): value is string => typeof value === "string" && value.trim() !== "")
+        : [],
+    );
+    if (requestedAssetIds.size === 0 && requestedSessionIds.size === 0) {
+      return c.json({ error: "Select at least one file or session to export." }, 400);
+    }
+
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const library = await store.getOnboardingFilesLibrary();
+    const selected = library.files.filter(
+      (file) =>
+        requestedAssetIds.has(file.assetId) ||
+        (file.session && requestedSessionIds.has(file.session.id)),
+    );
+    if (selected.length === 0) {
+      return c.json({ error: "No selected latest deliverables were found." }, 404);
+    }
+    if (selected.length > 200) {
+      return c.json({ error: "Export up to 200 deliverables at a time." }, 400);
+    }
+
+    const usedPaths = new Set<string>();
+    const entries: ZipEntry[] = [];
+    let totalBytes = 0;
+    for (const file of selected) {
+      const asset = await store.getAsset(file.assetId);
+      if (!asset || asset.status !== "complete" || asset.purpose !== "portal_task") {
+        return c.json({ error: `Deliverable ${file.fileName} is no longer exportable.` }, 409);
+      }
+      const object = await c.env.ASSETS.get(asset.object_key);
+      if (!object) {
+        return c.json({ error: `Deliverable ${file.fileName} is missing from storage.` }, 502);
+      }
+      const bytes = new Uint8Array(await object.arrayBuffer());
+      totalBytes += bytes.byteLength;
+      if (totalBytes > 100 * 1024 * 1024) {
+        return c.json({ error: "Export up to 100 MB of deliverables at a time." }, 400);
+      }
+      entries.push({
+        path: uniqueZipPath(file.safeExportPath, usedPaths),
+        bytes,
+        modifiedAt: file.uploadedAt,
+      });
+    }
+
+    entries.sort((a, b) => a.path.localeCompare(b.path));
+    const zip = buildStoredZip(entries);
+    const timestamp = new Date().toISOString().replace(/[:-]/g, "").replace(/\.\d{3}Z$/, "Z");
+    const filename = sanitizeUploadFileName(`${event.id}-deliverables-${timestamp}.zip`);
+    const headers = new Headers();
+    headers.set("content-type", "application/zip");
+    headers.set("cache-control", "private, no-store");
+    headers.set("content-disposition", `attachment; filename="${filename}"`);
+    headers.set("x-chartstead-export-file-count", String(entries.length));
+    return new Response(zip, { status: 200, headers });
   });
 
   app.patch("/api/events/:eventId/portal/profile", async (c) => {
@@ -2270,6 +4041,7 @@ export function createApp(options: AppOptions = {}) {
     if (purpose === "task" && !taskId) {
       return c.json({ error: "Task id is required for task uploads." }, 400);
     }
+    let taskConstraints = null as OnboardingFileConstraints | null;
     if (purpose === "task") {
       const session = await store.getSpeakerPortalSession({
         speakerId: authorized.payload.speakerId,
@@ -2280,16 +4052,29 @@ export function createApp(options: AppOptions = {}) {
       if (task.completionRequirement !== "file") {
         return c.json({ error: "This task does not accept file uploads." }, 400);
       }
+      taskConstraints = task.fileConstraints;
     }
 
-    const maxBytes = purpose === "headshot" ? HEADSHOT_MAX_BYTES : TASK_FILE_MAX_BYTES;
+    const maxBytes =
+      purpose === "headshot"
+        ? HEADSHOT_MAX_BYTES
+        : taskConstraints?.maxBytes ?? TASK_FILE_MAX_BYTES;
     const acceptMimeTypes =
-      purpose === "headshot" ? [...HEADSHOT_MIME_TYPES] : [] as string[];
+      purpose === "headshot"
+        ? [...HEADSHOT_MIME_TYPES]
+        : taskConstraints?.acceptMimeTypes ?? [];
+    const acceptExtensions =
+      purpose === "headshot"
+        ? [".jpg", ".jpeg", ".png", ".webp"]
+        : taskConstraints?.acceptExtensions ?? [];
     if (sizeBytes > maxBytes) {
       return c.json({ error: `Files must be ${maxBytes} bytes or smaller.` }, 400);
     }
     if (acceptMimeTypes.length > 0 && !acceptMimeTypes.includes(mime)) {
-      return c.json({ error: "That file type is not allowed." }, 400);
+      return c.json({ error: `Use one of these file types: ${acceptMimeTypes.join(", ")}.` }, 400);
+    }
+    if (acceptExtensions.length > 0 && !acceptExtensions.includes(fileExtension(fileName))) {
+      return c.json({ error: `Use one of these file extensions: ${acceptExtensions.join(", ")}.` }, 400);
     }
 
     const assetId = createTokenId();
@@ -2313,6 +4098,7 @@ export function createApp(options: AppOptions = {}) {
         uploadUrl: `/api/events/${eventId}/portal/uploads/${assetId}`,
         maxBytes,
         acceptMimeTypes,
+        acceptExtensions,
       },
     });
   });
@@ -2361,6 +4147,68 @@ export function createApp(options: AppOptions = {}) {
     }
     return new Response(object.body, { status: 200, headers });
   });
+
+  app.get("/api/events/:eventId/portal/assets/:assetId/comments", async (c) => {
+    const eventId = c.req.param("eventId");
+    const assetId = c.req.param("assetId");
+    const token = c.req.query("token") ?? "";
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const authorized = await authorizeSpeakerPortal({
+      secret: signingSecret(c.env, options.signingSecret),
+      token,
+      eventId,
+      store,
+    });
+    if (!authorized) return c.json(INVALID_PORTAL_LINK_ERROR, 401);
+    const asset = await store.getAsset(assetId);
+    if (
+      !asset ||
+      asset.status !== "complete" ||
+      asset.owner_speaker_id !== authorized.payload.speakerId ||
+      asset.purpose !== "portal_task"
+    ) {
+      return c.json({ error: "Deliverable version not found." }, 404);
+    }
+    return c.json({ comments: store.listDeliverableVersionComments(assetId) });
+  });
+
+  app.post("/api/events/:eventId/portal/assets/:assetId/comments", async (c) => {
+    const eventId = c.req.param("eventId");
+    const assetId = c.req.param("assetId");
+    const token = c.req.query("token") ?? "";
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const authorized = await authorizeSpeakerPortal({
+      secret: signingSecret(c.env, options.signingSecret),
+      token,
+      eventId,
+      store,
+    });
+    if (!authorized) return c.json(INVALID_PORTAL_LINK_ERROR, 401);
+    const session = await store.getSpeakerPortalSession({
+      speakerId: authorized.payload.speakerId,
+      expiresAt: authorized.tokenRow.expiresAt,
+    });
+    if (!session) return c.json(INVALID_PORTAL_LINK_ERROR, 401);
+    const body = (await c.req.json().catch(() => null)) as { body?: unknown } | null;
+    const result = await store.addDeliverableVersionComment({
+      assetId,
+      speakerId: authorized.payload.speakerId,
+      body: typeof body?.body === "string" ? body.body : "",
+      authorId: authorized.payload.speakerId,
+      authorName: session.profile.name,
+      authorRole: "speaker",
+    });
+    if (!result.ok) return c.json({ error: result.error }, result.status);
+    const comments = await store.listDeliverableVersionComments(assetId);
+    return Response.json(comments[comments.length - 1] ?? result.comment);
+  });
+
 
   app.put("/api/events/:eventId/portal/uploads/:assetId", async (c) => {
     const eventId = c.req.param("eventId");
@@ -2524,6 +4372,92 @@ export function createApp(options: AppOptions = {}) {
     return c.json({ ...board, eventId: event.id });
   });
 
+  app.get("/api/events/:eventId/onboarding/assets/:assetId", async (c) => {
+    const eventId = c.req.param("eventId");
+    const assetId = c.req.param("assetId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can access deliverables." }, 403);
+    }
+    if (!c.env.ASSETS) return c.json({ error: "File uploads are not configured." }, 503);
+
+    const asset = await c.env.EVENT_STORE.getByName(eventId).getAsset(assetId);
+    if (!asset || asset.status !== "complete" || asset.purpose !== "portal_task") {
+      return c.json({ error: "Deliverable not found." }, 404);
+    }
+    const object = await c.env.ASSETS.get(asset.object_key);
+    if (!object) return c.json({ error: "Deliverable file is missing." }, 404);
+
+    const requestedDisposition = c.req.query("disposition");
+    const disposition =
+      requestedDisposition === "inline" && isPreviewableOnboardingMime(asset.mime)
+        ? "inline"
+        : "attachment";
+    const headers = new Headers();
+    headers.set("content-type", asset.mime || "application/octet-stream");
+    headers.set("cache-control", "private, no-store");
+    headers.set(
+      "content-disposition",
+      `${disposition}; filename="${sanitizeUploadFileName(asset.file_name)}"`,
+    );
+    return new Response(object.body, { status: 200, headers });
+  });
+
+  app.get("/api/events/:eventId/onboarding/assets/:assetId/comments", async (c) => {
+    const eventId = c.req.param("eventId");
+    const assetId = c.req.param("assetId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can access deliverable comments." }, 403);
+    }
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const asset = await store.getAsset(assetId);
+    if (!asset || asset.status !== "complete" || asset.purpose !== "portal_task") {
+      return c.json({ error: "Deliverable version not found." }, 404);
+    }
+    return c.json({ comments: store.listDeliverableVersionComments(assetId) });
+  });
+
+  app.post("/api/events/:eventId/onboarding/assets/:assetId/comments", async (c) => {
+    const eventId = c.req.param("eventId");
+    const assetId = c.req.param("assetId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can add deliverable comments." }, 403);
+    }
+    const body = (await c.req.json().catch(() => null)) as { body?: unknown } | null;
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const result = await store.addDeliverableVersionComment({
+      assetId,
+      body: typeof body?.body === "string" ? body.body : "",
+      authorId: principal.id,
+      authorName: principal.displayName,
+      authorRole: "organizer",
+    });
+    if (!result.ok) return c.json({ error: result.error }, result.status);
+    const comments = await store.listDeliverableVersionComments(assetId);
+    return Response.json(comments[comments.length - 1] ?? result.comment);
+  });
+
+
   app.post("/api/events/:eventId/speakers", async (c) => {
     const eventId = c.req.param("eventId");
     const seed = findSeed(eventId);
@@ -2583,15 +4517,255 @@ export function createApp(options: AppOptions = {}) {
       name?: unknown;
       email?: unknown;
       biography?: unknown;
+      socialLinks?: unknown;
+      headshotAssetId?: unknown;
     } | null;
     if (!body || typeof body !== "object") {
       return c.json({ error: "Speaker update must be valid JSON." }, 400);
+    }
+    if (
+      "headshotAssetId" in body &&
+      body.headshotAssetId !== null &&
+      typeof body.headshotAssetId !== "string"
+    ) {
+      return c.json({ error: "Headshot asset id is invalid." }, 400);
     }
     const result = await c.env.EVENT_STORE.getByName(eventId).updateDirectorySpeaker({
       speakerId: c.req.param("speakerId"),
       name: typeof body.name === "string" ? body.name : undefined,
       email: typeof body.email === "string" ? body.email : undefined,
       biography: typeof body.biography === "string" ? body.biography : undefined,
+      socialLinks: "socialLinks" in body ? body.socialLinks : undefined,
+      headshotAssetId:
+        "headshotAssetId" in body
+          ? body.headshotAssetId === null || typeof body.headshotAssetId === "string"
+            ? body.headshotAssetId
+            : undefined
+          : undefined,
+      actorId: principal.id,
+      actorName: principal.displayName,
+    });
+    if (!result.ok) return c.json({ error: result.error }, result.status);
+    return c.json(result.speaker);
+  });
+
+  app.post("/api/events/:eventId/speakers/:speakerId/headshot-uploads", async (c) => {
+    const eventId = c.req.param("eventId");
+    const speakerId = c.req.param("speakerId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can manage speakers." }, 403);
+    }
+    if (!c.env.ASSETS) return c.json({ error: "File uploads are not configured." }, 503);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const speaker = (await store.getOnboardingBoard()).speakers.find(
+      (row) => row.speakerId === speakerId,
+    );
+    if (!speaker) return c.json({ error: "Speaker not found." }, 404);
+
+    const body = (await c.req.json().catch(() => null)) as {
+      fileName?: unknown;
+      mime?: unknown;
+      sizeBytes?: unknown;
+    } | null;
+    const rawFileName = typeof body?.fileName === "string" ? body.fileName.trim() : "";
+    const fileName = rawFileName ? sanitizeUploadFileName(rawFileName) : "";
+    const mime = typeof body?.mime === "string" ? body.mime.trim() : "";
+    const sizeBytes = typeof body?.sizeBytes === "number" ? body.sizeBytes : Number.NaN;
+    if (!fileName || !mime || !Number.isInteger(sizeBytes) || sizeBytes < 0) {
+      return c.json({ error: "A valid headshot upload start request is required." }, 400);
+    }
+    if (sizeBytes > HEADSHOT_MAX_BYTES) {
+      return c.json({ error: `Files must be ${HEADSHOT_MAX_BYTES} bytes or smaller.` }, 400);
+    }
+    if (!HEADSHOT_MIME_TYPES.includes(mime as (typeof HEADSHOT_MIME_TYPES)[number])) {
+      return c.json({ error: "That file type is not allowed." }, 400);
+    }
+
+    const assetId = createTokenId();
+    const objectKey = `${eventId}/portal/${speakerId}/${assetId}/${fileName}`;
+    await store.createPortalAsset({
+      assetId,
+      objectKey,
+      fileName,
+      mime,
+      sizeBytes,
+      speakerId,
+      purpose: "portal_headshot",
+      maxBytes: HEADSHOT_MAX_BYTES,
+    });
+    return c.json({
+      upload: {
+        assetId,
+        objectKey,
+        uploadUrl: `/api/events/${eventId}/speakers/${speakerId}/headshot-uploads/${assetId}`,
+        maxBytes: HEADSHOT_MAX_BYTES,
+        acceptMimeTypes: [...HEADSHOT_MIME_TYPES],
+      },
+    });
+  });
+
+  app.put("/api/events/:eventId/speakers/:speakerId/headshot-uploads/:assetId", async (c) => {
+    const eventId = c.req.param("eventId");
+    const speakerId = c.req.param("speakerId");
+    const assetId = c.req.param("assetId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can manage speakers." }, 403);
+    }
+    if (!c.env.ASSETS) return c.json({ error: "File uploads are not configured." }, 503);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const asset = await store.getAsset(assetId);
+    if (
+      !asset ||
+      asset.owner_speaker_id !== speakerId ||
+      asset.purpose !== "portal_headshot"
+    ) {
+      return c.json({ error: "Upload session not found." }, 404);
+    }
+    if (asset.claimed_proposal_id || (asset.status !== "pending" && asset.status !== "failed")) {
+      return c.json({ error: "This upload can no longer be replaced." }, 400);
+    }
+    const contentLength = Number(c.req.header("content-length") ?? Number.NaN);
+    if (!Number.isInteger(contentLength) || contentLength < 0) {
+      return c.json({ error: "Content-Length is required." }, 400);
+    }
+    if (contentLength !== Number(asset.size_bytes)) {
+      return c.json({ error: "Upload size must match the declared file size." }, 400);
+    }
+    const contentType = c.req.header("content-type")?.split(";")[0]?.trim() ?? "";
+    if (contentType !== asset.mime) {
+      return c.json({ error: "Content-Type must match the declared file type." }, 400);
+    }
+    if (!c.req.raw.body) return c.json({ error: "Upload body is required." }, 400);
+
+    try {
+      const stored = await c.env.ASSETS.put(asset.object_key, c.req.raw.body, {
+        httpMetadata: { contentType: asset.mime },
+        customMetadata: { assetId, eventId, fileName: asset.file_name, speakerId },
+      });
+      if (!stored || stored.size !== Number(asset.size_bytes)) {
+        await c.env.ASSETS.delete(asset.object_key).catch(() => undefined);
+        await store.failAsset(assetId);
+        return c.json({ error: "Upload size did not match the declared file size." }, 400);
+      }
+      const completed = await store.completeAsset({
+        assetId,
+        sizeBytes: stored.size,
+        mime: asset.mime,
+        fileName: asset.file_name,
+      });
+      if (!completed) return c.json({ error: "This upload can no longer be replaced." }, 409);
+      return c.json({ asset: completed });
+    } catch {
+      await store.failAsset(assetId);
+      return c.json({ error: "Upload failed. You can retry without restarting." }, 502);
+    }
+  });
+
+
+
+
+  app.get("/api/events/:eventId/speakers/:speakerId/headshot", async (c) => {
+    const eventId = c.req.param("eventId");
+    const speakerId = c.req.param("speakerId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can manage speakers." }, 403);
+    }
+    if (!c.env.ASSETS) return c.json({ error: "File uploads are not configured." }, 503);
+    const assetId = c.req.query("asset") ?? "";
+    const asset = await c.env.EVENT_STORE.getByName(eventId).getAsset(assetId);
+    if (
+      !asset ||
+      asset.status !== "complete" ||
+      asset.owner_speaker_id !== speakerId ||
+      asset.purpose !== "portal_headshot"
+    ) {
+      return c.json({ error: "Asset not found." }, 404);
+    }
+    const object = await c.env.ASSETS.get(asset.object_key);
+    if (!object) return c.json({ error: "Asset file is missing." }, 404);
+    return new Response(object.body, {
+      headers: {
+        "content-type": asset.mime,
+        "cache-control": "private, max-age=300",
+        "content-disposition": `inline; filename="${sanitizeUploadFileName(asset.file_name)}"`,
+      },
+    });
+  });
+
+
+  app.patch("/api/events/:eventId/speakers/:speakerId/participation", async (c) => {
+    const eventId = c.req.param("eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can manage speaker participation." }, 403);
+    }
+    const body = (await c.req.json().catch(() => null)) as {
+      workflowStatus?: unknown;
+      travelPreferences?: unknown;
+      logistics?: unknown;
+    } | null;
+    const workflowStatus = body?.workflowStatus;
+    if (
+      workflowStatus !== "invited" &&
+      workflowStatus !== "confirmed" &&
+      workflowStatus !== "preparing" &&
+      workflowStatus !== "ready" &&
+      workflowStatus !== "withdrawn"
+    ) {
+      return c.json({ error: "A valid workflowStatus is required." }, 400);
+    }
+    if (!body || typeof body.travelPreferences !== "string") {
+      return c.json({ error: "travelPreferences is required." }, 400);
+    }
+    if (
+      !body ||
+      !body.logistics ||
+      typeof body.logistics !== "object" ||
+      Array.isArray(body.logistics)
+    ) {
+      return c.json({ error: "logistics must be an object of field labels and values." }, 400);
+    }
+    const logistics = Object.fromEntries(
+      Object.entries(body.logistics as Record<string, unknown>).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
+    if (Object.keys(logistics).length !== Object.keys(body.logistics).length) {
+      return c.json({ error: "Each logistics value must be text." }, 400);
+    }
+
+    const result = await c.env.EVENT_STORE.getByName(eventId).updateParticipationWorkflow({
+      speakerId: c.req.param("speakerId"),
+      workflowStatus,
+      travelPreferences: body.travelPreferences,
+      logistics,
       actorId: principal.id,
       actorName: principal.displayName,
     });
@@ -2766,18 +4940,24 @@ export function createApp(options: AppOptions = {}) {
 
     const body = (await c.req.json().catch(() => null)) as {
       speakerId?: unknown;
+      speakerIds?: unknown;
       title?: unknown;
       instructions?: unknown;
       kind?: unknown;
       completionRequirement?: unknown;
       readinessFlag?: unknown;
       dueAt?: unknown;
+      idempotencyKey?: unknown;
     } | null;
     if (!body || typeof body !== "object") {
       return c.json({ error: "Task request must be valid JSON." }, 400);
     }
 
-    const speakerId = typeof body.speakerId === "string" ? body.speakerId.trim() : "";
+    const speakerIds = Array.isArray(body.speakerIds)
+      ? body.speakerIds.filter((id): id is string => typeof id === "string" && Boolean(id.trim()))
+      : typeof body.speakerId === "string" && body.speakerId.trim()
+        ? [body.speakerId.trim()]
+        : [];
     const title = typeof body.title === "string" ? body.title : "";
     const instructions = typeof body.instructions === "string" ? body.instructions : "";
     const kind = typeof body.kind === "string" ? body.kind : "custom";
@@ -2795,16 +4975,20 @@ export function createApp(options: AppOptions = {}) {
     const dueAt =
       typeof body.dueAt === "string" && body.dueAt.trim() ? body.dueAt.trim() : null;
 
-    if (!speakerId || !completionRequirement) {
+    const idempotencyKey =
+      (typeof body.idempotencyKey === "string" && body.idempotencyKey.trim()) ||
+      c.req.header("idempotency-key")?.trim() ||
+      (speakerIds.length === 1 ? crypto.randomUUID() : "");
+    if (speakerIds.length === 0 || !completionRequirement || !idempotencyKey) {
       return c.json(
-        { error: "speakerId and completionRequirement are required." },
+        { error: "speakerIds, completionRequirement, and idempotencyKey are required." },
         400,
       );
     }
 
     const store = c.env.EVENT_STORE.getByName(eventId);
-    const created = await store.createOnboardingTask({
-      speakerId,
+    const created = await store.createOnboardingTasks({
+      speakerIds,
       title,
       instructions,
       kind,
@@ -2812,11 +4996,15 @@ export function createApp(options: AppOptions = {}) {
       readinessFlag,
       dueAt,
       createdBy: principal.id,
+      idempotencyKey,
     });
-    if ("error" in created) {
+    if (!created.ok) {
       return c.json({ error: created.error }, 400);
     }
-    return c.json({ task: created }, 201);
+    return c.json(
+      { ...created.result, task: created.result.tasks[0] },
+      created.created ? 201 : 200,
+    );
   });
 
   app.post("/api/events/:eventId/onboarding/reminders", async (c) => {
@@ -2846,6 +5034,100 @@ export function createApp(options: AppOptions = {}) {
     });
     if ("error" in draft) return c.json({ error: draft.error }, 400);
     return c.json(draft, 201);
+  });
+
+  app.get("/api/events/:eventId/onboarding/reminders/policy", async (c) => {
+    const eventId = c.req.param("eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can view reminder policy." }, 403);
+    }
+    const policy = await c.env.EVENT_STORE.getByName(eventId).getOnboardingReminderPolicy();
+    return c.json({ policy });
+  });
+
+  app.put("/api/events/:eventId/onboarding/reminders/policy", async (c) => {
+    const eventId = c.req.param("eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can change reminder policy." }, 403);
+    }
+    const body = (await c.req.json().catch(() => null)) as {
+      policy?: Partial<OnboardingReminderAutomationPolicy>;
+    } | null;
+    const policy = await c.env.EVENT_STORE.getByName(eventId).setOnboardingReminderPolicy({
+      policy: body?.policy ?? {},
+      actorId: principal.id,
+      actorName: principal.displayName,
+    });
+    return c.json({ policy });
+  });
+
+  app.post("/api/events/:eventId/onboarding/reminders/bulk", async (c) => {
+    const eventId = c.req.param("eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can prepare bulk reminders." }, 403);
+    }
+    const body = (await c.req.json().catch(() => null)) as {
+      speakerIds?: unknown;
+      mode?: unknown;
+      idempotencyKey?: unknown;
+    } | null;
+    const speakerIds = Array.isArray(body?.speakerIds)
+      ? body.speakerIds.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      : [];
+    const mode = body?.mode === "send" ? "send" : "draft";
+    const idempotencyKey =
+      (typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim()) ||
+      c.req.header("idempotency-key")?.trim() ||
+      "";
+    const result = await c.env.EVENT_STORE.getByName(eventId).prepareBulkOnboardingReminders({
+      speakerIds,
+      mode,
+      actorId: principal.id,
+      actorName: principal.displayName,
+      idempotencyKey,
+    });
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    return c.json(result, result.counts.prepared + result.counts.queued > 0 ? 201 : 200);
+  });
+
+  app.post("/api/events/:eventId/onboarding/reminders/process-due", async (c) => {
+    const eventId = c.req.param("eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    if (!principal || !canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Only event administrators can process due reminders." }, 403);
+    }
+    const result = await c.env.EVENT_STORE.getByName(eventId).processAutomaticOnboardingReminders({
+      actorId: principal.id,
+      actorName: principal.displayName,
+    });
+    return c.json(result);
   });
 
   app.patch("/api/events/:eventId/onboarding/reminders/:draftId", async (c) => {
@@ -3473,6 +5755,7 @@ export function createApp(options: AppOptions = {}) {
       subject?: unknown;
       bodyText?: unknown;
       bodyHtml?: unknown;
+      portalInvitation?: unknown;
       idempotencyKey?: unknown;
     } | null;
     const headerKey = c.req.header("idempotency-key");
@@ -3505,6 +5788,8 @@ export function createApp(options: AppOptions = {}) {
         subject: typeof body?.subject === "string" ? body.subject : undefined,
         bodyText: typeof body?.bodyText === "string" ? body.bodyText : undefined,
         bodyHtml: typeof body?.bodyHtml === "string" ? body.bodyHtml : undefined,
+        portalInvitation: body?.portalInvitation === true,
+        portalBaseUrl: new URL(c.req.url).origin,
         idempotencyKey,
         actor: toCourseCheckActor(principal!, parseInitiatingHumanHeader(c.req.raw)),
       })) as { plan: import("../shared/course-check").CourseCheckPlan; created: boolean };
@@ -4864,6 +7149,159 @@ export function createApp(options: AppOptions = {}) {
     return c.json(program);
   });
 
+  app.get("/api/events/:eventId/embed-configs", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = param(c, "eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    return c.json({
+      configs: await c.env.EVENT_STORE.getByName(eventId).listPublicEmbedConfigs(),
+    });
+  });
+
+  app.post("/api/events/:eventId/embed-configs", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = param(c, "eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const body = (await c.req.json().catch(() => null)) as PublicEmbedConfigInput | null;
+    if (!body) return c.json({ error: "Embed configuration is required." }, 400);
+    const result = await c.env.EVENT_STORE.getByName(eventId).savePublicEmbedConfig(body);
+    if (!result.ok) return c.json({ error: result.error }, 400);
+    return new Response(JSON.stringify(result.config), {
+      status: 201,
+      headers: { "content-type": "application/json; charset=utf-8" },
+    });
+  });
+
+  app.patch("/api/events/:eventId/embed-configs/:embedId", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = param(c, "eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const embedId = param(c, "embedId");
+    const prior = await c.env.EVENT_STORE.getByName(eventId).getPublicEmbedConfig(embedId, {
+      includeDisabled: true,
+    });
+    if (!prior) return c.json({ error: "Embed configuration not found" }, 404);
+    const body = (await c.req.json().catch(() => null)) as Partial<PublicEmbedConfigInput> | null;
+    if (!body) return c.json({ error: "Embed configuration patch is required." }, 400);
+    const result = await c.env.EVENT_STORE.getByName(eventId).savePublicEmbedConfig({
+      id: embedId,
+      name: typeof body.name === "string" ? body.name : prior.name,
+      widget: body.widget ?? prior.widget,
+      theme: body.theme ?? prior.theme,
+      filters: body.filters ?? prior.filters,
+      fields: body.fields ?? prior.fields,
+      revisionId: body.revisionId === undefined ? prior.revisionId : body.revisionId,
+      disabled: body.disabled === undefined ? prior.disabled : body.disabled,
+    });
+    if (!result.ok) return c.json({ error: result.error }, 400);
+    return c.json(result.config);
+  });
+
+  app.get("/api/events/:eventId/public-embeds/:embedId", async (c) => {
+    const eventId = param(c, "eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const resolved = await c.env.EVENT_STORE.getByName(eventId).resolvePublicEmbed(
+      param(c, "embedId"),
+    );
+    if (!resolved) return c.json({ error: "Embed not found" }, 404);
+    return c.json(resolved);
+  });
+
+  app.get("/api/events/:eventId/public-embeds/:embedId/feed.json", async (c) => {
+    const eventId = param(c, "eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const resolved = await c.env.EVENT_STORE.getByName(eventId).resolvePublicEmbed(
+      param(c, "embedId"),
+    );
+    if (!resolved) return c.json({ error: "Embed not found" }, 404);
+    return c.json(resolved.program);
+  });
+
+  app.get("/api/events/:eventId/program/calendar.ics", async (c) => {
+    const eventId = param(c, "eventId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const sessionIds = (c.req.query("sessionIds") ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
+    const revisionId = c.req.query("revision") ?? undefined;
+    const result = await c.env.EVENT_STORE.getByName(eventId).getPublicProgramCalendarIcs(
+      sessionIds,
+      revisionId,
+    );
+    if (!result.ok) {
+      return c.json(
+        { error: result.status === 400 ? "At least one session is required" : "Session not found" },
+        result.status,
+      );
+    }
+    return new Response(result.ics, {
+      status: 200,
+      headers: {
+        "content-type": "text/calendar; charset=utf-8",
+        "content-disposition": `attachment; filename="${result.filename}"`,
+        "cache-control": "private, max-age=300",
+      },
+    });
+  });
+
+
+
+  app.get("/api/events/:eventId/program/assets/:assetId", async (c) => {
+    const eventId = param(c, "eventId");
+    const assetId = param(c, "assetId");
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    if (!c.env.ASSETS) return c.json({ error: "File uploads are not configured." }, 503);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const revisionId = c.req.query("revision") ?? undefined;
+    if (!(await store.isPublicProgramHeadshot(assetId, revisionId))) {
+      return c.json({ error: "Asset not found." }, 404);
+    }
+    const asset = await store.getAsset(assetId);
+    if (!asset || asset.status !== "complete" || asset.purpose !== "portal_headshot") {
+      return c.json({ error: "Asset not found." }, 404);
+    }
+    const object = await c.env.ASSETS.get(asset.object_key);
+    if (!object) return c.json({ error: "Asset file is missing." }, 404);
+    return new Response(object.body, {
+      headers: {
+        "content-type": asset.mime,
+        "cache-control": "public, max-age=31536000, immutable",
+        "content-disposition": `inline; filename="${sanitizeUploadFileName(asset.file_name)}"`,
+      },
+    });
+  });
+
+
   app.get("/api/events/:eventId/program/sessions/:sessionId/calendar.ics", async (c) => {
     const eventId = param(c, "eventId");
     const sessionId = param(c, "sessionId");
@@ -4996,6 +7434,171 @@ export function createApp(options: AppOptions = {}) {
     return c.json(agenda);
   });
 
+  app.post("/api/events/:eventId/agenda/auto-place/preview", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = param(c, "eventId");
+    if (!canAccessEvent(principal, eventId)) return c.json({ error: "Unauthorized" }, 401);
+    if (!isEventAdmin(principal, eventId)) return c.json({ error: "Administrator access required" }, 403);
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const body = (await c.req.json().catch(() => null)) as { selectedSessionIds?: unknown; includeManual?: unknown } | null;
+    if (!body || typeof body !== "object") return c.json({ error: "JSON body is required." }, 400);
+    const selectedSessionIds = body.selectedSessionIds;
+    if (selectedSessionIds !== undefined && (!Array.isArray(selectedSessionIds) || selectedSessionIds.some((id) => typeof id !== "string"))) {
+      return c.json({ error: "selectedSessionIds must be an array of session IDs." }, 400);
+    }
+    if (body.includeManual !== undefined && typeof body.includeManual !== "boolean") {
+      return c.json({ error: "includeManual must be a boolean." }, 400);
+    }
+    const preview = await c.env.EVENT_STORE.getByName(eventId).previewAutoPlace({
+      selectedSessionIds: selectedSessionIds as string[] | undefined,
+      includeManual: body.includeManual as boolean | undefined,
+      actorId: principal!.id,
+      actorName: principal!.displayName,
+    });
+    return c.json(preview, 201);
+  });
+
+  app.post("/api/events/:eventId/agenda/auto-place/apply", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = param(c, "eventId");
+    if (!canAccessEvent(principal, eventId)) return c.json({ error: "Unauthorized" }, 401);
+    if (!isEventAdmin(principal, eventId)) return c.json({ error: "Administrator access required" }, 403);
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const body = (await c.req.json().catch(() => null)) as { previewId?: unknown; previewDigest?: unknown; agendaVersion?: unknown; idempotencyKey?: unknown } | null;
+    const idempotencyKey = (typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim()) || c.req.header("idempotency-key")?.trim() || "";
+    if (!body || typeof body.previewId !== "string" || typeof body.previewDigest !== "string" || !Number.isInteger(body.agendaVersion) || !idempotencyKey) {
+      return c.json({ error: "previewId, previewDigest, agendaVersion, and idempotencyKey are required." }, 400);
+    }
+    const result = await c.env.EVENT_STORE.getByName(eventId).applyAutoPlace({
+      previewId: body.previewId,
+      previewDigest: body.previewDigest,
+      agendaVersion: body.agendaVersion as number,
+      idempotencyKey,
+      actorId: principal!.id,
+      actorName: principal!.displayName,
+    });
+    if (!result.ok) return c.json({ error: result.error, ...(result.code ? { code: result.code } : {}), ...(result.currentVersion === undefined ? {} : { currentVersion: result.currentVersion }) }, result.status);
+    return c.json(result.result);
+  });
+
+
+  app.get("/api/events/:eventId/session-content", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = param(c, "eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const workspace = await c.env.EVENT_STORE.getByName(
+      eventId,
+    ).getSessionContentWorkspace();
+    return c.json(workspace);
+  });
+
+  app.patch("/api/events/:eventId/session-content/:sessionId", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = param(c, "eventId");
+    const sessionId = param(c, "sessionId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    const body = (await c.req.json().catch(() => null)) as {
+      expectedVersion?: unknown;
+      title?: unknown;
+      abstract?: unknown;
+      publicContent?: unknown;
+      status?: unknown;
+    } | null;
+    if (!body || typeof body !== "object") {
+      return c.json({ error: "JSON body is required." }, 400);
+    }
+    if (typeof body.expectedVersion !== "number") {
+      return c.json({ error: "expectedVersion must be a number." }, 400);
+    }
+    for (const field of ["title", "abstract", "publicContent"] as const) {
+      if (body[field] !== undefined && typeof body[field] !== "string") {
+        return c.json({ error: `${field} must be a string.` }, 400);
+      }
+    }
+    if (
+      body.status !== undefined &&
+      body.status !== "draft" &&
+      body.status !== "needs-changes" &&
+      body.status !== "approved"
+    ) {
+      return c.json({ error: "status must be draft, needs-changes, or approved." }, 400);
+    }
+    await loadEvent(c.env, seed);
+    const result = (await c.env.EVENT_STORE.getByName(eventId).updateSessionContent(
+      sessionId,
+      {
+        expectedVersion: body.expectedVersion,
+        title: body.title as string | undefined,
+        abstract: body.abstract as string | undefined,
+        publicContent: body.publicContent as string | undefined,
+        status: body.status,
+      },
+      { id: principal!.id, name: principal!.displayName },
+    )) as
+      | { ok: true; result: import("../shared/events").SessionContentMutationResponse }
+      | { ok: false; status: 400 | 404 | 409; code: string; error: string };
+    if (!result.ok) return c.json({ error: result.error, code: result.code }, result.status);
+    return c.json(result.result);
+  });
+
+  app.post("/api/events/:eventId/session-content/:sessionId/restore", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = param(c, "eventId");
+    const sessionId = param(c, "sessionId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!isEventAdmin(principal, eventId)) {
+      return c.json({ error: "Administrator access required" }, 403);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    const body = (await c.req.json().catch(() => null)) as {
+      expectedVersion?: unknown;
+      restoreVersion?: unknown;
+    } | null;
+    if (
+      !body ||
+      typeof body.expectedVersion !== "number" ||
+      typeof body.restoreVersion !== "number"
+    ) {
+      return c.json(
+        { error: "expectedVersion and restoreVersion must be numbers." },
+        400,
+      );
+    }
+    await loadEvent(c.env, seed);
+    const result = (await c.env.EVENT_STORE.getByName(eventId).restoreSessionContent(
+      sessionId,
+      body.expectedVersion,
+      body.restoreVersion,
+      { id: principal!.id, name: principal!.displayName },
+    )) as
+      | { ok: true; result: import("../shared/events").SessionContentMutationResponse }
+      | { ok: false; status: 400 | 404 | 409; code: string; error: string };
+    if (!result.ok) return c.json({ error: result.error, code: result.code }, result.status);
+    return c.json(result.result);
+  });
+
   app.patch("/api/events/:eventId/sessions/:sessionId", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
     const eventId = param(c, "eventId");
@@ -5032,14 +7635,20 @@ export function createApp(options: AppOptions = {}) {
       }
       patch.endsAt = body.endsAt;
     }
+    if ("expectedAgendaVersion" in body) {
+      if (typeof body.expectedAgendaVersion !== "number") {
+        return c.json({ error: "expectedAgendaVersion must be a number." }, 400);
+      }
+      patch.expectedAgendaVersion = body.expectedAgendaVersion;
+    }
     const result = (await c.env.EVENT_STORE.getByName(eventId).updateSessionPlacement(
       sessionId,
       patch,
     )) as
       | { ok: true; result: import("../shared/events").SessionPlacementResponse }
-      | { ok: false; status: 400 | 404; error: string };
+      | { ok: false; status: 400 | 404 | 409; error: string; code?: string; currentVersion?: number };
     if (!result.ok) {
-      return c.json({ error: result.error }, result.status);
+      return c.json({ error: result.error, ...(result.code ? { code: result.code } : {}), ...(result.currentVersion === undefined ? {} : { currentVersion: result.currentVersion }) }, result.status);
     }
     return c.json(result.result);
   });

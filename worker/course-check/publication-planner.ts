@@ -124,6 +124,8 @@ function reasonLabel(reason: string): string {
       return "no approved public speaker identity";
     case "private":
       return "marked private";
+    case "content_not_approved":
+      return "content is not approved";
     default:
       return reason;
   }
@@ -183,7 +185,13 @@ export function planPublication(input: PublicationPlannerInput): PublicationPlan
         });
       }
     }
-    const subset = selectValidPublicSubset(input.workingSessions, input.workingSpeakers);
+    const subset = selectValidPublicSubset(
+      input.workingSessions,
+      input.workingSpeakers,
+      Object.fromEntries(
+        input.workingSessions.map((session) => [session.id, session.contentStatus ?? "draft"]),
+      ),
+    );
     proposedSessions = subset.sessions;
     proposedSpeakers = subset.speakers;
 

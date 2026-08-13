@@ -13,9 +13,18 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createDefaultCfpDefinition } from "../../shared/cfp-definition";
-import type { OrganizerCfpForm } from "../../shared/events";
-import { AgendaPage, App, MessagesPage, SubmissionsPage } from "../../src/App";
-import { CfpBuilderPage, CfpFormsPage } from "../../src/CfpBuilderPage";
+import type { CfpPublicLifecycle, OrganizerCfpForm } from "../../shared/events";
+import {
+  AgendaPage,
+  App,
+  FormsPage,
+  MessagesPage,
+  OverviewPage,
+  SettingsPage,
+  SpeakersPage,
+  SubmissionsPage,
+} from "../../src/App";
+import { CfpBuilderPage } from "../../src/CfpBuilderPage";
 import { CfpPage } from "../../src/CfpPage";
 import { ProposalDetailPage } from "../../src/ProposalDetailPage";
 import { SpeakerPortalPage } from "../../src/SpeakerPortalPage";
@@ -51,10 +60,15 @@ function renderAt(path: string) {
     path: "/e/$eventId/portal/$token",
     component: SpeakerPortalPage,
   });
+  const overviewRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/e/$eventId",
+    component: OverviewPage,
+  });
   const formsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/e/$eventId/forms",
-    component: CfpFormsPage,
+    component: FormsPage,
   });
   const formBuilderRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -83,6 +97,16 @@ function renderAt(path: string) {
     path: "/e/$eventId/messages",
     component: MessagesPage,
   });
+  const speakersRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/e/$eventId/speakers",
+    component: SpeakersPage,
+  });
+  const settingsRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/e/$eventId/settings",
+    component: SettingsPage,
+  });
   const courseCheckRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/e/$eventId/course-checks/$planId",
@@ -95,12 +119,15 @@ function renderAt(path: string) {
       proposalRoute,
       editRoute,
       portalRoute,
+      overviewRoute,
       formsRoute,
       formBuilderRoute,
       submissionsRoute,
       submissionDetailRoute,
       agendaRoute,
       messagesRoute,
+      speakersRoute,
+      settingsRoute,
       courseCheckRoute,
     ]),
     history: createMemoryHistory({ initialEntries: [path] }),
@@ -176,6 +203,16 @@ function mockPublishedDefinition(
     },
   };
 }
+
+const openCfpLifecycle: CfpPublicLifecycle = {
+  state: "open",
+  reason: "open",
+  opensAt: null,
+  closesAt: null,
+  deadlineAt: null,
+  timezone: "America/Los_Angeles",
+  evaluatedAt: "2026-08-01T00:00:00.000Z",
+};
 
 const eventsPayload = {
   events: [
@@ -274,6 +311,73 @@ describe("organizer application", () => {
     expect(await screen.findByLabelText("Unplaced sessions")).toBeVisible();
   });
 
+
+  it("renders direct Settings routes inside the shared organizer shell", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes("/evaluation-plan")) {
+        return new Response(JSON.stringify({ plan: null }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("/reviewers")) {
+        return new Response(JSON.stringify({ reviewers: [] }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("/integrations/airtable")) {
+        return new Response(
+          JSON.stringify({
+            sync: {
+              configured: false,
+              health: "unconfigured",
+              baseId: null,
+              hasAccessToken: false,
+              lastPullAt: null,
+              lastSuccessAt: null,
+              lastError: null,
+              guidance: "Connect Airtable in Settings.",
+              pendingChangeCount: 0,
+            },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("/course-checks/policy")) {
+        return new Response(
+          JSON.stringify({
+            policy: {
+              requireTwoPersonApproval: false,
+              requireDistinctApprover: false,
+              requireReasonOnApprove: false,
+              maxAgentMode: "propose_only",
+            },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("/api-keys")) {
+        return new Response(JSON.stringify({ apiKeys: [] }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify(eventsPayload), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    renderAt("/e/pacific-open-data-summit-2026/settings");
+
+    expect(await screen.findByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
+    expect(screen.getByRole("navigation", { name: "Organizer" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.queryByRole("heading", { name: "Settings", level: 2 })).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Reviewers", level: 2 })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Airtable sync", level: 2 })).toBeVisible();
+  });
   it("creates and configures a truthful empty event workspace", async () => {
     const requests: Array<{ url: string; method: string; body: unknown }> = [];
     let workspaceCreated = false;
@@ -419,6 +523,12 @@ describe("organizer application", () => {
     await user.click(screen.getByRole("link", { name: /Submissions/ }));
     expect(await screen.findByText("No submissions yet.")).toBeVisible();
     await user.click(screen.getByRole("link", { name: "Speakers" }));
+    const speakerControls = await screen.findByRole("toolbar", {
+      name: "Speaker directory controls",
+    });
+    expect(speakerControls.closest(".shell-toolbar")).not.toBeNull();
+    expect(speakerControls.closest(".operations-panel")).toBeNull();
+    expect(document.querySelectorAll(".shell-toolbar")).toHaveLength(1);
     expect(await screen.findByText("No event speakers yet.")).toBeVisible();
     expect(screen.getByText("No onboarding tasks yet.")).toBeVisible();
     await user.click(screen.getByRole("link", { name: "Agenda" }));
@@ -708,6 +818,7 @@ describe("organizer application", () => {
                 },
               ]),
             },
+            lifecycle: openCfpLifecycle,
           }),
           { headers: { "content-type": "application/json" } },
         );
@@ -797,6 +908,7 @@ describe("organizer application", () => {
               },
             ]),
           },
+          lifecycle: openCfpLifecycle,
         }),
         { headers: { "content-type": "application/json" } },
       ),
@@ -907,6 +1019,7 @@ describe("organizer application", () => {
               eventId,
             ),
           },
+          lifecycle: openCfpLifecycle,
         }),
         { headers: { "content-type": "application/json" } },
       );
@@ -1074,6 +1187,7 @@ describe("organizer application", () => {
   it("preserves review queue context while saving notes and reversible decisions", async () => {
     const user = userEvent.setup();
     const reviewWrites: Array<Record<string, unknown>> = [];
+    let proposalsRequest = "";
     let reviewVersion = 2;
     let status = "unreviewed";
     let committeeNote = "Committee only";
@@ -1169,10 +1283,7 @@ describe("organizer application", () => {
         );
       }
       if (url.includes("/proposals")) {
-        expect(url).toContain("q=harbor");
-        expect(url).toContain("status=unreviewed");
-        expect(url).toContain("track=platform");
-        expect(url).toContain("sort=title-asc");
+        proposalsRequest = url;
         return new Response(JSON.stringify({ proposals: [proposal()] }), {
           headers: { "content-type": "application/json" },
         });
@@ -1187,6 +1298,9 @@ describe("organizer application", () => {
     expect(
       await screen.findByRole("heading", { name: "Open charts for harbor operations" }),
     ).toBeVisible();
+    expect(proposalsRequest).toBe(
+      "/api/events/pacific-open-data-summit-2026/proposals?sort=title-asc",
+    );
     expect(screen.getByLabelText("Search title, speaker, or ID")).toHaveValue(
       "harbor",
     );
@@ -1198,10 +1312,11 @@ describe("organizer application", () => {
     ).toHaveAttribute("aria-pressed", "true");
     expect(
       screen.getByRole("combobox", { name: "Track filter" }),
-    ).toHaveTextContent("FilterPlatform");
-    expect(
-      screen.getByRole("combobox", { name: "Sort submissions" }),
-    ).toHaveTextContent("SortTitle A-Z");
+    ).toHaveTextContent("TrackPlatform");
+    expect(screen.getByRole("columnheader", { name: /Talk/i })).toHaveAttribute(
+      "aria-sort",
+      "ascending",
+    );
     expect(screen.getByText("A repeatable harbor data checklist.")).toBeVisible();
     expect(screen.getByText("ada-headshot.jpg")).toBeVisible();
     expect(screen.getByText("she/her")).toBeVisible();
@@ -1301,8 +1416,8 @@ describe("organizer application", () => {
     });
 
     renderAt("/e/pacific-open-data-summit-2026/submissions");
-    await user.click(await screen.findByRole("button", { name: "Reviewer routing" }));
-    expect(screen.getByRole("heading", { name: "Reviewer routing" })).toBeVisible();
+    await user.click(await screen.findByRole("link", { name: "Settings" }));
+    expect(await screen.findByRole("heading", { name: "Reviewers" })).toBeVisible();
     await user.type(screen.getByLabelText("Reviewer email"), "rae@example.com");
     await user.click(screen.getByRole("checkbox", { name: "Platform" }));
     await user.click(screen.getByRole("button", { name: "Send reviewer invitation" }));
@@ -1400,7 +1515,7 @@ describe("organizer application", () => {
     });
 
     renderAt("/e/pacific-open-data-summit-2026/submissions");
-    await user.click(await screen.findByRole("button", { name: "Reviewer routing" }));
+    await user.click(await screen.findByRole("link", { name: "Settings" }));
     expect(await screen.findByText("Delivery failed — retry available")).toBeVisible();
     const invitationRow = screen.getByText("future@example.com").closest("li");
     expect(invitationRow).toBeTruthy();
@@ -1649,6 +1764,17 @@ describe("organizer application", () => {
           headers: { "content-type": "application/json" },
         });
       }
+      if (url.endsWith("/review-results")) {
+        return new Response(
+          JSON.stringify({
+            eventId: "pacific-open-data-summit-2026",
+            generatedAt: "2026-08-01T00:00:00.000Z",
+            criteria: [],
+            submissions: [],
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
       if (url.includes("/proposals")) {
         return new Response(JSON.stringify({ error: "Unavailable" }), {
           status: 503,
@@ -1790,6 +1916,7 @@ describe("organizer application", () => {
                 "pacific-open-data-summit-2026",
               ),
             },
+            lifecycle: openCfpLifecycle,
           }),
           { headers: { "content-type": "application/json" } },
         );
@@ -2468,6 +2595,7 @@ describe("guided CFP builder", () => {
               ]),
               publishedAt: "2026-08-01T00:00:00.000Z",
             },
+            lifecycle: openCfpLifecycle,
           }),
           { headers: { "content-type": "application/json" } },
         );

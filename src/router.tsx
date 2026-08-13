@@ -5,16 +5,33 @@ import {
   Outlet,
 } from "@tanstack/react-router";
 
-import { AgendaPage, App, MessagesPage, SubmissionsPage } from "./App";
-import { CfpBuilderPage, CfpFormsPage } from "./CfpBuilderPage";
+import {
+  AgendaPage,
+  App,
+  CfpBuilderPage,
+  EmbedsPage,
+  FormsPage,
+  MessagesPage,
+  OverviewPage,
+  SettingsPage,
+  SpeakersPage,
+  SubmissionsPage,
+} from "./App";
 import { CourseCheckPage } from "./CourseCheckPage";
 import { ProposalDetailPage } from "./ProposalDetailPage";
 import {
+  PublicAgendaPage,
+  PublicItineraryPage,
+  PublicManagedEmbedPage,
   PublicProgramEmbedPage,
   PublicProgramPage,
+  PublicSessionsPage,
+  PublicSpeakerGalleryPage,
+  PublicSpeakersPage,
 } from "./PublicProgramPage";
 import { SpeakerPortalPage } from "./SpeakerPortalPage";
 import { SubmitterEditPage } from "./SubmitterEditPage";
+import { SubmitterDashboardPage } from "./SubmitterDashboardPage";
 import { ReviewerInvitationPage } from "./ReviewerInvitationPage";
 import { DemoPersonasPage } from "./DemoPersonasPage";
 
@@ -37,8 +54,12 @@ const demoPersonasRoute = createRoute({
 const cfpRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/e/$eventId/cfp",
-  validateSearch: (search: Record<string, unknown>): { formId?: string } => ({
+  validateSearch: (search: Record<string, unknown>): {
+    formId?: string;
+    draftId?: string;
+  } => ({
     formId: typeof search.formId === "string" ? search.formId : undefined,
+    draftId: typeof search.draftId === "string" ? search.draftId : undefined,
   }),
 }).lazy(() => import("./cfp.lazy").then((module) => module.Route));
 
@@ -54,6 +75,12 @@ const submitterEditRoute = createRoute({
   component: SubmitterEditPage,
 });
 
+const submitterDashboardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId/my-proposals",
+  component: SubmitterDashboardPage,
+});
+
 const speakerPortalRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/e/$eventId/portal/$token",
@@ -66,10 +93,16 @@ const reviewerInvitationRoute = createRoute({
   component: ReviewerInvitationPage,
 });
 
+const overviewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId",
+  component: OverviewPage,
+});
+
 const formsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/e/$eventId/forms",
-  component: CfpFormsPage,
+  component: FormsPage,
 });
 
 const formBuilderRoute = createRoute({
@@ -103,7 +136,11 @@ const agendaRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/e/$eventId/agenda",
   component: AgendaPage,
-  validateSearch: (search: Record<string, unknown>): { sessionIds?: string } => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { day?: string; session?: string; sessionIds?: string } => ({
+    day: typeof search.day === "string" ? search.day : undefined,
+    session: typeof search.session === "string" ? search.session : undefined,
     sessionIds: typeof search.sessionIds === "string" ? search.sessionIds : undefined,
   }),
 });
@@ -117,9 +154,43 @@ const messagesRoute = createRoute({
   }),
 });
 
+const speakersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId/speakers",
+  component: SpeakersPage,
+});
+
+const embedsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId/embeds",
+  component: EmbedsPage,
+});
+
+
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId/settings",
+  component: SettingsPage,
+});
+
+const publicManagedEmbedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId/embed/$embedId",
+  component: PublicManagedEmbedPage,
+});
+
+
 function validateProgramSearch(search: Record<string, unknown>) {
   return {
     revision: typeof search.revision === "string" ? search.revision : undefined,
+    query: typeof search.query === "string" ? search.query : undefined,
+    day: typeof search.day === "string" ? search.day : undefined,
+    trackId: typeof search.trackId === "string" ? search.trackId : undefined,
+    roomId: typeof search.roomId === "string" ? search.roomId : undefined,
+    format: typeof search.format === "string" ? search.format : undefined,
+    speakerId: typeof search.speakerId === "string" ? search.speakerId : undefined,
+    session: typeof search.session === "string" ? search.session : undefined,
+    widget: typeof search.widget === "string" ? search.widget : undefined,
   };
 }
 
@@ -137,10 +208,47 @@ const programEmbedRoute = createRoute({
   validateSearch: validateProgramSearch,
 });
 
+const programSessionsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId/program/sessions",
+  component: PublicSessionsPage,
+  validateSearch: validateProgramSearch,
+});
+
+const programSpeakersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId/program/speakers",
+  component: PublicSpeakersPage,
+  validateSearch: validateProgramSearch,
+});
+
+const programAgendaRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId/program/agenda",
+  component: PublicAgendaPage,
+  validateSearch: validateProgramSearch,
+});
+
+const programItineraryRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId/program/itinerary",
+  component: PublicItineraryPage,
+  validateSearch: validateProgramSearch,
+});
+
+const programSpeakerGalleryRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/e/$eventId/program/speaker-gallery",
+  component: PublicSpeakerGalleryPage,
+  validateSearch: validateProgramSearch,
+});
+
+
 function validateProposalQueueSearch(search: Record<string, unknown>): {
   q?: string;
   status?: string;
   track?: string;
+  roundId?: string;
   sort?: string;
   field?: string;
   returnTo?: string;
@@ -150,6 +258,7 @@ function validateProposalQueueSearch(search: Record<string, unknown>): {
     q: typeof search.q === "string" ? search.q : undefined,
     status: typeof search.status === "string" ? search.status : undefined,
     track: typeof search.track === "string" ? search.track : undefined,
+    roundId: typeof search.roundId === "string" ? search.roundId : undefined,
     sort: typeof search.sort === "string" ? search.sort : undefined,
     field: typeof search.field === "string" ? search.field : undefined,
     returnTo: typeof search.returnTo === "string" ? search.returnTo : undefined,
@@ -163,8 +272,10 @@ const routeTree = rootRoute.addChildren([
   cfpRoute,
   proposalDetailRoute,
   submitterEditRoute,
+  submitterDashboardRoute,
   speakerPortalRoute,
   reviewerInvitationRoute,
+  overviewRoute,
   formsRoute,
   formBuilderRoute,
   submissionsRoute,
@@ -172,8 +283,17 @@ const routeTree = rootRoute.addChildren([
   courseCheckRoute,
   agendaRoute,
   messagesRoute,
+  speakersRoute,
+  settingsRoute,
+  publicManagedEmbedRoute,
+  embedsRoute,
   programRoute,
   programEmbedRoute,
+  programSessionsRoute,
+  programSpeakersRoute,
+  programAgendaRoute,
+  programItineraryRoute,
+  programSpeakerGalleryRoute,
 ]);
 
 export const router = createRouter({ routeTree });

@@ -7,8 +7,15 @@ import type {
   PortalMessageStatus,
   PortalOnboardingTask,
   SpeakerPortalSession,
+  SpeakerSocialLinks,
 } from "../shared/events";
+import { EMPTY_SPEAKER_SOCIAL_LINKS } from "../shared/speaker-profile";
 import {
+  fileMatchesOnboardingConstraints,
+  formatFileSize,
+} from "../shared/onboarding-tasks";
+import {
+  addPortalDeliverableComment,
   ApiError,
   completePortalTask,
   fetchSpeakerPortalSession,
@@ -134,10 +141,14 @@ export function SpeakerPortalPage() {
 
   const [name, setName] = useState("");
   const [biography, setBiography] = useState("");
+  const [socialLinks, setSocialLinks] = useState<SpeakerSocialLinks>({
+    ...EMPTY_SPEAKER_SOCIAL_LINKS,
+  });
   const [profileSeeded, setProfileSeeded] = useState(false);
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
   const [taskMessage, setTaskMessage] = useState<string | null>(null);
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [headshotBusy, setHeadshotBusy] = useState(false);
   const [localHeadshotPreview, setLocalHeadshotPreview] = useState<string | null>(
     null,
@@ -148,6 +159,7 @@ export function SpeakerPortalPage() {
     if (!session.data || profileSeeded) return;
     setName(session.data.profile.name);
     setBiography(session.data.profile.biography);
+    setSocialLinks(session.data.profile.socialLinks ?? { ...EMPTY_SPEAKER_SOCIAL_LINKS });
     setProfileSeeded(true);
   }, [session.data, profileSeeded]);
 
@@ -177,6 +189,7 @@ export function SpeakerPortalPage() {
     mutationFn: async (patch: {
       biography?: string;
       name?: string;
+      socialLinks?: SpeakerSocialLinks;
       headshotAssetId?: string;
     }) => updateSpeakerPortalProfile(eventId, token, patch),
     onSuccess: (data) => {
@@ -191,7 +204,7 @@ export function SpeakerPortalPage() {
     event.preventDefault();
     setProfileMessage(null);
     try {
-      await saveProfile.mutateAsync({ name, biography });
+      await saveProfile.mutateAsync({ name, biography, socialLinks });
       setProfileMessage("Profile saved.");
     } catch {
       // message set in onError
@@ -235,6 +248,13 @@ export function SpeakerPortalPage() {
   async function onCompleteFile(task: PortalOnboardingTask, file: File | null) {
     if (!file) return;
     setTaskMessage(null);
+    if (task.fileConstraints) {
+      const validationError = fileMatchesOnboardingConstraints(file, task.fileConstraints);
+      if (validationError) {
+        setTaskMessage(validationError);
+        return;
+      }
+    }
     setBusyTaskId(task.id);
     try {
       const assetId = await uploadPortalFile(eventId, token, "task", file, task.id);
@@ -248,6 +268,20 @@ export function SpeakerPortalPage() {
     }
   }
 
+  async function onAddDeliverableComment(assetId: string, event: FormEvent) {
+    event.preventDefault();
+    const body = (commentDrafts[assetId] ?? "").trim();
+    if (!body) return;
+    setTaskMessage(null);
+    try {
+      await addPortalDeliverableComment(eventId, token, assetId, body);
+      setCommentDrafts((current) => ({ ...current, [assetId]: "" }));
+      await queryClient.invalidateQueries({ queryKey: ["speaker-portal", eventId, token] });
+      setTaskMessage("Comment added.");
+    } catch (error) {
+      setTaskMessage(error instanceof ApiError ? error.message : "Could not add comment.");
+    }
+  }
   if (session.isPending) {
     return (
       <main className="portal-shell" aria-busy="true">
@@ -260,6 +294,7 @@ export function SpeakerPortalPage() {
     return (
       <main className="portal-shell">
         <section className="error-panel" role="alert">
+
           <h1>Portal link unavailable</h1>
           <p>{session.error.message}</p>
           <p>Invalid, expired, or revoked links never expose speaker details.</p>
@@ -369,6 +404,60 @@ export function SpeakerPortalPage() {
                 maxLength={2000}
               />
             </label>
+            <fieldset className="profile-social-links">
+              <legend>Professional links</legend>
+              <p>Use public HTTPS links only.</p>
+              <label>
+                LinkedIn URL
+                <input
+                  type="url"
+                  inputMode="url"
+                  placeholder="https://linkedin.com/in/name"
+                  value={socialLinks.linkedin}
+                  onChange={(event) =>
+                    setSocialLinks({ ...socialLinks, linkedin: event.target.value })
+                  }
+                  maxLength={500}
+                />
+              </label>
+              <label>
+                X URL
+                <input
+                  type="url"
+                  inputMode="url"
+                  placeholder="https://x.com/name"
+                  value={socialLinks.x}
+                  onChange={(event) => setSocialLinks({ ...socialLinks, x: event.target.value })}
+                  maxLength={500}
+                />
+              </label>
+              <label>
+                GitHub URL
+                <input
+                  type="url"
+                  inputMode="url"
+                  placeholder="https://github.com/name"
+                  value={socialLinks.github}
+                  onChange={(event) =>
+                    setSocialLinks({ ...socialLinks, github: event.target.value })
+                  }
+                  maxLength={500}
+                />
+              </label>
+              <label>
+                Website URL
+                <input
+                  type="url"
+                  inputMode="url"
+                  placeholder="https://example.com"
+                  value={socialLinks.website}
+                  onChange={(event) =>
+                    setSocialLinks({ ...socialLinks, website: event.target.value })
+                  }
+                  maxLength={500}
+                />
+              </label>
+            </fieldset>
             <div className="portal-headshot-field">
               <span className="portal-field-label">Headshot</span>
               <div className="portal-headshot-row">
@@ -484,11 +573,19 @@ export function SpeakerPortalPage() {
                       {task.instructions ? ` · ${task.instructions}` : ""}
                     </span>
                     {task.completionRequirement === "file" ? (
-                      <PortalFileButton
-                        label={busyTaskId === task.id ? "Uploading…" : "Upload file"}
-                        disabled={busyTaskId === task.id}
-                        onFile={(file) => void onCompleteFile(task, file)}
-                      />
+                      <>
+                        {task.fileConstraints ? (
+                          <p className="portal-file-constraints">
+                            Accepted: {task.fileConstraints.acceptExtensions.join(", ")} · Max {formatFileSize(task.fileConstraints.maxBytes)}
+                          </p>
+                        ) : null}
+                        <PortalFileButton
+                          label={busyTaskId === task.id ? "Uploading…" : "Upload file"}
+                          accept={task.fileConstraints?.acceptExtensions.join(",")}
+                          disabled={busyTaskId === task.id}
+                          onFile={(file) => void onCompleteFile(task, file)}
+                        />
+                      </>
                     ) : (
                       <button
                         type="button"
@@ -524,12 +621,81 @@ export function SpeakerPortalPage() {
                           />
                         </div>
                       ) : null}
+                      {task.asset ? (
+                        <details className="portal-deliverable-versions">
+                          <summary>
+                            Latest version v{task.asset.version} · {task.asset.versions.length} total
+                          </summary>
+                          <ol>
+                            {task.asset.versions.map((version) => (
+                              <li key={version.assetId}>
+                                <div>
+                                  <strong>
+                                    Version {version.version}
+                                    {version.isLatest ? " (latest)" : ""}
+                                  </strong>
+                                  <span className="portal-muted">
+                                    {" "}
+                                    · {version.fileName} · {formatFileSize(version.size)} · uploaded {formatWhen(version.uploadedAt)}
+                                  </span>
+                                  <a
+                                    className="btn btn-secondary btn-sm"
+                                    href={portalAssetUrl(eventId, token, version.assetId)}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    Download
+                                  </a>
+                                </div>
+                                {version.comments.length > 0 ? (
+                                  <ul className="portal-deliverable-comments">
+                                    {version.comments.map((comment) => (
+                                      <li key={comment.id}>
+                                        <strong>
+                                          {comment.author.name} · {comment.author.role}
+                                        </strong>
+                                        <span className="portal-muted"> · {formatWhen(comment.createdAt)}</span>
+                                        <p>{comment.body}</p>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : null}
+                                <form onSubmit={(event) => void onAddDeliverableComment(version.assetId, event)}>
+                                  <label>
+                                    Comment on version {version.version}
+                                    <textarea
+                                      value={commentDrafts[version.assetId] ?? ""}
+                                      onChange={(event) =>
+                                        setCommentDrafts((current) => ({
+                                          ...current,
+                                          [version.assetId]: event.target.value,
+                                        }))
+                                      }
+                                    />
+                                  </label>
+                                  <button className="btn btn-secondary btn-sm" type="submit">
+                                    Add comment
+                                  </button>
+                                </form>
+                              </li>
+                            ))}
+                          </ol>
+                        </details>
+                      ) : null}
                       {task.completionRequirement === "file" ? (
-                        <PortalFileButton
-                          label={busyTaskId === task.id ? "Uploading…" : "Replace file"}
-                          disabled={busyTaskId === task.id}
-                          onFile={(file) => void onCompleteFile(task, file)}
-                        />
+                        <>
+                          {task.fileConstraints ? (
+                            <p className="portal-file-constraints">
+                              Accepted: {task.fileConstraints.acceptExtensions.join(", ")} · Max {formatFileSize(task.fileConstraints.maxBytes)}
+                            </p>
+                          ) : null}
+                          <PortalFileButton
+                            label={busyTaskId === task.id ? "Uploading…" : "Replace file"}
+                            accept={task.fileConstraints?.acceptExtensions.join(",")}
+                            disabled={busyTaskId === task.id}
+                            onFile={(file) => void onCompleteFile(task, file)}
+                          />
+                        </>
                       ) : null}
                     </div>
                     <span className="portal-muted portal-task-status">{task.status}</span>
