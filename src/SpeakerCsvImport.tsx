@@ -13,6 +13,7 @@ import {
   applySpeakerCsvImport,
   previewSpeakerCsvImport,
 } from "./api";
+import { AppSelect } from "./AppSelect";
 
 const EMPTY_MAPPING: SpeakerCsvColumnMapping = {
   name: "",
@@ -70,6 +71,30 @@ function resolutionValue(resolution: SpeakerCsvResolution): string {
   return resolution.speakerId
     ? `${resolution.action}:${resolution.speakerId}`
     : resolution.action;
+}
+
+function rowActionOptions(row: SpeakerCsvImportPreview["rows"][number]) {
+  const options: { value: string; label: string }[] = [];
+  if (row.outcome === "create") options.push({ value: "create", label: "Create" });
+  if (row.outcome === "reuse" && row.selectedSpeakerId) {
+    options.push({ value: `reuse:${row.selectedSpeakerId}`, label: "Reuse match" });
+  }
+  if (row.outcome === "update" && row.selectedSpeakerId) {
+    options.push({ value: `update:${row.selectedSpeakerId}`, label: "Update match" });
+  }
+  if (row.outcome === "invalid") {
+    for (const match of row.matches) {
+      options.push({
+        value: `reuse:${match.speakerId}`,
+        label: `Reuse ${match.name} · ${match.email}`,
+      });
+    }
+    if (row.matches.length > 0 && row.matches.every((match) => match.signal === "name")) {
+      options.push({ value: "create", label: "Create separate identity" });
+    }
+  }
+  options.push({ value: "skip", label: "Skip" });
+  return options;
 }
 
 function summary(
@@ -235,19 +260,17 @@ export function SpeakerCsvImport({
                   ["organization", "Organization column", false],
                 ] as const
               ).map(([field, label, optional]) => (
-                <label key={field}>
-                  {label}
-                  <select
-                    aria-label={label}
-                    value={mapping[field] ?? ""}
-                    onChange={(event) => updateMapping(field, event.target.value)}
-                  >
-                    <option value="">{optional ? "Not mapped" : "Choose column"}</option>
-                    {headers.map((header) => (
-                      <option key={header} value={header}>{header}</option>
-                    ))}
-                  </select>
-                </label>
+                <AppSelect
+                  key={field}
+                  label={label}
+                  ariaLabel={label}
+                  value={mapping[field] ?? ""}
+                  options={[
+                    { value: "", label: optional ? "Not mapped" : "Choose column" },
+                    ...headers.map((header) => ({ value: header, label: header })),
+                  ]}
+                  onValueChange={(value) => updateMapping(field, value)}
+                />
               ))}
             </div>
           ) : null}
@@ -283,31 +306,13 @@ export function SpeakerCsvImport({
                           <td><span className="speaker-csv-outcome" data-outcome={row.outcome}>{row.outcome}</span></td>
                           <td>{row.feedback.join(" ")}</td>
                           <td>
-                            <select
-                              aria-label={`Action for CSV row ${row.rowNumber}`}
+                            <AppSelect
+                              label="Action"
+                              ariaLabel={`Action for CSV row ${row.rowNumber}`}
                               value={resolutionValue(resolution)}
-                              onChange={(event) => setResolution(row.rowNumber, event.target.value)}
-                            >
-                              {row.outcome === "create" ? <option value="create">Create</option> : null}
-                              {row.outcome === "reuse" && row.selectedSpeakerId ? <option value={`reuse:${row.selectedSpeakerId}`}>Reuse match</option> : null}
-                              {row.outcome === "update" && row.selectedSpeakerId ? <option value={`update:${row.selectedSpeakerId}`}>Update match</option> : null}
-                              {row.outcome === "invalid"
-                                ? row.matches.map((match) => (
-                                    <option
-                                      key={match.speakerId}
-                                      value={`reuse:${match.speakerId}`}
-                                    >
-                                      Reuse {match.name} · {match.email}
-                                    </option>
-                                  ))
-                                : null}
-                              {row.outcome === "invalid" &&
-                              row.matches.length > 0 &&
-                              row.matches.every((match) => match.signal === "name") ? (
-                                <option value="create">Create separate identity</option>
-                              ) : null}
-                              <option value="skip">Skip</option>
-                            </select>
+                              options={rowActionOptions(row)}
+                              onValueChange={(value) => setResolution(row.rowNumber, value)}
+                            />
                           </td>
                         </tr>
                       );

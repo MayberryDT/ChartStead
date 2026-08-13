@@ -23,24 +23,26 @@ test("organizer previews and applies a speaker CSV into the live directory", asy
     ),
   });
 
-  await expect(page.getByRole("combobox", { name: "Name column" })).toHaveValue(
+  await expect(page.getByRole("combobox", { name: "Name column" })).toContainText(
     "Full Name",
   );
-  await expect(page.getByRole("combobox", { name: "Email column" })).toHaveValue(
+  await expect(page.getByRole("combobox", { name: "Email column" })).toContainText(
     "Email Address",
   );
-  await expect(page.getByRole("combobox", { name: "Title column" })).toHaveValue(
+  await expect(page.getByRole("combobox", { name: "Title column" })).toContainText(
     "Job Title",
   );
   await expect(
     page.getByRole("combobox", { name: "Organization column" }),
-  ).toHaveValue("Company");
+  ).toContainText("Company");
 
   await page.getByRole("button", { name: "Preview 1 row" }).click();
   const preview = page.getByRole("table", { name: "Speaker import preview" });
   await expect(preview.getByText(name)).toBeVisible();
   await expect(preview.getByText("create", { exact: true })).toBeVisible();
-  await expect(preview.getByLabel("Action for CSV row 2")).toHaveValue("create");
+  await expect(preview.getByRole("combobox", { name: "Action for CSV row 2" })).toContainText(
+    "Create",
+  );
 
   await page.getByRole("button", { name: "Apply 1 changes" }).click();
   await expect(page.getByRole("status")).toContainText("1 created");

@@ -496,7 +496,8 @@ function EventDesk({
         identity={
           activeNav === "Submissions" ||
           activeNav === "Overview" ||
-          activeNav === "Agenda" ? null : (
+          activeNav === "Agenda" ||
+          activeNav === "Speakers" ? null : (
             <div className="topbar-identity" title={topbarMeta}>
               <h1>{topbarTitle}</h1>
               <p className="topbar-meta">{topbarMeta}</p>

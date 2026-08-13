@@ -1,5 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FormEvent, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
 
 import type {
   FilesLibraryItem,
@@ -9,7 +19,6 @@ import type {
 } from "../shared/events";
 import { formatFileSize } from "../shared/onboarding-tasks";
 import {
-  addOrganizerDeliverableComment,
   ApiError,
   createOnboardingTasks,
   discardOnboardingReminder,
@@ -29,10 +38,11 @@ import {
   SpeakerDirectoryControls,
   filterDirectorySpeakers,
   SpeakerCurrentProfile,
-  SpeakerDirectoryToolbar,
   SpeakerParticipation,
+  speakerWorkflowLabels,
   type SpeakerDirectoryFilter,
 } from "./SpeakerDirectory";
+import { AppSelect } from "./AppSelect";
 import { SpeakerCsvImport } from "./SpeakerCsvImport";
 
 function formatWhen(value: string | null | undefined): string {
@@ -125,13 +135,53 @@ function downloadBlob(blob: Blob, filename: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
-function FilesLibraryPanel({ eventId }: { eventId: string }) {
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+}
+
+function roleLabel(role: string): string {
+  if (role === "primary") return "Primary";
+  if (role === "co") return "Co-speaker";
+  if (role === "invited") return "Invited";
+  return role;
+}
+
+function roleFlagClass(role: string): string {
+  if (role === "primary") return "flag flag-role-primary";
+  if (role === "co") return "flag flag-role-co";
+  return "flag flag-role-invited";
+}
+
+function workflowFlagClass(status: string): string {
+  if (status === "ready") return "flag flag-workflow-ready";
+  if (status === "preparing") return "flag flag-workflow-preparing";
+  if (status === "confirmed") return "flag flag-workflow-confirmed";
+  if (status === "withdrawn") return "flag flag-workflow-withdrawn";
+  return "flag flag-workflow-invited";
+}
+
+function FilesLibraryPanel({
+  eventId,
+  focusSpeakerId,
+}: {
+  eventId: string;
+  focusSpeakerId?: string;
+}) {
   const library = useQuery({
     queryKey: ["onboarding-files-library", eventId],
     queryFn: () => fetchOnboardingFilesLibrary(eventId),
   });
   const [query, setQuery] = useState("");
-  const [speakerId, setSpeakerId] = useState("");
+  const [speakerId, setSpeakerId] = useState(focusSpeakerId ?? "");
+
+  useEffect(() => {
+    if (focusSpeakerId) setSpeakerId(focusSpeakerId);
+  }, [focusSpeakerId]);
   const [sessionId, setSessionId] = useState("");
   const [taskStatus, setTaskStatus] = useState("");
   const [fileType, setFileType] = useState("");
@@ -230,85 +280,51 @@ function FilesLibraryPanel({ eventId }: { eventId: string }) {
   }, [visibleFiles]);
 
   return (
-    <section className="operations-panel files-library" aria-label="Files library">
-      <div className="panel-heading">
-        <h2>Files library</h2>
-        <span>
-          {library.data?.files.length ?? 0} latest deliverable{(library.data?.files.length ?? 0) === 1 ? "" : "s"}
-        </span>
-      </div>
-      <div className="files-library-controls">
-        <label>
-          Search files
+    <div className="files-library files-library-compact" aria-label="Files library">
+      <div className="files-library-toolbar">
+        <label className="field search-field files-library-search">
           <input
+            type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Speaker, session, task, or file"
+            placeholder="Search files…"
+            aria-label="Search files"
           />
         </label>
-        <label>
-          Speaker
-          <select value={speakerId} onChange={(event) => setSpeakerId(event.target.value)}>
-            <option value="">All speakers</option>
-            {library.data?.filters.speakers.map((speaker) => (
-              <option key={speaker.id} value={speaker.id}>{speaker.name}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Session
-          <select value={sessionId} onChange={(event) => setSessionId(event.target.value)}>
-            <option value="">All sessions</option>
-            {library.data?.filters.sessions.map((session) => (
-              <option key={session.id} value={session.id}>{session.title}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Task status
-          <select value={taskStatus} onChange={(event) => setTaskStatus(event.target.value)}>
-            <option value="">Any status</option>
-            {library.data?.filters.taskStatuses.map((status) => (
-              <option key={status} value={status}>{status}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          File type
-          <select value={fileType} onChange={(event) => setFileType(event.target.value)}>
-            <option value="">Any type</option>
-            {library.data?.filters.fileTypes.map((type) => (
-              <option key={type} value={type}>{type}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Due state
-          <select value={dueState} onChange={(event) => setDueState(event.target.value)}>
-            <option value="">Any due state</option>
-            {library.data?.filters.dueStates.map((state) => (
-              <option key={state} value={state}>{dueStateLabel(state)}</option>
-            ))}
-          </select>
-        </label>
+        <AppSelect
+          label="Session"
+          value={sessionId}
+          options={[
+            { value: "", label: "All sessions" },
+            ...(library.data?.filters.sessions.map((session) => ({
+              value: session.id,
+              label: session.title,
+            })) ?? []),
+          ]}
+          onValueChange={setSessionId}
+        />
+        <AppSelect
+          label="Type"
+          value={fileType}
+          options={[
+            { value: "", label: "Any type" },
+            ...(library.data?.filters.fileTypes.map((type) => ({
+              value: type,
+              label: type,
+            })) ?? []),
+          ]}
+          onValueChange={setFileType}
+        />
       </div>
       <div className="files-library-export">
-        <div>
-          <strong>{selectedFiles.length} selected</strong>
-          <p className="muted-line">
-            Export includes only selected latest versions. No server copy is kept; regenerate if the download expires in your browser.
-          </p>
-          {selectedFiles.length > 0 ? (
-            <p className="muted-line">
-              Included versions: {selectedFiles.map((file) => `${file.fileName} v${file.currentVersion}`).join(", ")}
-            </p>
-          ) : null}
-        </div>
+        <span className="files-library-count">
+          {selectedFiles.length} selected · {visibleFiles.length} shown
+        </span>
         <div className="onboarding-actions">
           <button type="button" className="btn btn-secondary btn-sm" onClick={toggleVisible} disabled={visibleFiles.length === 0}>
             {visibleFiles.every((file) => selectedAssetIds.has(file.assetId)) && visibleFiles.length > 0
-              ? "Clear visible"
-              : "Select visible"}
+              ? "Clear"
+              : "Select shown"}
           </button>
           <button
             type="button"
@@ -316,11 +332,11 @@ function FilesLibraryPanel({ eventId }: { eventId: string }) {
             disabled={selectedAssetIds.size === 0 || exportZip.isPending}
             onClick={() => exportZip.mutate()}
           >
-            {exportZip.isPending ? "Preparing ZIP…" : "Export ZIP"}
+            {exportZip.isPending ? "Preparing…" : "Export ZIP"}
           </button>
           {exportZip.isError ? (
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => exportZip.mutate()}>
-              Retry export
+              Retry
             </button>
           ) : null}
         </div>
@@ -333,11 +349,13 @@ function FilesLibraryPanel({ eventId }: { eventId: string }) {
         <p className="form-message" data-tone="success">{exportReceipt}</p>
       ) : null}
       {library.isPending ? (
-        <p className="empty-state padded">Loading files…</p>
+        <p className="files-library-empty">Loading files…</p>
       ) : library.isError ? (
-        <p className="empty-state padded" role="alert">{library.error.message}</p>
+        <p className="files-library-empty" role="alert">{library.error.message}</p>
+      ) : (library.data?.files.length ?? 0) === 0 ? (
+        <p className="files-library-empty">No deliverable files uploaded yet.</p>
       ) : grouped.length === 0 ? (
-        <p className="empty-state padded">No files match these filters.</p>
+        <p className="files-library-empty">Nothing matches the current filters.</p>
       ) : (
         <div className="files-library-groups">
           {grouped.map((group) => (
@@ -350,56 +368,39 @@ function FilesLibraryPanel({ eventId }: { eventId: string }) {
                   onClick={() => toggleSessionFiles(group.sessionId, visibleFiles)}
                 >
                   {group.files.every((file) => selectedAssetIds.has(file.assetId))
-                    ? "Clear session"
-                    : "Select session"}
+                    ? "Clear"
+                    : "Select"}
                 </button>
               </div>
-              <div className="onboarding-table-wrap">
-                <table className="onboarding-table files-library-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Select</th>
-                      <th scope="col">File</th>
-                      <th scope="col">Speaker</th>
-                      <th scope="col">Task</th>
-                      <th scope="col">Uploaded</th>
-                      <th scope="col">Type</th>
-                      <th scope="col">Version</th>
-                      <th scope="col">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {group.files.map((file) => (
-                      <tr key={file.assetId}>
-                        <td>
-                          <input
-                            type="checkbox"
-                            aria-label={`Select ${file.fileName}`}
-                            checked={selectedAssetIds.has(file.assetId)}
-                            onChange={() => toggleFile(file.assetId)}
-                          />
-                        </td>
-                        <td>
-                          <strong>{file.fileName}</strong>
-                          <span className="muted-line"> {formatFileSize(file.size)}</span>
-                          <p className="muted-line">{file.safeExportPath}</p>
-                        </td>
-                        <td>{file.speaker.name}</td>
-                        <td>{file.task.title}</td>
-                        <td>{formatWhen(file.uploadedAt)}</td>
-                        <td>{file.fileType}</td>
-                        <td>v{file.currentVersion} of {file.versionCount}</td>
-                        <td>{file.task.status} · {dueStateLabel(file.dueState)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ul className="files-library-list">
+                {group.files.map((file) => (
+                  <li key={file.assetId}>
+                    <label className="files-library-row">
+                      <input
+                        className="batch-check"
+                        type="checkbox"
+                        aria-label={`Select ${file.fileName}`}
+                        checked={selectedAssetIds.has(file.assetId)}
+                        onChange={() => toggleFile(file.assetId)}
+                      />
+                      <span className="files-library-file">
+                        <strong>{file.fileName}</strong>
+                        <span className="muted-line">
+                          {file.task.title} · v{file.currentVersion} · {formatFileSize(file.size)}
+                        </span>
+                      </span>
+                      <span className="muted-line files-library-meta">
+                        {formatWhen(file.uploadedAt)}
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
             </section>
           ))}
         </div>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -433,6 +434,193 @@ const TASK_PRESETS = [
     flag: "",
   },
 ];
+
+type SpeakerSort =
+  | "name-asc"
+  | "name-desc"
+  | "missing-desc"
+  | "missing-asc"
+  | "overdue-desc"
+  | "overdue-asc"
+  | "due-asc"
+  | "due-desc"
+  | "contact-desc"
+  | "contact-asc";
+
+type SpeakerCol = "talk" | "missing" | "overdue" | "due" | "readiness" | "contact";
+
+const SPEAKER_COL_DEFAULTS: Record<SpeakerCol, number> = {
+  talk: 260,
+  missing: 84,
+  overdue: 84,
+  due: 118,
+  readiness: 140,
+  contact: 132,
+};
+
+const SPEAKER_COL_MIN: Record<SpeakerCol, number> = {
+  talk: 180,
+  missing: 72,
+  overdue: 72,
+  due: 100,
+  readiness: 112,
+  contact: 112,
+};
+
+const SPEAKER_COL_STORAGE = "chartstead:speaker-cols:v1";
+
+function loadSpeakerColWidths(): Record<SpeakerCol, number> {
+  try {
+    const raw = localStorage.getItem(SPEAKER_COL_STORAGE);
+    if (!raw) return { ...SPEAKER_COL_DEFAULTS };
+    const parsed = JSON.parse(raw) as Partial<Record<SpeakerCol, number>>;
+    return {
+      talk: Math.max(SPEAKER_COL_MIN.talk, Number(parsed.talk) || SPEAKER_COL_DEFAULTS.talk),
+      missing: Math.max(
+        SPEAKER_COL_MIN.missing,
+        Number(parsed.missing) || SPEAKER_COL_DEFAULTS.missing,
+      ),
+      overdue: Math.max(
+        SPEAKER_COL_MIN.overdue,
+        Number(parsed.overdue) || SPEAKER_COL_DEFAULTS.overdue,
+      ),
+      due: Math.max(SPEAKER_COL_MIN.due, Number(parsed.due) || SPEAKER_COL_DEFAULTS.due),
+      readiness: Math.max(
+        SPEAKER_COL_MIN.readiness,
+        Number(parsed.readiness) || SPEAKER_COL_DEFAULTS.readiness,
+      ),
+      contact: Math.max(
+        SPEAKER_COL_MIN.contact,
+        Number(parsed.contact) || SPEAKER_COL_DEFAULTS.contact,
+      ),
+    };
+  } catch {
+    return { ...SPEAKER_COL_DEFAULTS };
+  }
+}
+
+function toggleSpeakerSort(current: SpeakerSort, column: SpeakerCol): SpeakerSort {
+  if (column === "talk") return current === "name-asc" ? "name-desc" : "name-asc";
+  if (column === "missing") return current === "missing-desc" ? "missing-asc" : "missing-desc";
+  if (column === "overdue") return current === "overdue-desc" ? "overdue-asc" : "overdue-desc";
+  if (column === "due") return current === "due-asc" ? "due-desc" : "due-asc";
+  if (column === "readiness") return current === "name-asc" ? "name-desc" : "name-asc";
+  return current === "contact-desc" ? "contact-asc" : "contact-desc";
+}
+
+function speakerSortAria(current: SpeakerSort, column: SpeakerCol) {
+  if (column === "talk") {
+    if (current === "name-asc") return "ascending" as const;
+    if (current === "name-desc") return "descending" as const;
+  }
+  if (column === "missing") {
+    if (current === "missing-asc") return "ascending" as const;
+    if (current === "missing-desc") return "descending" as const;
+  }
+  if (column === "overdue") {
+    if (current === "overdue-asc") return "ascending" as const;
+    if (current === "overdue-desc") return "descending" as const;
+  }
+  if (column === "due") {
+    if (current === "due-asc") return "ascending" as const;
+    if (current === "due-desc") return "descending" as const;
+  }
+  if (column === "contact") {
+    if (current === "contact-asc") return "ascending" as const;
+    if (current === "contact-desc") return "descending" as const;
+  }
+  return undefined;
+}
+
+function sortDirectorySpeakers(
+  speakers: OnboardingBoardSpeaker[],
+  sort: SpeakerSort,
+): OnboardingBoardSpeaker[] {
+  const next = [...speakers];
+  const dueValue = (speaker: OnboardingBoardSpeaker) => {
+    if (speaker.daysUntilNextDue === null) return Number.POSITIVE_INFINITY;
+    return speaker.daysUntilNextDue;
+  };
+  const contactValue = (speaker: OnboardingBoardSpeaker) => {
+    if (!speaker.lastContactAt) return 0;
+    const time = Date.parse(speaker.lastContactAt);
+    return Number.isNaN(time) ? 0 : time;
+  };
+  switch (sort) {
+    case "name-desc":
+      next.sort((a, b) => b.name.localeCompare(a.name) || a.speakerId.localeCompare(b.speakerId));
+      break;
+    case "missing-desc":
+      next.sort(
+        (a, b) =>
+          b.openTaskCount - a.openTaskCount ||
+          a.name.localeCompare(b.name) ||
+          a.speakerId.localeCompare(b.speakerId),
+      );
+      break;
+    case "missing-asc":
+      next.sort(
+        (a, b) =>
+          a.openTaskCount - b.openTaskCount ||
+          a.name.localeCompare(b.name) ||
+          a.speakerId.localeCompare(b.speakerId),
+      );
+      break;
+    case "overdue-desc":
+      next.sort(
+        (a, b) =>
+          b.overdueCount - a.overdueCount ||
+          a.name.localeCompare(b.name) ||
+          a.speakerId.localeCompare(b.speakerId),
+      );
+      break;
+    case "overdue-asc":
+      next.sort(
+        (a, b) =>
+          a.overdueCount - b.overdueCount ||
+          a.name.localeCompare(b.name) ||
+          a.speakerId.localeCompare(b.speakerId),
+      );
+      break;
+    case "due-asc":
+      next.sort(
+        (a, b) =>
+          dueValue(a) - dueValue(b) ||
+          a.name.localeCompare(b.name) ||
+          a.speakerId.localeCompare(b.speakerId),
+      );
+      break;
+    case "due-desc":
+      next.sort(
+        (a, b) =>
+          dueValue(b) - dueValue(a) ||
+          a.name.localeCompare(b.name) ||
+          a.speakerId.localeCompare(b.speakerId),
+      );
+      break;
+    case "contact-desc":
+      next.sort(
+        (a, b) =>
+          contactValue(b) - contactValue(a) ||
+          a.name.localeCompare(b.name) ||
+          a.speakerId.localeCompare(b.speakerId),
+      );
+      break;
+    case "contact-asc":
+      next.sort(
+        (a, b) =>
+          contactValue(a) - contactValue(b) ||
+          a.name.localeCompare(b.name) ||
+          a.speakerId.localeCompare(b.speakerId),
+      );
+      break;
+    case "name-asc":
+    default:
+      next.sort((a, b) => a.name.localeCompare(b.name) || a.speakerId.localeCompare(b.speakerId));
+      break;
+  }
+  return next;
+}
 
 export function OnboardingWorkspace({
   eventId,
@@ -470,27 +658,155 @@ export function OnboardingWorkspace({
   const [speakerFilter, setSpeakerFilter] = useState<SpeakerDirectoryFilter>("all");
   const [addingSpeaker, setAddingSpeaker] = useState(false);
   const [csvImportOpen, setCsvImportOpen] = useState(false);
-  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
+  const [filesLibraryOpen, setFilesLibraryOpen] = useState(false);
+  const [speakerSort, setSpeakerSort] = useState<SpeakerSort>("name-asc");
+  const [inspectorWidth, setInspectorWidth] = useState(640);
+  const [queuePaneWidth, setQueuePaneWidth] = useState(0);
+  const [colWidths, setColWidths] = useState<Record<SpeakerCol, number>>(loadSpeakerColWidths);
+  const inspectorWidthRef = useRef(inspectorWidth);
+  const colWidthsRef = useRef(colWidths);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const splitRef = useRef<HTMLDivElement>(null);
+  inspectorWidthRef.current = inspectorWidth;
+  colWidthsRef.current = colWidths;
+
+  useEffect(() => {
+    localStorage.setItem(SPEAKER_COL_STORAGE, JSON.stringify(colWidths));
+  }, [colWidths]);
 
   const speakers = board.data?.speakers ?? [];
   const filteredSpeakers = useMemo(
-    () => filterDirectorySpeakers(speakers, speakerSearch, speakerFilter),
-    [speakers, speakerSearch, speakerFilter],
+    () =>
+      sortDirectorySpeakers(
+        filterDirectorySpeakers(speakers, speakerSearch, speakerFilter),
+        speakerSort,
+      ),
+    [speakers, speakerSearch, speakerFilter, speakerSort],
   );
   const filteredSpeakersWithOutstanding = filteredSpeakers.filter(
     (speaker) => speaker.openTaskCount > 0,
   );
-  const selectedReminderSpeakers = speakers.filter((speaker) =>
-    reminderSpeakerIds.has(speaker.speakerId),
-  );
   const selected = useMemo(
-    () =>
-      filteredSpeakers.find((row) => row.speakerId === selectedSpeakerId) ??
-      filteredSpeakers[0] ??
-      null,
+    () => filteredSpeakers.find((row) => row.speakerId === selectedSpeakerId) ?? null,
     [filteredSpeakers, selectedSpeakerId],
   );
   const taskAttachments = selected?.taskAttachments ?? [];
+
+  useEffect(() => {
+    if (filteredSpeakers.length === 0) {
+      if (selectedSpeakerId !== null) setSelectedSpeakerId(null);
+      return;
+    }
+    const stillVisible = filteredSpeakers.some((row) => row.speakerId === selectedSpeakerId);
+    if (!stillVisible) {
+      setSelectedSpeakerId(filteredSpeakers[0]!.speakerId);
+    }
+  }, [filteredSpeakers, selectedSpeakerId]);
+
+  const [policyEnabled, setPolicyEnabled] = useState(false);
+  const [policyMode, setPolicyMode] = useState<"draft" | "send">("draft");
+  const [policyDueWindowDays, setPolicyDueWindowDays] = useState(0);
+  const [policySuppressHours, setPolicySuppressHours] = useState(72);
+
+  useEffect(() => {
+    const policy = reminderPolicy.data;
+    if (!policy) return;
+    setPolicyEnabled(policy.enabled);
+    setPolicyMode(policy.mode);
+    setPolicyDueWindowDays(policy.dueWindowDays);
+    setPolicySuppressHours(policy.suppressWithinHours);
+  }, [reminderPolicy.data]);
+
+  function startColResize(column: SpeakerCol, pointer: ReactPointerEvent<HTMLSpanElement>) {
+    pointer.preventDefault();
+    pointer.stopPropagation();
+    const handle = pointer.currentTarget;
+    handle.setPointerCapture(pointer.pointerId);
+    const header = handle.closest("th");
+    const colEl = tableRef.current?.querySelector<HTMLTableColElement>(`col.col-${column}`);
+    const startX = pointer.clientX;
+    const startWidth = header?.getBoundingClientRect().width ?? colWidthsRef.current[column];
+    let nextWidth = startWidth;
+    const move = (event: PointerEvent) => {
+      nextWidth = Math.max(SPEAKER_COL_MIN[column], Math.round(startWidth + event.clientX - startX));
+      if (colEl) colEl.style.width = `${nextWidth}px`;
+    };
+    const stop = () => {
+      handle.releasePointerCapture(pointer.pointerId);
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", stop);
+      setColWidths((current) => ({ ...current, [column]: nextWidth }));
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", stop);
+  }
+
+  const leadingFixed = 36 + 40;
+  const trailingFixed =
+    colWidths.missing +
+    colWidths.overdue +
+    colWidths.due +
+    colWidths.readiness +
+    colWidths.contact;
+
+  function queueFloorWidth(widths: Record<SpeakerCol, number> = colWidths) {
+    return (
+      leadingFixed +
+      SPEAKER_COL_MIN.talk +
+      widths.missing +
+      widths.overdue +
+      widths.due +
+      widths.readiness +
+      widths.contact
+    );
+  }
+
+  function clampInspectorWidth(
+    desired: number,
+    splitWidth: number,
+    widths: Record<SpeakerCol, number> = colWidths,
+  ) {
+    const floor = queueFloorWidth(widths);
+    const maxWidth = Math.max(280, Math.floor(splitWidth - 8 - floor));
+    return Math.min(maxWidth, Math.max(280, Math.min(desired, maxWidth)));
+  }
+
+  const talkDisplayWidth = (() => {
+    if (queuePaneWidth <= 0) return colWidths.talk;
+    const roomForTalk = queuePaneWidth - leadingFixed - trailingFixed;
+    if (roomForTalk >= colWidths.talk) return colWidths.talk;
+    return Math.max(SPEAKER_COL_MIN.talk, roomForTalk);
+  })();
+
+  useEffect(() => {
+    const splitEl = splitRef.current;
+    if (!splitEl) return;
+    const apply = () => {
+      const splitWidth = splitEl.getBoundingClientRect().width;
+      const next = clampInspectorWidth(
+        inspectorWidthRef.current,
+        splitWidth,
+        colWidthsRef.current,
+      );
+      if (next !== inspectorWidthRef.current) {
+        inspectorWidthRef.current = next;
+        setInspectorWidth(next);
+      }
+      splitEl.style.setProperty("--inspector-width", `${next}px`);
+      setQueuePaneWidth(Math.max(0, Math.round(splitWidth - 8 - next)));
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(splitEl);
+    return () => observer.disconnect();
+  }, [
+    colWidths.talk,
+    colWidths.missing,
+    colWidths.overdue,
+    colWidths.due,
+    colWidths.readiness,
+    colWidths.contact,
+  ]);
 
   const toggleAddingSpeaker = useCallback(() => {
     setAddingSpeaker((value) => !value);
@@ -500,58 +816,33 @@ export function OnboardingWorkspace({
   }, []);
 
   useEffect(() => {
-    if (!onShellToolsChange) return undefined;
-    onShellToolsChange(
-      <SpeakerDirectoryControls
-        search={speakerSearch}
-        filter={speakerFilter}
-        visibleCount={filteredSpeakers.length}
-        totalCount={speakers.length}
-        addOpen={addingSpeaker}
-        importOpen={csvImportOpen}
-        onSearchChange={setSpeakerSearch}
-        onFilterChange={setSpeakerFilter}
-        onToggleAdd={toggleAddingSpeaker}
-        onToggleImport={toggleCsvImport}
-      />,
-    );
-    return () => onShellToolsChange(null);
-  }, [
-    addingSpeaker,
-    csvImportOpen,
-    filteredSpeakers.length,
-    onShellToolsChange,
-    speakerFilter,
-    speakerSearch,
-    speakers.length,
-    toggleAddingSpeaker,
-    toggleCsvImport,
-  ]);
-
+    if (!selected) return;
+    setTaskSpeakerIds(new Set([selected.speakerId]));
+  }, [selected?.speakerId]);
 
   const refresh = async (speakerId?: string) => {
     if (speakerId) setSelectedSpeakerId(speakerId);
     await queryClient.invalidateQueries({ queryKey: ["onboarding-board", eventId] });
   };
 
-  async function onAddDeliverableComment(assetId: string, event: FormEvent) {
-    event.preventDefault();
-    const body = (commentDrafts[assetId] ?? "").trim();
-    if (!body) return;
-    try {
-      await addOrganizerDeliverableComment(eventId, assetId, body);
-      setCommentDrafts((current) => ({ ...current, [assetId]: "" }));
-      flash("Comment added.");
-      await refresh(selected?.speakerId);
-    } catch (error) {
-      flash(error instanceof ApiError ? error.message : "Could not add comment.", "error");
-    }
-  }
-
+  const flashTimerRef = useRef<number | null>(null);
   const flash = useCallback((text: string, tone: "success" | "error" = "success") => {
     setMessage(text);
     setMessageTone(tone);
+    if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = window.setTimeout(() => {
+      setMessage(null);
+      setMessageTone(null);
+      flashTimerRef.current = null;
+    }, 3200);
   }, []);
+
+  useEffect(
+    () => () => {
+      if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
+    },
+    [],
+  );
 
   const activePreset =
     TASK_PRESETS.find((preset) => preset.value === taskPreset) ?? TASK_PRESETS[0]!;
@@ -612,22 +903,19 @@ export function OnboardingWorkspace({
   });
 
   const saveReminderPolicy = useMutation({
-    mutationFn: () => {
-      const current = reminderPolicy.data;
-      return updateOnboardingReminderPolicy(eventId, {
-        enabled: !(current?.enabled ?? false),
-        mode: current?.mode ?? "draft",
-        dueWindowDays: current?.dueWindowDays ?? 0,
-        suppressWithinHours: current?.suppressWithinHours ?? 72,
-        unattendedSendAuthorized: current?.unattendedSendAuthorized ?? false,
-      });
-    },
-    onSuccess: async (policy) => {
-      flash(
-        policy.enabled
-          ? "Automatic reminder policy enabled. It defaults to draft review unless unattended send authority is explicitly granted."
-          : "Automatic reminder policy disabled.",
-      );
+    mutationFn: () =>
+      updateOnboardingReminderPolicy(eventId, {
+        enabled: policyEnabled,
+        mode: policyMode,
+        dueWindowDays: Math.max(0, Math.floor(policyDueWindowDays)),
+        suppressWithinHours: Math.max(1, Math.floor(policySuppressHours)),
+        unattendedSendAuthorized:
+          policyMode === "send"
+            ? (reminderPolicy.data?.unattendedSendAuthorized ?? false)
+            : false,
+      }),
+    onSuccess: async () => {
+      flash("Automatic reminder settings saved.");
       await queryClient.invalidateQueries({
         queryKey: ["onboarding-reminder-policy", eventId],
       });
@@ -732,188 +1020,381 @@ export function OnboardingWorkspace({
     }
   }
 
+  const selectedCount = reminderSpeakerIds.size;
+  const outstandingSpeakerIds = filteredSpeakersWithOutstanding.map(
+    (speaker) => speaker.speakerId,
+  );
+  const outstandingKey = outstandingSpeakerIds.join(",");
+  const allOutstandingSelected =
+    outstandingSpeakerIds.length > 0 &&
+    outstandingSpeakerIds.every((speakerId) => reminderSpeakerIds.has(speakerId));
+
+  const batchChrome = (
+    <div
+      className={`topbar-batch${selectedCount === 0 ? " topbar-batch-idle" : ""}`}
+      role="region"
+      aria-label="Bulk task reminders"
+    >
+      <strong className="topbar-batch-count">
+        {selectedCount === 0 ? "None selected" : `${selectedCount} selected`}
+      </strong>
+      <AppSelect
+        label="Action"
+        ariaLabel="Reminder action"
+        value={bulkReminderMode}
+        options={[
+          { value: "draft", label: "Prepare drafts for review" },
+          { value: "send", label: "Queue sends now" },
+        ]}
+        onValueChange={(value) =>
+          setBulkReminderMode(value === "send" ? "send" : "draft")
+        }
+      />
+      <button
+        type="button"
+        className="btn btn-primary btn-sm"
+        disabled={selectedCount === 0 || prepareBulkReminder.isPending}
+        onClick={() => prepareBulkReminder.mutate()}
+      >
+        {prepareBulkReminder.isPending
+          ? "Preparing…"
+          : `Prepare ${selectedCount || ""}`.trim()}
+      </button>
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm"
+        disabled={filteredSpeakersWithOutstanding.length === 0 || allOutstandingSelected}
+        onClick={() =>
+          setReminderSpeakerIds(
+            new Set(filteredSpeakersWithOutstanding.map((speaker) => speaker.speakerId)),
+          )
+        }
+      >
+        Select outstanding
+      </button>
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm"
+        disabled={selectedCount === 0}
+        onClick={() => setReminderSpeakerIds(new Set())}
+      >
+        Clear
+      </button>
+    </div>
+  );
+
+  const directoryChrome = (
+    <div className="topbar-tools-inner">
+      <SpeakerDirectoryControls
+        search={speakerSearch}
+        filter={speakerFilter}
+        visibleCount={filteredSpeakers.length}
+        totalCount={speakers.length}
+        addOpen={addingSpeaker}
+        importOpen={csvImportOpen}
+        onSearchChange={setSpeakerSearch}
+        onFilterChange={setSpeakerFilter}
+        onToggleAdd={toggleAddingSpeaker}
+        onToggleImport={toggleCsvImport}
+      />
+      <span className="topbar-tools-spacer" aria-hidden="true" />
+      {batchChrome}
+    </div>
+  );
+
+  useEffect(() => {
+    if (!onShellToolsChange) return undefined;
+    onShellToolsChange(
+      <div className="topbar-tools-inner">
+        <SpeakerDirectoryControls
+          search={speakerSearch}
+          filter={speakerFilter}
+          visibleCount={filteredSpeakers.length}
+          totalCount={speakers.length}
+          addOpen={addingSpeaker}
+          importOpen={csvImportOpen}
+          onSearchChange={setSpeakerSearch}
+          onFilterChange={setSpeakerFilter}
+          onToggleAdd={toggleAddingSpeaker}
+          onToggleImport={toggleCsvImport}
+        />
+        <span className="topbar-tools-spacer" aria-hidden="true" />
+        <div
+          className={`topbar-batch${selectedCount === 0 ? " topbar-batch-idle" : ""}`}
+          role="region"
+          aria-label="Bulk task reminders"
+        >
+          <strong className="topbar-batch-count">
+            {selectedCount === 0 ? "None selected" : `${selectedCount} selected`}
+          </strong>
+          <AppSelect
+            label="Action"
+            ariaLabel="Reminder action"
+            value={bulkReminderMode}
+            options={[
+              { value: "draft", label: "Prepare drafts for review" },
+              { value: "send", label: "Queue sends now" },
+            ]}
+            onValueChange={(value) =>
+              setBulkReminderMode(value === "send" ? "send" : "draft")
+            }
+          />
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            disabled={selectedCount === 0 || prepareBulkReminder.isPending}
+            onClick={() => prepareBulkReminder.mutate()}
+          >
+            {prepareBulkReminder.isPending
+              ? "Preparing…"
+              : `Prepare ${selectedCount || ""}`.trim()}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={outstandingSpeakerIds.length === 0 || allOutstandingSelected}
+            onClick={() => setReminderSpeakerIds(new Set(outstandingSpeakerIds))}
+          >
+            Select outstanding
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={selectedCount === 0}
+            onClick={() => setReminderSpeakerIds(new Set())}
+          >
+            Clear
+          </button>
+        </div>
+      </div>,
+    );
+  }, [
+    addingSpeaker,
+    allOutstandingSelected,
+    bulkReminderMode,
+    csvImportOpen,
+    filteredSpeakers.length,
+    onShellToolsChange,
+    outstandingKey,
+    prepareBulkReminder.isPending,
+    selectedCount,
+    speakerFilter,
+    speakerSearch,
+    speakers.length,
+    toggleAddingSpeaker,
+    toggleCsvImport,
+  ]);
+
+  useEffect(() => {
+    if (!onShellToolsChange) return undefined;
+    return () => onShellToolsChange(null);
+  }, [onShellToolsChange]);
+
+  function startInspectorResize(pointer: ReactPointerEvent<HTMLDivElement>) {
+    pointer.preventDefault();
+    const handle = pointer.currentTarget;
+    handle.setPointerCapture(pointer.pointerId);
+    const splitEl = handle.parentElement;
+    const startX = pointer.clientX;
+    const startWidth = inspectorWidthRef.current;
+    const widths = colWidthsRef.current;
+    let nextWidth = startWidth;
+    const move = (event: PointerEvent) => {
+      const splitWidth = splitEl?.getBoundingClientRect().width ?? window.innerWidth;
+      nextWidth = clampInspectorWidth(
+        startWidth + startX - event.clientX,
+        splitWidth,
+        widths,
+      );
+      if (splitEl) {
+        splitEl.style.setProperty("--inspector-width", `${nextWidth}px`);
+        setQueuePaneWidth(Math.max(0, Math.round(splitWidth - 8 - nextWidth)));
+      }
+    };
+    const stop = () => {
+      handle.releasePointerCapture(pointer.pointerId);
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", stop);
+      inspectorWidthRef.current = nextWidth;
+      setInspectorWidth(nextWidth);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", stop);
+  }
+
+  function sortHeader(column: SpeakerCol, label: string) {
+    const aria = speakerSortAria(speakerSort, column);
+    const sortable = column !== "readiness";
+    return (
+      <th scope="col" className={`col-${column}`} aria-sort={aria}>
+        {sortable ? (
+          <button
+            type="button"
+            className="th-sort"
+            onClick={() => setSpeakerSort((current) => toggleSpeakerSort(current, column))}
+          >
+            {label}
+            <span className="th-sort-ind" aria-hidden="true">
+              {aria === "ascending" ? "↑" : aria === "descending" ? "↓" : ""}
+            </span>
+          </button>
+        ) : (
+          label
+        )}
+        <span
+          className="col-resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={`Resize ${label} column`}
+          onPointerDown={(event) => startColResize(column, event)}
+        />
+      </th>
+    );
+  }
+
   if (board.isPending) {
     return (
-      <div className="workspace">
-        <section className="operations-panel">
-          <p className="empty-state padded">Loading onboarding board…</p>
-        </section>
+      <div className="work" aria-label="Speakers workspace">
+        <p className="empty-state">Loading speakers…</p>
       </div>
     );
   }
 
   if (board.isError) {
     return (
-      <div className="workspace">
-        <section className="operations-panel">
-          <p className="empty-state padded" role="alert">
-            {board.error.message}
-          </p>
-        </section>
+      <div className="work" aria-label="Speakers workspace">
+        <div className="submission-error" role="alert">
+          <strong>Unable to load speakers.</strong>
+          <span>{board.error.message}</span>
+        </div>
       </div>
     );
   }
 
+  const overlays = (
+    <>
+      <SpeakerDirectoryAddPanel
+        eventId={eventId}
+        open={addingSpeaker}
+        onClose={() => setAddingSpeaker(false)}
+        onChanged={refresh}
+        onMessage={flash}
+      />
+      <SpeakerCsvImport
+        eventId={eventId}
+        onChanged={refresh}
+        open={csvImportOpen}
+        onOpenChange={setCsvImportOpen}
+        hideTrigger
+      />
+    </>
+  );
+
   return (
-    <div className="workspace onboarding-workspace">
-      <section className="operations-panel onboarding-board">
-        <div className="panel-heading">
-          <h2>Speaker directory</h2>
-          <span>Identity, participation, and readiness</span>
+    <div className="work onboarding-workspace" aria-label="Speakers workspace">
+      <h2 className="sr-only">Speaker directory</h2>
+      {onShellToolsChange ? null : (
+        <div className="toolbar speaker-fallback-toolbar">
+          {directoryChrome}
         </div>
-        {onShellToolsChange ? (
-          <>
-            <SpeakerDirectoryAddPanel
-              eventId={eventId}
-              open={addingSpeaker}
-              onClose={() => setAddingSpeaker(false)}
-              onChanged={refresh}
-              onMessage={flash}
-            />
-            <SpeakerCsvImport
-              eventId={eventId}
-              onChanged={refresh}
-              open={csvImportOpen}
-              onOpenChange={setCsvImportOpen}
-              hideTrigger
-            />
-          </>
-        ) : (
-          <>
-            <SpeakerDirectoryToolbar
-              eventId={eventId}
-              search={speakerSearch}
-              filter={speakerFilter}
-              visibleCount={filteredSpeakers.length}
-              totalCount={speakers.length}
-              onSearchChange={setSpeakerSearch}
-              onFilterChange={setSpeakerFilter}
-              onChanged={refresh}
-              onMessage={flash}
-            />
-            <SpeakerCsvImport eventId={eventId} onChanged={refresh} />
-          </>
-        )}
-        <div className="onboarding-card onboarding-bulk-reminders">
-          <div className="onboarding-card-head">
-            <h3>Bulk task reminders</h3>
-            <span>
-              {selectedReminderSpeakers.length} selected · {filteredSpeakersWithOutstanding.length} shown with open tasks
-            </span>
-          </div>
-          <p className="muted-line">
-            Select speakers with outstanding work, then prepare one audited reminder operation. Draft mode never sends; send mode only queues through the existing outbox and retry path.
-          </p>
-          <div className="onboarding-actions">
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() =>
-                setReminderSpeakerIds(
-                  new Set(filteredSpeakersWithOutstanding.map((speaker) => speaker.speakerId)),
-                )
-              }
-              disabled={filteredSpeakersWithOutstanding.length === 0}
-            >
-              Select shown outstanding
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => setReminderSpeakerIds(new Set())}
-              disabled={reminderSpeakerIds.size === 0}
-            >
-              Clear reminder selection
-            </button>
-            <label>
-              Reminder action
-              <select
-                value={bulkReminderMode}
-                onChange={(event) =>
-                  setBulkReminderMode(event.target.value === "send" ? "send" : "draft")
-                }
-              >
-                <option value="draft">Prepare drafts for review</option>
-                <option value="send">Queue sends now</option>
-              </select>
-            </label>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={reminderSpeakerIds.size === 0 || prepareBulkReminder.isPending}
-              onClick={() => prepareBulkReminder.mutate()}
-            >
-              {prepareBulkReminder.isPending
-                ? "Preparing…"
-                : `Prepare ${reminderSpeakerIds.size} reminder${reminderSpeakerIds.size === 1 ? "" : "s"}`}
-            </button>
-          </div>
-          <div className="onboarding-actions">
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              disabled={saveReminderPolicy.isPending || reminderPolicy.isPending}
-              onClick={() => saveReminderPolicy.mutate()}
-            >
-              {reminderPolicy.data?.enabled ? "Disable automatic due reminders" : "Enable automatic due reminders"}
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              disabled={runDueReminders.isPending || !reminderPolicy.data?.enabled}
-              onClick={() => runDueReminders.mutate()}
-            >
-              Run due reminder policy now
-            </button>
-            <span className="muted-line">
-              Policy: {reminderPolicy.data?.enabled ? "enabled" : "off"} · mode {reminderPolicy.data?.mode ?? "draft"} · suppress {reminderPolicy.data?.suppressWithinHours ?? 72}h
-            </span>
-          </div>
-          {bulkReminderResult ? (
-            <div className="onboarding-reminder-result" aria-live="polite">
-              <p className="muted-line">
-                Last operation: {bulkReminderResult.counts.selected} selected · {bulkReminderResult.counts.prepared} prepared · {bulkReminderResult.counts.queued} queued · {bulkReminderResult.counts.sent} sent · {bulkReminderResult.counts.failed} failed · {bulkReminderResult.counts.retryScheduled} retry scheduled
-              </p>
-              <ul className="onboarding-history-list">
-                {bulkReminderResult.recipients.map((recipient) => (
-                  <li key={`${bulkReminderResult.idempotencyKey}-${recipient.speakerId}`}>
-                    <strong>{recipient.speakerName}</strong>
-                    <div>
-                      <span>{contactLabel(recipient.status)}</span>
-                      <p className="muted-line">
-                        {recipient.reason} Tasks: {recipient.taskSummaries.map((task) => `${task.title}${task.dueAt ? ` (${formatWhen(task.dueAt)})` : ""}`).join(", ") || "none"}.
-                      </p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
+      )}
+      {overlays}
+      {message ? (
+        <div
+          className="onboarding-toast"
+          data-tone={messageTone ?? undefined}
+          role="status"
+          aria-live="polite"
+        >
+          {message}
         </div>
-        {message ? (
-          <p className="form-message onboarding-flash" data-tone={messageTone ?? undefined}>
-            {message}
-          </p>
-        ) : null}
+      ) : null}
+      {bulkReminderResult ? (
+        <details className="onboarding-reminder-result" aria-live="polite">
+          <summary>
+            Last reminder operation: {bulkReminderResult.counts.prepared} prepared · {bulkReminderResult.counts.queued} queued · {bulkReminderResult.counts.failed} failed
+          </summary>
+          <ul className="onboarding-history-list">
+            {bulkReminderResult.recipients.map((recipient) => (
+              <li key={`${bulkReminderResult.idempotencyKey}-${recipient.speakerId}`}>
+                <strong>{recipient.speakerName}</strong>
+                <div>
+                  <span>{contactLabel(recipient.status)}</span>
+                  <p className="muted-line">
+                    {recipient.reason} Tasks: {recipient.taskSummaries.map((task) => `${task.title}${task.dueAt ? ` (${formatWhen(task.dueAt)})` : ""}`).join(", ") || "none"}.
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+      <div
+        ref={splitRef}
+        className="split"
+        style={{ "--inspector-width": `${inspectorWidth}px` } as CSSProperties}
+      >
+        <div className="table-wrap">
         {speakers.length === 0 ? (
-          <div className="empty-state padded">
-            <p>No event speakers yet.</p>
-            <p>No onboarding tasks yet.</p>
-          </div>
+          <p className="empty-state">No event speakers yet.</p>
         ) : filteredSpeakers.length === 0 ? (
-          <p className="empty-state padded">No speakers match this search and filter.</p>
+          <p className="empty-state">
+            No speakers match this search and filter. Try another name, email, or readiness filter.
+          </p>
         ) : (
-          <div className="onboarding-table-wrap">
-            <table className="onboarding-table">
+            <table
+              ref={tableRef}
+              className="grid grid-queue"
+              aria-label="Speaker directory"
+              style={{ minWidth: queueFloorWidth() }}
+            >
+              <colgroup>
+                <col className="col-batch" />
+                <col className="col-avatar" />
+                <col className="col-talk" style={{ width: talkDisplayWidth }} />
+                <col className="col-missing" style={{ width: colWidths.missing }} />
+                <col className="col-overdue" style={{ width: colWidths.overdue }} />
+                <col className="col-due" style={{ width: colWidths.due }} />
+                <col className="col-readiness" style={{ width: colWidths.readiness }} />
+                <col className="col-contact" style={{ width: colWidths.contact }} />
+              </colgroup>
               <thead>
                 <tr>
-                  <th scope="col">Remind</th>
-                  <th scope="col">Speaker</th>
-                  <th scope="col">Missing</th>
-                  <th scope="col">Overdue</th>
-                  <th scope="col">Next due</th>
-                  <th scope="col">Readiness</th>
-                  <th scope="col">Last contact</th>
+                  <th scope="col" className="col-batch">
+                    <input
+                      className="batch-check"
+                      type="checkbox"
+                      aria-label="Select all visible speakers with outstanding work"
+                      checked={allOutstandingSelected}
+                      disabled={filteredSpeakersWithOutstanding.length === 0}
+                      ref={(node) => {
+                        if (!node) return;
+                        node.indeterminate =
+                          selectedCount > 0 &&
+                          !allOutstandingSelected &&
+                          filteredSpeakersWithOutstanding.some((speaker) =>
+                            reminderSpeakerIds.has(speaker.speakerId),
+                          );
+                      }}
+                      onChange={() => {
+                        setReminderSpeakerIds((current) => {
+                          if (allOutstandingSelected) return new Set();
+                          return new Set(
+                            filteredSpeakersWithOutstanding.map((speaker) => speaker.speakerId),
+                          );
+                        });
+                      }}
+                    />
+                  </th>
+                  <th scope="col" className="col-avatar">
+                    <span className="visually-hidden">Speaker</span>
+                  </th>
+                  {sortHeader("talk", "Speaker")}
+                  {sortHeader("missing", "Missing")}
+                  {sortHeader("overdue", "Overdue")}
+                  {sortHeader("due", "Next due")}
+                  {sortHeader("readiness", "Readiness")}
+                  {sortHeader("contact", "Last contact")}
                 </tr>
               </thead>
               <tbody>
@@ -922,14 +1403,17 @@ export function OnboardingWorkspace({
                   return (
                     <tr
                       key={row.speakerId}
-                      className={isSelected ? "is-selected" : undefined}
+                      className={`proposal-row${isSelected ? " is-selected" : ""}`}
+                      aria-selected={isSelected}
                     >
-                      <td>
+                      <td className="col-batch">
                         <input
+                          className="batch-check"
                           type="checkbox"
                           aria-label={`Select ${row.name} for bulk reminder`}
                           checked={reminderSpeakerIds.has(row.speakerId)}
                           disabled={row.openTaskCount === 0}
+                          onClick={(click) => click.stopPropagation()}
                           onChange={() => {
                             setReminderSpeakerIds((current) => {
                               const next = new Set(current);
@@ -940,43 +1424,52 @@ export function OnboardingWorkspace({
                           }}
                         />
                       </td>
-                      <td>
+                      <td className="col-avatar">
+                        <span className="avatar" aria-hidden="true">
+                          {row.headshotAssetId ? (
+                            <img
+                              src={`/api/events/${eventId}/speakers/${row.speakerId}/headshot?asset=${encodeURIComponent(row.headshotAssetId)}`}
+                              alt=""
+                            />
+                          ) : (
+                            initials(row.name)
+                          )}
+                        </span>
+                      </td>
+                      <td className="col-talk">
                         <button
                           type="button"
-                          className="onboarding-speaker-btn"
+                          className="proposal-row-link onboarding-speaker-btn"
                           aria-current={isSelected ? "true" : undefined}
                           onClick={() => {
                             setSelectedSpeakerId(row.speakerId);
                             setDraft(null);
                           }}
                         >
-                          <strong>{row.name}</strong>
-                          <span>{row.email}</span>
-                          <span>
-                            {row.proposalTitle ?? "Program placement"} · {row.role}
+                          <span className="talk">{row.name}</span>
+                          <span className="talk-sub">
+                            {row.email} · {row.proposalTitle ?? "Program placement"}
+                          </span>
+                          <span className="speaker-row-flags">
+                            <span className={roleFlagClass(row.role)}>{roleLabel(row.role)}</span>
+                            <span className={workflowFlagClass(row.workflowStatus)}>
+                              {speakerWorkflowLabels[row.workflowStatus] ?? row.workflowStatus}
+                            </span>
                           </span>
                         </button>
                       </td>
-                      <td className="onboarding-num">{row.openTaskCount}</td>
-                      <td
-                        className={
-                          row.overdueCount > 0
-                            ? "onboarding-num is-overdue"
-                            : "onboarding-num"
-                        }
-                      >
-                        {row.overdueCount}
+                      <td className="col-missing onboarding-num">{row.openTaskCount}</td>
+                      <td className="col-overdue onboarding-num">{row.overdueCount}</td>
+                      <td className="col-due muted">
+                        {row.daysUntilNextDue !== null && row.daysUntilNextDue < 0 ? (
+                          <span className="due-label is-due-soon">
+                            {daysLabel(row.daysUntilNextDue)}
+                          </span>
+                        ) : (
+                          daysLabel(row.daysUntilNextDue)
+                        )}
                       </td>
-                      <td
-                        className={
-                          row.daysUntilNextDue !== null && row.daysUntilNextDue < 0
-                            ? "is-overdue"
-                            : "muted-line"
-                        }
-                      >
-                        {daysLabel(row.daysUntilNextDue)}
-                      </td>
-                      <td className="muted-line">
+                      <td className="col-readiness muted">
                         {row.readinessFlags.length > 0
                           ? row.readinessFlags
                               .map((flag) => humanFlag(flag))
@@ -984,16 +1477,16 @@ export function OnboardingWorkspace({
                               .join(", ")
                           : "None"}
                       </td>
-                      <td>
+                      <td className="col-contact">
                         {row.lastContactAt ? (
                           <div className="onboarding-contact">
                             <strong>{contactLabel(row.lastContactStatus)}</strong>
-                            <span className="muted-line">
+                            <span className="muted">
                               {formatWhen(row.lastContactAt)}
                             </span>
                           </div>
                         ) : (
-                          <span className="muted-line">No contact yet</span>
+                          <span className="muted">No contact yet</span>
                         )}
                       </td>
                     </tr>
@@ -1001,26 +1494,118 @@ export function OnboardingWorkspace({
                 })}
               </tbody>
             </table>
-          </div>
         )}
-      </section>
-      <FilesLibraryPanel eventId={eventId} />
-
+        </div>
+        <div
+          className="inspector-resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize speaker inspector"
+          aria-valuenow={inspectorWidth}
+          tabIndex={0}
+          onPointerDown={startInspectorResize}
+          onKeyDown={(event) => {
+            const splitWidth = splitRef.current?.getBoundingClientRect().width ?? 0;
+            if (event.key === "ArrowLeft") {
+              event.preventDefault();
+              const next = clampInspectorWidth(inspectorWidthRef.current + 24, splitWidth);
+              inspectorWidthRef.current = next;
+              setInspectorWidth(next);
+            }
+            if (event.key === "ArrowRight") {
+              event.preventDefault();
+              const next = clampInspectorWidth(inspectorWidthRef.current - 24, splitWidth);
+              inspectorWidthRef.current = next;
+              setInspectorWidth(next);
+            }
+          }}
+        />
+        <aside
+          className={`inspector${selected ? " has-selection" : ""}`}
+          aria-label="Speaker detail"
+        >
       {selected ? (
-        <section className="operations-panel onboarding-detail" aria-label="Speaker detail">
-          <div className="panel-heading">
-            <h2>{selected.name}</h2>
-            <span>
-              {selected.email}
-              {selected.proposalTitle
-                ? ` · ${selected.proposalTitle} · ${selected.role}`
-                : ` · ${selected.role}`}
-            </span>
-          </div>
+        <div className="inspector-content speaker-inspector">
+          <header className="speaker-inspector-head">
+            <div className="avatar avatar-lg" aria-hidden="true">
+              {selected.headshotAssetId ? (
+                <img
+                  src={`/api/events/${eventId}/speakers/${selected.speakerId}/headshot?asset=${encodeURIComponent(selected.headshotAssetId)}`}
+                  alt=""
+                />
+              ) : (
+                initials(selected.name)
+              )}
+            </div>
+            <div className="speaker-inspector-identity">
+              <h2>{selected.name}</h2>
+              <div className="speaker-row-flags">
+                <span className={roleFlagClass(selected.role)}>{roleLabel(selected.role)}</span>
+                <span className={workflowFlagClass(selected.workflowStatus)}>
+                  {speakerWorkflowLabels[selected.workflowStatus] ?? selected.workflowStatus}
+                </span>
+                {selected.proposalTitle ? (
+                  <span className="speaker-inspector-placement">{selected.proposalTitle}</span>
+                ) : null}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="inspector-close btn btn-secondary btn-sm"
+              onClick={() => {
+                setDraft(null);
+                setSelectedSpeakerId(filteredSpeakers[0]?.speakerId ?? null);
+              }}
+            >
+              Close
+            </button>
+          </header>
 
-          <div className="onboarding-detail-body">
-            <div className="onboarding-detail-grid">
-              <div className="onboarding-detail-col">
+          <div className="inspector-body">
+            <div className="onboarding-detail-col">
+                <details
+                  className="onboarding-disclosure onboarding-disclosure-card"
+                  open={selected.missingWork.length > 0 && selected.missingWork.length <= 6}
+                >
+                  <summary>
+                    <span>Missing work</span>
+                    <span className="muted-line">{selected.missingWork.length} open</span>
+                  </summary>
+                  <div className="onboarding-disclosure-body">
+                    {selected.missingWork.length === 0 ? (
+                      <p className="muted-line">Nothing open for this speaker.</p>
+                    ) : (
+                      <ul className="onboarding-missing-list">
+                        {selected.missingWork.map((item) => {
+                          const overdue =
+                            item.daysUntilDue !== null && item.daysUntilDue < 0;
+                          return (
+                            <li key={item.taskId}>
+                              <div className="onboarding-missing-main">
+                                <strong>{item.title}</strong>
+                                {item.readinessFlag ? (
+                                  <span className="muted-line">
+                                    {humanFlag(item.readinessFlag)}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <span className="muted-line">
+                                {overdue ? (
+                                  <span className="is-due-soon">
+                                    {daysLabel(item.daysUntilDue)}
+                                  </span>
+                                ) : (
+                                  daysLabel(item.daysUntilDue)
+                                )}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                </details>
+
                 <SpeakerCurrentProfile
                   key={selected.speakerId}
                   eventId={eventId}
@@ -1035,222 +1620,79 @@ export function OnboardingWorkspace({
                   onChanged={() => refresh(selected.speakerId)}
                   onMessage={flash}
                 />
-                <div className="onboarding-card">
-                  <div className="onboarding-card-head">
-                    <h3>Missing work</h3>
-                    <span>{selected.missingWork.length} open</span>
-                  </div>
-                  {selected.missingWork.length === 0 ? (
-                    <p className="muted-line">Nothing open for this speaker.</p>
-                  ) : (
-                    <ul className="onboarding-missing-list">
-                      {selected.missingWork.map((item) => {
-                        const overdue =
-                          item.daysUntilDue !== null && item.daysUntilDue < 0;
-                        return (
-                          <li key={item.taskId}>
-                            <div className="onboarding-missing-main">
-                              <strong>{item.title}</strong>
-                              {item.readinessFlag ? (
-                                <span className="muted-line">
-                                  {humanFlag(item.readinessFlag)}
-                                </span>
-                              ) : null}
-                            </div>
-                            <span className={overdue ? "is-overdue" : "muted-line"}>
-                              {daysLabel(item.daysUntilDue)}
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </div>
 
-                <div className="onboarding-card">
-                  <div className="onboarding-card-head">
-                    <h3>Deliverables</h3>
-                    <span>{taskAttachments.length} files</span>
-                  </div>
-                  {taskAttachments.length === 0 ? (
-                    <p className="muted-line">No task files uploaded yet.</p>
-                  ) : (
-                    <ul className="onboarding-deliverable-list">
-                      {taskAttachments.map((attachment) => (
-                        <li key={attachment.assetId}>
-                          <div>
-                            <strong>{attachment.fileName}</strong>
-                            <p className="muted-line">
-                              {attachment.mime} · {formatFileSize(attachment.size)} · uploaded {formatWhen(attachment.uploadedAt)}
-                            </p>
-                            <p className="muted-line">
-                              {attachment.uploader.name} ({attachment.uploader.email}) · {attachment.task.title} · {attachment.speaker.name}
-                              {attachment.session ? ` · ${attachment.session.title} (${attachment.session.format})` : " · No session"}
-                            </p>
-                            <details className="onboarding-deliverable-versions">
-                              <summary>
-                                Latest version v{attachment.version} · {attachment.versions.length} total
-                              </summary>
-                              <ol>
-                                {attachment.versions.map((version) => (
-                                  <li key={version.assetId}>
-                                    <div>
-                                      <strong>
-                                        Version {version.version}
-                                        {version.isLatest ? " (latest)" : ""}
-                                      </strong>
-                                      <span className="muted-line">
-                                        {" "}
-                                        · {version.fileName} · {formatFileSize(version.size)} · uploaded {formatWhen(version.uploadedAt)}
-                                      </span>
-                                      <a
-                                        className="btn btn-secondary btn-sm"
-                                        href={organizerAssetUrl(eventId, version.assetId, "attachment")}
-                                      >
-                                        Download
-                                      </a>
-                                    </div>
-                                    {version.comments.length > 0 ? (
-                                      <ul className="onboarding-deliverable-comments">
-                                        {version.comments.map((comment) => (
-                                          <li key={comment.id}>
-                                            <strong>
-                                              {comment.author.name} · {comment.author.role}
-                                            </strong>
-                                            <span className="muted-line"> · {formatWhen(comment.createdAt)}</span>
-                                            <p>{comment.body}</p>
-                                          </li>
-                                        ))}
-                                      </ul>
-                                    ) : null}
-                                    <form onSubmit={(event) => void onAddDeliverableComment(version.assetId, event)}>
-                                      <label>
-                                        Comment on version {version.version}
-                                        <textarea
-                                          value={commentDrafts[version.assetId] ?? ""}
-                                          onChange={(event) =>
-                                            setCommentDrafts((current) => ({
-                                              ...current,
-                                              [version.assetId]: event.target.value,
-                                            }))
-                                          }
-                                        />
-                                      </label>
-                                      <button className="btn btn-secondary btn-sm" type="submit">
-                                        Add comment
-                                      </button>
-                                    </form>
-                                  </li>
-                                ))}
-                              </ol>
-                            </details>
-                          </div>
-                          <div className="onboarding-actions">
-                            {attachment.previewable ? (
-                              <a
-                                className="btn btn-secondary btn-sm"
-                                href={organizerAssetUrl(eventId, attachment.assetId, "inline")}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                Preview
-                              </a>
-                            ) : null}
-                            <a
-                              className="btn btn-secondary btn-sm"
-                              href={organizerAssetUrl(eventId, attachment.assetId, "attachment")}
-                            >
-                              Download
-                            </a>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-
-                <div className="onboarding-card">
-                  <div className="onboarding-card-head">
-                    <h3>History</h3>
-                  </div>
-                  {selected.history.length === 0 ? (
-                    <p className="muted-line">No history yet.</p>
-                  ) : (
-                    <ul className="onboarding-history-list">
-                      {selected.history.map((entry) => (
-                        <li key={entry.id}>
-                          <time dateTime={entry.createdAt}>
-                            {formatWhen(entry.createdAt)}
-                          </time>
-                          <div>
-                            <strong>{humanHistoryType(entry.type)}</strong>
-                            <p>{entry.summary}</p>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </div>
-
-              <div className="onboarding-detail-col">
-                <div className="onboarding-card">
-                  <div className="onboarding-card-head">
-                    <h3>Assign task</h3>
-                  </div>
+                <details className="onboarding-disclosure">
+                  <summary>
+                    <span>Assign task</span>
+                    <span className="muted-line">To {selected.name} by default</span>
+                  </summary>
                   <form
-                    className="onboarding-form"
+                    className="onboarding-form is-compact"
                     onSubmit={(event) => {
                       event.preventDefault();
                       void createTask.mutateAsync();
                     }}
                   >
-                    <fieldset className="onboarding-speaker-selection">
-                      <legend>Speakers</legend>
-                      {filteredSpeakers.map((speaker) => (
-                        <label key={speaker.speakerId}>
-                          <input
-                            type="checkbox"
-                            checked={taskSpeakerIds.has(speaker.speakerId)}
-                            onChange={() => {
-                              setTaskSpeakerIds((current) => {
-                                const next = new Set(current);
-                                if (next.has(speaker.speakerId)) next.delete(speaker.speakerId);
-                                else next.add(speaker.speakerId);
-                                return next;
-                              });
-                            }}
-                          />
-                          {speaker.name}
-                        </label>
-                      ))}
-                    </fieldset>
-                    <label>
-                      Task type
-                      <select
-                        value={taskPreset}
-                        onChange={(event) => {
-                          const next = event.target.value;
-                          setTaskPreset(next);
-                          const preset =
-                            TASK_PRESETS.find((item) => item.value === next) ??
-                            TASK_PRESETS[0]!;
-                          setTaskRequirement(preset.requirement);
-                          if (
-                            !taskTitle.trim() ||
-                            TASK_PRESETS.some((p) => p.label === taskTitle)
-                          ) {
-                            setTaskTitle(preset.value === "custom" ? "" : preset.label);
-                          }
-                        }}
-                      >
-                        {TASK_PRESETS.map((preset) => (
-                          <option key={preset.value} value={preset.value}>
-                            {preset.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    <p className="speaker-assign-target">
+                      Assigning to <strong>{selected.name}</strong>
+                      {taskSpeakerIds.size > 1
+                        ? ` + ${taskSpeakerIds.size - 1} other${taskSpeakerIds.size - 1 === 1 ? "" : "s"}`
+                        : ""}
+                    </p>
+                    {filteredSpeakers.length > 1 ? (
+                      <div>
+                        <p className="muted-line" style={{ marginBottom: 6 }}>
+                          Also include
+                        </p>
+                        <div className="speaker-include-list" role="group" aria-label="Additional speakers">
+                          {filteredSpeakers
+                            .filter((speaker) => speaker.speakerId !== selected.speakerId)
+                            .map((speaker) => {
+                              const pressed = taskSpeakerIds.has(speaker.speakerId);
+                              return (
+                                <button
+                                  key={speaker.speakerId}
+                                  type="button"
+                                  className="speaker-include-box"
+                                  aria-pressed={pressed}
+                                  onClick={() => {
+                                    setTaskSpeakerIds((current) => {
+                                      const next = new Set(current);
+                                      next.add(selected.speakerId);
+                                      if (next.has(speaker.speakerId)) next.delete(speaker.speakerId);
+                                      else next.add(speaker.speakerId);
+                                      return next;
+                                    });
+                                  }}
+                                >
+                                  {speaker.name}
+                                </button>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    ) : null}
+                    <AppSelect
+                      label="Task type"
+                      value={taskPreset}
+                      options={TASK_PRESETS.map((preset) => ({
+                        value: preset.value,
+                        label: preset.label,
+                      }))}
+                      onValueChange={(next) => {
+                        setTaskPreset(next);
+                        const preset =
+                          TASK_PRESETS.find((item) => item.value === next) ??
+                          TASK_PRESETS[0]!;
+                        setTaskRequirement(preset.requirement);
+                        if (
+                          !taskTitle.trim() ||
+                          TASK_PRESETS.some((item) => item.label === taskTitle)
+                        ) {
+                          setTaskTitle(preset.value === "custom" ? "" : preset.label);
+                        }
+                      }}
+                    />
                     <label>
                       Title
                       <input
@@ -1265,25 +1707,22 @@ export function OnboardingWorkspace({
                       <textarea
                         value={taskInstructions}
                         onChange={(event) => setTaskInstructions(event.target.value)}
-                        rows={3}
+                        rows={2}
                         placeholder="What the speaker needs to finish"
                       />
                     </label>
-                    <label>
-                      Completion
-                      <select
-                        value={taskRequirement}
-                        onChange={(event) =>
-                          setTaskRequirement(
-                            event.target.value as "manual" | "file" | "ack",
-                          )
-                        }
-                      >
-                        <option value="manual">Mark complete in portal</option>
-                        <option value="file">Upload a file</option>
-                        <option value="ack">Acknowledgement</option>
-                      </select>
-                    </label>
+                    <AppSelect
+                      label="Completion"
+                      value={taskRequirement}
+                      options={[
+                        { value: "manual", label: "Mark complete in portal" },
+                        { value: "file", label: "Upload a file" },
+                        { value: "ack", label: "Acknowledgement" },
+                      ]}
+                      onValueChange={(value) =>
+                        setTaskRequirement(value as "manual" | "file" | "ack")
+                      }
+                    />
                     <label>
                       Due
                       <input
@@ -1297,40 +1736,37 @@ export function OnboardingWorkspace({
                         Adds readiness flag: {humanFlag(activePreset.flag)}
                       </p>
                     ) : null}
-                    <button
-                      className="btn btn-secondary"
-                      type="submit"
-                      disabled={createTask.isPending}
-                    >
-                      {createTask.isPending
-                        ? "Assigning…"
-                        : `Assign to ${taskSpeakerIds.size || 1} speaker${(taskSpeakerIds.size || 1) === 1 ? "" : "s"}`}
-                    </button>
+                    <div className="onboarding-actions onboarding-actions-end">
+                      <button
+                        className="btn btn-primary btn-sm"
+                        type="submit"
+                        disabled={createTask.isPending}
+                      >
+                        {createTask.isPending
+                          ? "Assigning…"
+                          : `Assign to ${Math.max(taskSpeakerIds.size, 1)} speaker${Math.max(taskSpeakerIds.size, 1) === 1 ? "" : "s"}`}
+                      </button>
+                    </div>
                   </form>
-                </div>
+                </details>
 
                 <div className="onboarding-card">
                   <div className="onboarding-card-head">
                     <h3>Assisted reminder</h3>
+                    {draft ? <span>{contactLabel(draft.status)}</span> : null}
                   </div>
-                  <p className="muted-line">
-                    Build an editable draft from missing work and deadlines. Preparing a
-                    draft never sends mail.
-                    {selected.missingWork.length === 0
-                      ? " No open tasks right now — draft will be a short check-in."
-                      : ""}
-                  </p>
-                  <div className="onboarding-actions">
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => void onPrepareReminder()}
-                    >
-                      Prepare draft
-                    </button>
-                  </div>
-                  {draft ? (
-                    <form className="onboarding-form onboarding-draft-form" onSubmit={onSaveDraft}>
+                  {!draft ? (
+                    <div className="onboarding-actions">
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => void onPrepareReminder()}
+                      >
+                        Prepare draft
+                      </button>
+                    </div>
+                  ) : (
+                    <form className="onboarding-form is-compact onboarding-draft-form" onSubmit={onSaveDraft}>
                       <p className="muted-line">
                         Status: <strong>{contactLabel(draft.status)}</strong>
                         {draft.lastError ? ` · ${draft.lastError}` : ""}
@@ -1352,25 +1788,25 @@ export function OnboardingWorkspace({
                           onChange={(event) =>
                             setDraft({ ...draft, bodyText: event.target.value })
                           }
-                          rows={10}
+                          rows={6}
                           disabled={draft.status !== "draft"}
                         />
                       </label>
-                      <div className="onboarding-actions">
+                      <div className="onboarding-actions onboarding-actions-end">
                         {draft.status === "draft" ? (
                           <>
-                            <button className="btn btn-secondary" type="submit">
+                            <button className="btn btn-secondary btn-sm" type="submit">
                               Save edits
                             </button>
                             <button
-                              className="btn btn-secondary"
+                              className="btn btn-secondary btn-sm"
                               type="button"
                               onClick={() => void onDiscardDraft()}
                             >
                               Discard
                             </button>
                             <button
-                              className="btn btn-primary"
+                              className="btn btn-primary btn-sm"
                               type="button"
                               onClick={() => void onSendDraft()}
                             >
@@ -1379,7 +1815,7 @@ export function OnboardingWorkspace({
                           </>
                         ) : draft.status === "failed" ? (
                           <button
-                            className="btn btn-primary"
+                            className="btn btn-primary btn-sm"
                             type="button"
                             onClick={() => void onSendDraft()}
                           >
@@ -1388,12 +1824,212 @@ export function OnboardingWorkspace({
                         ) : null}
                       </div>
                     </form>
-                  ) : null}
+                  )}
+                </div>
+
+                <div className="onboarding-card">
+                  <div className="onboarding-card-head">
+                    <h3>Deliverables</h3>
+                    <span>{taskAttachments.length} files</span>
+                  </div>
+                  {taskAttachments.length === 0 ? (
+                    <p className="muted-line">No task files uploaded yet.</p>
+                  ) : (
+                    <ul className="onboarding-deliverable-list">
+                      {taskAttachments.map((attachment) => (
+                        <li key={attachment.assetId}>
+                          <div className="onboarding-deliverable-main">
+                            <strong>{attachment.fileName}</strong>
+                            <p className="muted-line">
+                              {formatFileSize(attachment.size)} · {attachment.task.title} ·{" "}
+                              {formatWhen(attachment.uploadedAt)}
+                            </p>
+                          </div>
+                          <div className="onboarding-deliverable-actions">
+                            {attachment.previewable ? (
+                              <a
+                                className="btn btn-secondary btn-xs"
+                                href={organizerAssetUrl(eventId, attachment.assetId, "inline")}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Preview
+                              </a>
+                            ) : null}
+                            <a
+                              className="btn btn-secondary btn-xs"
+                              href={organizerAssetUrl(eventId, attachment.assetId, "attachment")}
+                            >
+                              Download
+                            </a>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <details
+                  className="onboarding-disclosure onboarding-disclosure-card"
+                  open={selected.history.length > 0 && selected.history.length <= 5}
+                >
+                  <summary>
+                    <span>History</span>
+                    <span className="muted-line">{selected.history.length} entries</span>
+                  </summary>
+                  <div className="onboarding-disclosure-body">
+                    {selected.history.length === 0 ? (
+                      <p className="muted-line">No history yet.</p>
+                    ) : (
+                      <div className="onboarding-history-scroll">
+                        <ul className="onboarding-history-list">
+                          {selected.history.map((entry) => (
+                            <li key={entry.id}>
+                              <time dateTime={entry.createdAt}>
+                                {formatWhen(entry.createdAt)}
+                              </time>
+                              <div>
+                                <strong>{humanHistoryType(entry.type)}</strong>
+                                <p>{entry.summary}</p>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </details>
+
+                <div className="onboarding-inspector-utilities">
+                  <details className="onboarding-disclosure">
+                    <summary>
+                      <span>Automatic reminders</span>
+                    </summary>
+                    <form
+                      className="onboarding-form is-compact onboarding-disclosure-body onboarding-policy-form"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        saveReminderPolicy.mutate();
+                      }}
+                    >
+                      <label className="onboarding-check-row">
+                        <input
+                          className="batch-check"
+                          type="checkbox"
+                          checked={policyEnabled}
+                          onChange={(event) => setPolicyEnabled(event.target.checked)}
+                        />
+                        <span>Enable automatic due reminders</span>
+                      </label>
+                      <AppSelect
+                        label="When due"
+                        value={policyMode}
+                        options={[
+                          { value: "draft", label: "Prepare drafts for review" },
+                          { value: "send", label: "Queue sends automatically" },
+                        ]}
+                        onValueChange={(value) =>
+                          setPolicyMode(value === "send" ? "send" : "draft")
+                        }
+                      />
+                      <label>
+                        Due window (days)
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={policyDueWindowDays}
+                          onChange={(event) =>
+                            setPolicyDueWindowDays(Number(event.target.value) || 0)
+                          }
+                        />
+                      </label>
+                      <label>
+                        Suppress within (hours)
+                        <input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={policySuppressHours}
+                          onChange={(event) =>
+                            setPolicySuppressHours(Number(event.target.value) || 1)
+                          }
+                        />
+                      </label>
+                      <div className="onboarding-actions">
+                        <button
+                          type="submit"
+                          className="btn btn-primary btn-sm"
+                          disabled={saveReminderPolicy.isPending || reminderPolicy.isPending}
+                        >
+                          {saveReminderPolicy.isPending ? "Saving…" : "Save settings"}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          disabled={runDueReminders.isPending || !policyEnabled}
+                          onClick={() => runDueReminders.mutate()}
+                        >
+                          Run due now
+                        </button>
+                      </div>
+                    </form>
+                  </details>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm files-library-open"
+                    onClick={() => setFilesLibraryOpen(true)}
+                  >
+                    Open files library
+                  </button>
                 </div>
               </div>
             </div>
           </div>
-        </section>
+      ) : (
+        <div className="inspector-body">
+          <p className="empty-state">Select a speaker to inspect profile, tasks, and files.</p>
+        </div>
+      )}
+        </aside>
+      </div>
+      {filesLibraryOpen ? (
+        <div
+          className="event-dialog-backdrop"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setFilesLibraryOpen(false);
+          }}
+        >
+          <section
+            className="event-dialog files-library-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="files-library-title"
+          >
+            <div className="event-dialog-heading">
+              <div>
+                <p className="eyebrow">Deliverables</p>
+                <h2 id="files-library-title">Files library</h2>
+                <p>
+                  {selected
+                    ? `Latest uploads for ${selected.name} and the wider event roster.`
+                    : "Latest speaker deliverables for this event."}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setFilesLibraryOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <FilesLibraryPanel
+              eventId={eventId}
+              focusSpeakerId={selected?.speakerId}
+            />
+          </section>
+        </div>
       ) : null}
     </div>
   );

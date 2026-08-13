@@ -15,6 +15,7 @@ import {
   updateDirectorySpeaker,
   updateSpeakerParticipation,
 } from "./api";
+import { AppSelect } from "./AppSelect";
 
 export type SpeakerDirectoryFilter =
   | "all"
@@ -31,6 +32,24 @@ export const speakerWorkflowLabels: Record<SpeakerWorkflowStatus, string> = {
   ready: "Ready",
   withdrawn: "Withdrawn",
 };
+
+const directoryFilterOptions = [
+  { value: "all", label: "All speakers" },
+  { value: "ready", label: "Ready — no open work" },
+  { value: "outstanding", label: "Outstanding work" },
+  { value: "overdue", label: "Overdue work" },
+  { value: "flagged", label: "Readiness flags" },
+  ...Object.entries(speakerWorkflowLabels).map(([status, label]) => ({
+    value: status,
+    label,
+  })),
+];
+
+const speakerRoleOptions = [
+  { value: "invited", label: "Invited speaker" },
+  { value: "primary", label: "Primary speaker" },
+  { value: "co", label: "Co-speaker" },
+];
 
 export function filterDirectorySpeakers(
   speakers: OnboardingBoardSpeaker[],
@@ -107,10 +126,8 @@ export function SpeakerDirectoryControls({
   onToggleAdd,
   onToggleImport,
 }: DirectoryControlsProps) {
-  const countLabel =
-    visibleCount === totalCount
-      ? `${totalCount} speaker${totalCount === 1 ? "" : "s"}`
-      : `${visibleCount} of ${totalCount} speakers`;
+  void visibleCount;
+  void totalCount;
 
   return (
     <div
@@ -118,46 +135,33 @@ export function SpeakerDirectoryControls({
       role="toolbar"
       aria-label="Speaker directory controls"
     >
-      <label className="speaker-directory-search">
-        <span>Search speakers</span>
+      <label className="field search-field topbar-search">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.5-3.5" />
+        </svg>
         <input
           type="search"
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
-          placeholder="Name or email"
+          placeholder="Search name or email…"
+          aria-label="Search speakers"
+          autoComplete="off"
         />
       </label>
-      <label>
-        <span>Directory filter</span>
-        <select
-          value={filter}
-          onChange={(event) =>
-            onFilterChange(event.target.value as SpeakerDirectoryFilter)
-          }
-        >
-          <option value="all">All speakers</option>
-          <option value="ready">Ready — no open work</option>
-          <option value="outstanding">Outstanding work</option>
-          <option value="overdue">Overdue work</option>
-          <option value="flagged">Readiness flags</option>
-          <optgroup label="Workflow status">
-            {Object.entries(speakerWorkflowLabels).map(([status, label]) => (
-              <option key={status} value={status}>
-                {label}
-              </option>
-            ))}
-          </optgroup>
-        </select>
-      </label>
-      <span className="speaker-directory-count" aria-live="polite">
-        {countLabel}
-      </span>
-      <button type="button" className="btn btn-primary" onClick={onToggleAdd}>
-        {addOpen ? "Close add form" : "Add speaker"}
+      <AppSelect
+        label="Filter"
+        ariaLabel="Directory filter"
+        value={filter}
+        options={directoryFilterOptions}
+        onValueChange={(value) => onFilterChange(value as SpeakerDirectoryFilter)}
+      />
+      <button type="button" className="btn btn-primary btn-sm" onClick={onToggleAdd}>
+        {addOpen ? "Close add" : "Add speaker"}
       </button>
       {onToggleImport ? (
-        <button type="button" className="btn btn-secondary" onClick={onToggleImport}>
-          {importOpen ? "Close CSV import" : "Import CSV"}
+        <button type="button" className="btn btn-secondary btn-sm" onClick={onToggleImport}>
+          {importOpen ? "Close import" : "Import CSV"}
         </button>
       ) : null}
     </div>
@@ -265,17 +269,12 @@ export function SpeakerDirectoryAddPanel({
             }
           />
         </label>
-        <label>
-          Event role
-          <select
-            value={input.role}
-            onChange={(event) => setInput({ ...input, role: event.target.value })}
-          >
-            <option value="invited">Invited speaker</option>
-            <option value="primary">Primary speaker</option>
-            <option value="co">Co-speaker</option>
-          </select>
-        </label>
+        <AppSelect
+          label="Event role"
+          value={input.role}
+          options={speakerRoleOptions}
+          onValueChange={(role) => setInput({ ...input, role })}
+        />
         <label className="speaker-directory-bio">
           Biography
           <textarea
@@ -457,7 +456,7 @@ export function SpeakerCurrentProfile({
         {!editing ? (
           <button
             type="button"
-            className="btn btn-ghost speaker-profile-edit"
+            className="btn btn-secondary btn-sm speaker-profile-edit"
             onClick={() => {
               setName(speaker.name);
               setEmail(speaker.email);
@@ -466,16 +465,12 @@ export function SpeakerCurrentProfile({
               setEditing(true);
             }}
           >
-            Edit current profile
+            Edit profile
           </button>
         ) : null}
       </div>
       {editing ? (
-        <form className="onboarding-form" aria-label="Edit current profile" onSubmit={onSubmit}>
-          <p className="speaker-snapshot-note">
-            Event-time snapshot: <strong>{speaker.titleSnapshot} · {speaker.organizationSnapshot}</strong>.
-            These preserved details will not change.
-          </p>
+        <form className="onboarding-form is-compact" aria-label="Edit current profile" onSubmit={onSubmit}>
           <label>
             Name
             <input required value={name} onChange={(event) => setName(event.target.value)} />
@@ -484,80 +479,38 @@ export function SpeakerCurrentProfile({
             Email
             <input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
           </label>
-            <label>
-              Biography
-              <textarea rows={4} value={biography} onChange={(event) => setBiography(event.target.value)} />
-            </label>
-            <fieldset className="profile-social-links">
-              <legend>Professional links</legend>
-              <p>Only public HTTPS links are accepted.</p>
-              <label>
-                LinkedIn URL
-                <input
-                  type="url"
-                  value={socialLinks.linkedin}
-                  onChange={(event) =>
-                    setSocialLinks({ ...socialLinks, linkedin: event.target.value })
-                  }
-                  maxLength={500}
-                />
-              </label>
-              <label>
-                X URL
-                <input
-                  type="url"
-                  value={socialLinks.x}
-                  onChange={(event) => setSocialLinks({ ...socialLinks, x: event.target.value })}
-                  maxLength={500}
-                />
-              </label>
-              <label>
-                GitHub URL
-                <input
-                  type="url"
-                  value={socialLinks.github}
-                  onChange={(event) =>
-                    setSocialLinks({ ...socialLinks, github: event.target.value })
-                  }
-                  maxLength={500}
-                />
-              </label>
-              <label>
-                Website URL
-                <input
-                  type="url"
-                  value={socialLinks.website}
-                  onChange={(event) =>
-                    setSocialLinks({ ...socialLinks, website: event.target.value })
-                  }
-                  maxLength={500}
-                />
-              </label>
-            </fieldset>
-            <div className="speaker-profile-headshot">
-              <span>Headshot</span>
-              <div className="portal-headshot-row">
-                <div className="portal-headshot-preview" aria-live="polite">
-                  {headshotPreview ? <img src={headshotPreview} alt="Current speaker headshot" /> : <span>No headshot yet</span>}
-                </div>
-                <label className="speaker-profile-upload">
-                  <span>{headshotBusy ? "Uploading headshot…" : "Replace headshot"}</span>
-                  <input
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    disabled={headshotBusy || pending}
-                    onChange={(event) => void onHeadshotChange(event.target.files?.[0] ?? null)}
-                  />
-                  <small>PNG, JPEG, or WebP. Up to 5 MB.</small>
-                </label>
+          <label>
+            Biography
+            <textarea rows={3} value={biography} onChange={(event) => setBiography(event.target.value)} />
+          </label>
+          <div className="speaker-profile-headshot">
+            <span>Headshot</span>
+            <div className="portal-headshot-row">
+              <div className="portal-headshot-preview" aria-live="polite">
+                {headshotPreview ? (
+                  <img src={headshotPreview} alt="Current speaker headshot" />
+                ) : (
+                  <span>No headshot yet</span>
+                )}
               </div>
+              <label className="speaker-profile-upload">
+                <span>{headshotBusy ? "Uploading…" : "Choose file"}</span>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  disabled={headshotBusy || pending}
+                  onChange={(event) => void onHeadshotChange(event.target.files?.[0] ?? null)}
+                />
+                <small>PNG, JPEG, or WebP · 5 MB max</small>
+              </label>
             </div>
-          <div className="onboarding-actions">
-            <button className="btn btn-primary" type="submit" disabled={pending}>
-              {pending ? "Saving…" : "Save profile"}
-            </button>
-            <button className="btn btn-ghost" type="button" onClick={() => setEditing(false)}>
+          </div>
+          <div className="onboarding-actions onboarding-actions-end">
+            <button className="btn btn-secondary btn-sm" type="button" onClick={() => setEditing(false)}>
               Cancel
+            </button>
+            <button className="btn btn-primary btn-sm" type="submit" disabled={pending}>
+              {pending ? "Saving…" : "Save profile"}
             </button>
           </div>
         </form>
@@ -566,18 +519,22 @@ export function SpeakerCurrentProfile({
           <div><dt>Email</dt><dd>{speaker.email}</dd></div>
           <div><dt>Event-time details</dt><dd>{speaker.titleSnapshot} · {speaker.organizationSnapshot}</dd></div>
           <div><dt>Biography</dt><dd>{speaker.biography || "Not provided"}</dd></div>
-          <div>
-            <dt>Professional links</dt>
-            <dd>
-              {profileLinks.length > 0 ? (
+          {profileLinks.length > 0 ? (
+            <div>
+              <dt>Links</dt>
+              <dd>
                 <ul className="speaker-profile-links">
                   {profileLinks.map(([label, url]) => (
-                    <li key={label}><a href={url} target="_blank" rel="noreferrer">{label}</a></li>
+                    <li key={label}>
+                      <a href={url} target="_blank" rel="noreferrer">
+                        {label}
+                      </a>
+                    </li>
                   ))}
                 </ul>
-              ) : "Not provided"}
-            </dd>
-          </div>
+              </dd>
+            </div>
+          ) : null}
         </dl>
       )}
     </div>
@@ -663,29 +620,25 @@ export function SpeakerParticipation({
       <div className="onboarding-card-head">
         <h3>Event participation</h3>
         {!editing ? (
-          <button type="button" className="btn btn-ghost speaker-profile-edit" onClick={startEditing}>
-            Edit event details
+          <button type="button" className="btn btn-secondary btn-sm speaker-profile-edit" onClick={startEditing}>
+            Edit details
           </button>
         ) : null}
       </div>
       {editing ? (
-        <form className="onboarding-form" aria-label="Edit event participation" onSubmit={onSubmit}>
+        <form className="onboarding-form is-compact" aria-label="Edit event participation" onSubmit={onSubmit}>
           <p className="speaker-snapshot-note">
             These event-specific details do not change the current speaker profile.
           </p>
-          <label>
-            Workflow status
-            <select
-              value={workflowStatus}
-              onChange={(event) => setWorkflowStatus(event.target.value as SpeakerWorkflowStatus)}
-            >
-              {workflowStatuses.map((status) => (
-                <option key={status} value={status}>
-                  {speakerWorkflowLabels[status]}
-                </option>
-              ))}
-            </select>
-          </label>
+          <AppSelect
+            label="Workflow status"
+            value={workflowStatus}
+            options={workflowStatuses.map((status) => ({
+              value: status,
+              label: speakerWorkflowLabels[status],
+            }))}
+            onValueChange={(value) => setWorkflowStatus(value as SpeakerWorkflowStatus)}
+          />
           <label>
             Travel preferences
             <textarea
@@ -705,17 +658,24 @@ export function SpeakerParticipation({
           </label>
           <p className="muted-line">One field per line: Label: value.</p>
           <div className="onboarding-actions">
-            <button className="btn btn-primary" type="submit" disabled={pending}>
+            <button className="btn btn-primary btn-sm" type="submit" disabled={pending}>
               {pending ? "Saving…" : "Save event details"}
             </button>
-            <button className="btn btn-ghost" type="button" onClick={() => setEditing(false)}>
+            <button className="btn btn-secondary btn-sm" type="button" onClick={() => setEditing(false)}>
               Cancel
             </button>
           </div>
         </form>
       ) : (
         <dl className="speaker-profile-summary">
-          <div><dt>Workflow</dt><dd>{speakerWorkflowLabels[speaker.workflowStatus]}</dd></div>
+          <div>
+            <dt>Workflow</dt>
+            <dd>
+              <span className={`flag flag-workflow-${speaker.workflowStatus}`}>
+                {speakerWorkflowLabels[speaker.workflowStatus]}
+              </span>
+            </dd>
+          </div>
           <div><dt>Travel</dt><dd>{speaker.travelPreferences || "Not recorded"}</dd></div>
           <div>
             <dt>Logistics</dt>
