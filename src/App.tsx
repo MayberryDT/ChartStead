@@ -505,7 +505,8 @@ function EventDesk({
           activeNav === "Overview" ||
           activeNav === "Agenda" ||
           activeNav === "Speakers" ||
-          activeNav === "Forms" ? null : (
+          activeNav === "Forms" ||
+          activeNav === "Messages" ? null : (
             <div className="topbar-identity" title={topbarMeta}>
               <h1>{topbarTitle}</h1>
               <p className="topbar-meta">{topbarMeta}</p>

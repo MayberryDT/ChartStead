@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { CourseCheckPlan } from "../../shared/course-check";
@@ -7,8 +8,8 @@ import { MessagesWorkspace } from "../../src/MessagesWorkspace";
 
 afterEach(() => vi.restoreAllMocks());
 
-describe("Messages Outbox handoff", () => {
-  it("opens the exact frozen draft set with source, inclusion, prior communication, and no implicit send", async () => {
+describe("Messages history inspector", () => {
+  it("opens focused communication history detail without Course Check chrome", async () => {
     const plan = {
       id: "communication-1",
       eventId: "event-1",
@@ -24,86 +25,110 @@ describe("Messages Outbox handoff", () => {
       body: {
         actionType: "communication",
         subject: "Acceptance update",
-        recipientGroups: [{ recipients: [{ selected: true }] }],
+        bodyText: "Hello speaker,\n\nYour session is confirmed.",
+        portalInvitation: false,
+        compensation: null,
+        recipientGroups: [
+          {
+            recipients: [
+              {
+                selected: true,
+                deliverability: "ok",
+                name: "Exact Speaker",
+                email: "exact@example.test",
+              },
+            ],
+          },
+        ],
         drafts: [{}],
         effects: [],
-        deliverySummary: { total: 0, queued: 0, sending: 0, succeeded: 0, retryScheduled: 0, failed: 0, unknown: 0 },
-        stageVisibility: { decision: "complete", draft: "complete", send: "ready", delivery: "not_started" },
-        compensation: null,
-      },
-      communicationReview: {
-        kind: "communication_review",
-        currentStatus: { key: "ready_to_send", label: "Ready to send" },
-        progress: [
-          { key: "no_draft", label: "No draft", state: "complete" },
-          { key: "draft_prepared", label: "Draft prepared", state: "complete" },
-          { key: "ready_to_send", label: "Ready to send", state: "current" },
-          { key: "sending", label: "Sending", state: "pending" },
-        ],
-        draftResult: {
-          title: "Draft prepared",
-          counts: { prepared: 1, omitted: 1, failed: 0, unchanged: 1 },
-          noEmailsSent: true,
-          statement: "1 draft prepared, 1 recipient omitted, 0 failed, and 1 item unchanged. No emails were sent.",
-          preparedAt: "2026-08-12T10:05:00.000Z",
+        deliverySummary: {
+          total: 1,
+          queued: 0,
+          sending: 0,
+          succeeded: 1,
+          retryScheduled: 0,
+          failed: 0,
+          unknown: 0,
         },
-        handoffs: [
-          { kind: "outbox", label: "Review 1 draft in Outbox", href: "/e/event-1/messages?planId=communication-1", count: 1 },
-          { kind: "submissions", label: "Return to submissions", href: "/e/event-1/submissions", count: 2 },
-        ],
-        outbox: {
-          exactDraftCount: 1,
-          sourceLabel: "Prepared from applied decisions",
-          groups: [{
-            label: "Exact proposal",
-            outcome: "accepted",
-            draftCount: 1,
-            proposalHref: "/e/event-1/submissions/proposal-1",
-            sessionHref: "/e/event-1/agenda?sessionIds=session-1",
-            recipients: [{
-              name: "Exact Speaker",
-              address: "exact@example.test",
-              inclusion: "include",
-              inclusionReason: "Exact Speaker is the primary speaker for this proposal.",
-              selected: true,
-              draftPrepared: true,
-              priorCommunicationCount: 1,
-              priorCommunications: [{ status: "sent", subject: "Earlier update", sentAt: "2026-08-01T10:00:00.000Z" }],
-            }],
-          }],
-          draftlessGroups: [{ label: "Draftless proposal", reason: "No deliverable address is available.", proposalHref: "/e/event-1/submissions/proposal-2" }],
+        stageVisibility: {
+          decision: "complete",
+          draft: "complete",
+          send: "complete",
+          delivery: "complete",
         },
-        deliveryResult: null,
-        sendAction: { stageId: "send-messages", label: "Send 1 message", effectSummary: "Approve and queue exactly 1 frozen message." },
-        immutableBoundary: null,
       },
     } as unknown as CourseCheckPlan;
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
       if (url.endsWith("/onboarding")) {
-        return new Response(JSON.stringify({ speakers: [], drafts: [] }), { headers: { "content-type": "application/json" } });
+        return new Response(
+          JSON.stringify({
+            speakers: [
+              {
+                speakerId: "spk-1",
+                name: "Exact Speaker",
+                email: "exact@example.test",
+                biography: "",
+                socialLinks: { linkedin: "", x: "", github: "", website: "" },
+                headshotAssetId: null,
+                headshotFileName: null,
+                participationId: "prt-1",
+                titleSnapshot: "Opening keynote",
+                organizationSnapshot: "Lab",
+                proposalId: null,
+                proposalTitle: "Opening keynote",
+                role: "confirmed",
+                workflowStatus: "ready",
+                travelPreferences: "",
+                logistics: {},
+                openTaskCount: 0,
+                overdueCount: 0,
+                nextDueAt: null,
+                daysUntilNextDue: null,
+                readinessFlags: [],
+                taskAttachments: [],
+                missingWork: [],
+                lastContactAt: null,
+                lastContactStatus: null,
+                history: [],
+              },
+            ],
+            drafts: [],
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
       }
       if (url.endsWith("/course-checks")) {
-        return new Response(JSON.stringify({ plans: [plan] }), { headers: { "content-type": "application/json" } });
+        return new Response(JSON.stringify({ plans: [plan] }), {
+          headers: { "content-type": "application/json" },
+        });
       }
       throw new Error(`Unexpected request ${url}`);
     });
-    const open = vi.fn();
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
     render(
       <QueryClientProvider client={queryClient}>
-        <MessagesWorkspace eventId="event-1" eventName="Event One" focusedPlanId="communication-1" onOpenCourseCheck={open} />
+        <MessagesWorkspace
+          eventId="event-1"
+          eventName="Event One"
+          focusedPlanId="communication-1"
+        />
       </QueryClientProvider>,
     );
 
-    const outbox = await screen.findByRole("region", { name: "Exact Outbox draft set" });
-    expect(within(outbox).getByText("Prepared from applied decisions")).toBeVisible();
-    expect(within(outbox).getByText("Exact Speaker <exact@example.test>")).toBeVisible();
-    expect(within(outbox).getByText(/primary speaker for this proposal/)).toBeVisible();
-    expect(within(outbox).getByText(/Earlier update/)).toBeVisible();
-    expect(within(outbox).getByRole("heading", { name: "Draftless items" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Send 1 message" })).toBeVisible();
-    expect(open).not.toHaveBeenCalled();
+    expect(await screen.findByRole("heading", { name: "Acceptance update" })).toBeVisible();
+    expect(screen.getAllByText("Exact Speaker").length).toBeGreaterThan(0);
+    expect(screen.getByText(/Your session is confirmed/)).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Exact Outbox draft set" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Send 1 message/i })).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByRole("heading", { name: "History" })).toBeVisible();
+    expect(screen.getByText("Acceptance update")).toBeVisible();
   });
 });
