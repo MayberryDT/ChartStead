@@ -15,3 +15,5 @@
 ## Comments
 
 Filed 2026-08-12 to complete per-tab visual-polish coverage. Human-led tandem only; Competition 33 remains the structural shell port.
+
+- 2026-08-13 — frontier-reconcile: Blockers satisfied; remains human-tandem only (not agent-ready).
