@@ -494,7 +494,7 @@ function EventDesk({
         onEventChange={selectEvent}
         onCreateEvent={() => setCreateEventOpen(true)}
         identity={
-          activeNav === "Submissions" ? null : (
+          activeNav === "Submissions" || activeNav === "Overview" ? null : (
             <div className="topbar-identity" title={topbarMeta}>
               <h1>{topbarTitle}</h1>
               <p className="topbar-meta">{topbarMeta}</p>

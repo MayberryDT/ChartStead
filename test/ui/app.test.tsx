@@ -290,8 +290,9 @@ describe("organizer application", () => {
       await screen.findByRole("heading", { name: "Pacific Open Data Summit 2026" }),
     ).toBeVisible();
     expect(screen.getByRole("navigation", { name: "Organizer" })).toBeVisible();
-    expect(screen.getByLabelText("4 tracks")).toBeVisible();
-    expect(screen.getByLabelText("3 rooms")).toBeVisible();
+    expect(screen.getByLabelText("18 unreviewed")).toBeVisible();
+    expect(screen.getByLabelText("57 submissions")).toBeVisible();
+    expect(screen.getByLabelText("Event dates")).toHaveTextContent("Oct 7, 2026");
 
     await userEvent.click(screen.getByRole("combobox", { name: "Event" }));
     await userEvent.click(

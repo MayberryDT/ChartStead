@@ -83,6 +83,18 @@ function NavIcon({ item }: { item: NavItem }) {
   );
 }
 
+function formatEventWindow(event: EventRecord) {
+  const format = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  return `${format.format(new Date(`${event.startsOn}T00:00:00Z`))} – ${format.format(
+    new Date(`${event.endsOn}T00:00:00Z`),
+  )}`;
+}
+
 function navHref(item: NavItem, eventId: string) {
   switch (item) {
     case "Overview":
@@ -166,6 +178,10 @@ export function OrganizerShell({
           <strong>{data.principal.displayName}</strong>
           <small>{currentRole === "admin" ? "Event administrator" : "Track reviewer"}</small>
         </div>
+        <div className="sidebar-event-window" aria-label="Event dates">
+          <strong>{formatEventWindow(event)}</strong>
+          <small>{event.timezone.replaceAll("_", " ")}</small>
+        </div>
         <div className="event-switcher">
           <AppSelect
             label="Event"
@@ -187,18 +203,22 @@ export function OrganizerShell({
       </aside>
 
       <main className="main">
-        <header
-          className={`shell-toolbar${tools && !identity ? " shell-toolbar-tools-only" : ""}`}
-          data-polish-id="S-shell-topbar"
-        >
-          {identity ?? <h1 className="sr-only">{title}</h1>}
-          {tools ? (
-            <div className="topbar-tools" aria-label={`${title} tools`}>
-              {tools}
-            </div>
-          ) : null}
-          {actions ? <div className="topbar-actions">{actions}</div> : null}
-        </header>
+        {identity || tools || actions ? (
+          <header
+            className={`shell-toolbar${tools && !identity ? " shell-toolbar-tools-only" : ""}`}
+            data-polish-id="S-shell-topbar"
+          >
+            {identity ?? <h1 className="sr-only">{title}</h1>}
+            {tools ? (
+              <div className="topbar-tools" aria-label={`${title} tools`}>
+                {tools}
+              </div>
+            ) : null}
+            {actions ? <div className="topbar-actions">{actions}</div> : null}
+          </header>
+        ) : (
+          <h1 className="sr-only">{title}</h1>
+        )}
         {children}
       </main>
     </div>

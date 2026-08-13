@@ -64,6 +64,8 @@ describe("OrganizerShell", () => {
     expect(screen.getByRole("button", { name: "Queue tools" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Workspace action" })).toBeVisible();
     expect(screen.getByRole("region", { name: "Work surface" })).toBeVisible();
+    expect(screen.getByLabelText("Event dates")).toHaveTextContent("Oct 7, 2026");
+    expect(screen.getByLabelText("Event dates")).toHaveTextContent("UTC");
   });
 
   it("keeps organizer navigation and event context keyboard reachable", async () => {
@@ -168,5 +170,27 @@ describe("OrganizerShell", () => {
     expect(tools).toContainElement(container.querySelector(".topbar-tools-inner"));
     expect(tools).toHaveAttribute("aria-label", "Submissions tools");
     expect(screen.getByRole("button", { name: "Search" })).toBeVisible();
+  });
+
+  it("omits the harbor toolbar when Overview has no identity, tools, or actions", () => {
+    const { container } = render(
+      <OrganizerShell
+        data={data}
+        event={data.events[0]!}
+        activeNav="Overview"
+        title="Event One"
+        meta="October 7-8, 2026"
+        currentRole="admin"
+        onNavigate={vi.fn()}
+        onEventChange={vi.fn()}
+        onCreateEvent={vi.fn()}
+        identity={null}
+      >
+        <section aria-label="Work surface">Work surface</section>
+      </OrganizerShell>,
+    );
+
+    expect(container.querySelector(".shell-toolbar")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Event One" })).toHaveClass("sr-only");
   });
 });

@@ -30,7 +30,9 @@ export function AppSelect({
     >
       <div className={`app-select app-select-${variant}`}>
         <Select.Trigger className="app-select-trigger" aria-label={ariaLabel ?? label}>
-          <span className="app-select-label">{label}</span>
+          <span className={variant === "sidebar" ? "app-select-label sr-only" : "app-select-label"}>
+            {label}
+          </span>
           <Select.Value className="app-select-value" />
           <Select.Icon className="app-select-icon" aria-hidden="true">
             <svg viewBox="0 0 16 16">
