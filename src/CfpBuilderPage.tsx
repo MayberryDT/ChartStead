@@ -35,6 +35,7 @@ import {
   reopenOrganizerForm,
   saveOrganizerFormDraft,
 } from "./api";
+import { AppSelect } from "./AppSelect";
 import { CfpRuntime } from "./CfpRuntime";
 
 type BuilderStep = "basics" | "proposal" | "speakers" | "preview";
@@ -48,6 +49,7 @@ type DraftSaveState =
 export type CfpBuilderChrome = {
   title: string;
   meta: string;
+  tools: ReactNode;
   actions: ReactNode;
 };
 
@@ -57,11 +59,10 @@ type SaveVars = {
   definition: CfpDefinitionV1;
 };
 
-const steps: Array<{ id: BuilderStep; label: string }> = [
+const editorSteps: Array<{ id: Exclude<BuilderStep, "preview">; label: string }> = [
   { id: "basics", label: "Basics" },
   { id: "proposal", label: "Proposal" },
   { id: "speakers", label: "Speakers" },
-  { id: "preview", label: "Preview & publish" },
 ];
 
 const ADD_FIELD_OPTIONS: Array<{
@@ -202,7 +203,7 @@ export function CfpBuilderPage() {
 
   if (!eventId || !formId) {
     return (
-      <section className="builder-work" aria-label="Guided CFP builder">
+      <section className="work builder-work" aria-label="Guided CFP builder">
         <p className="form-message error" role="alert">
           CFP builder route is missing an event or form id.
         </p>
@@ -239,12 +240,27 @@ export function CfpBuilderWorkspace({
     status: "saved",
     revision: 0,
   });
-  const [message, setMessage] = useState<string | null>(null);
-  const [tone, setTone] = useState<"success" | "error">("success");
+  const [toast, setToast] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+
+  function showToast(next: { tone: "success" | "error"; text: string }) {
+    if (toastTimerRef.current != null) window.clearTimeout(toastTimerRef.current);
+    setToast(next);
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, 3200);
+  }
   const revisionRef = useRef(0);
   const hydratedKeyRef = useRef<string | null>(null);
   const serverDraftUpdatedAtRef = useRef<string | null>(null);
   const [liveAnnouncement, setLiveAnnouncement] = useState("");
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current != null) window.clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   const isDirty = saveState.status !== "saved";
 
@@ -306,7 +322,6 @@ export function CfpBuilderWorkspace({
     },
     onMutate: (vars) => {
       setSaveState({ status: "saving", revision: vars.revision });
-      setMessage(null);
     },
     onSuccess: async ({ form, revision }) => {
       serverDraftUpdatedAtRef.current = form.draftUpdatedAt;
@@ -315,8 +330,6 @@ export function CfpBuilderWorkspace({
         setName(form.name);
         setSaveState({ status: "saved", revision });
         hydratedKeyRef.current = `${form.id}:${form.draftUpdatedAt}`;
-        setTone("success");
-        setMessage("Draft saved. Published form is unchanged until you publish.");
         await queryClient.invalidateQueries({ queryKey: ["form", eventId, formId] });
         await queryClient.invalidateQueries({ queryKey: ["forms", eventId] });
         return;
@@ -343,8 +356,7 @@ export function CfpBuilderWorkspace({
         revision: revisionRef.current,
         message: error.message,
       });
-      setTone("error");
-      setMessage(error.message);
+      showToast({ tone: "error", text: error.message });
     },
   });
 
@@ -391,15 +403,13 @@ export function CfpBuilderWorkspace({
             : { status: "unsaved", revision: revisionRef.current },
         );
       }
-      setTone("success");
-      setMessage(`Published version ${form.publishedVersion}.`);
+      showToast({ tone: "success", text: `Published version ${form.publishedVersion}.` });
       await queryClient.invalidateQueries({ queryKey: ["form", eventId, formId] });
       await queryClient.invalidateQueries({ queryKey: ["forms", eventId] });
       await queryClient.invalidateQueries({ queryKey: ["cfp", eventId] });
     },
     onError: (error: Error) => {
-      setTone("error");
-      setMessage(error.message);
+      showToast({ tone: "error", text: error.message });
     },
   });
 
@@ -408,8 +418,7 @@ export function CfpBuilderWorkspace({
   const close = useMutation({
     mutationFn: () => closeOrganizerForm(eventId, formId),
     onSuccess: async () => {
-      setTone("success");
-      setMessage("Form closed to new submissions.");
+      showToast({ tone: "success", text: "Form closed to new submissions." });
       await queryClient.invalidateQueries({ queryKey: ["form", eventId, formId] });
     },
   });
@@ -417,8 +426,7 @@ export function CfpBuilderWorkspace({
   const reopen = useMutation({
     mutationFn: () => reopenOrganizerForm(eventId, formId),
     onSuccess: async () => {
-      setTone("success");
-      setMessage("Form reopened for submissions.");
+      showToast({ tone: "success", text: "Form reopened for submissions." });
       await queryClient.invalidateQueries({ queryKey: ["form", eventId, formId] });
     },
   });
@@ -441,81 +449,131 @@ export function CfpBuilderWorkspace({
   }, [draft, form, name]);
 
   const chromeTitle = form ? name || form.name : "Guided CFP builder";
-  const chromeMeta = formQuery.isError
-    ? "Builder could not open"
-    : form
-      ? `Status: ${form.lifecycleStatus}${
-          form.publishedVersion ? ` · Live version ${form.publishedVersion}` : " · Not published"
-        } · ${saveStatusLabel(saveState)}`
-      : "Loading form…";
+  const lifecycleState = liveLifecycle?.state ?? form?.lifecycleStatus;
+
+  function renderBuilderTools() {
+    return (
+      <div className="topbar-tools-inner">
+        <Link className="btn btn-secondary btn-sm" to="/e/$eventId/forms" params={{ eventId }}>
+          Back
+        </Link>
+        <div className="seg builder-step-seg" role="group" aria-label="Builder steps">
+          {editorSteps.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              aria-pressed={step === item.id}
+              onClick={() => setStep(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        {form?.publishedVersion ? (
+          <a className="btn btn-secondary btn-sm" href={`/e/${eventId}/cfp?formId=${formId}`}>
+            View Form
+          </a>
+        ) : null}
+        {form?.publishedVersion && lifecycleState !== "closed" ? (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={close.isPending}
+            onClick={() => close.mutate()}
+          >
+            Close
+          </button>
+        ) : null}
+        {form?.publishedVersion && lifecycleState === "closed" ? (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={reopen.isPending}
+            onClick={() => reopen.mutate()}
+          >
+            Reopen
+          </button>
+        ) : null}
+        {saveState.status === "failed" ? (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={save.isPending}
+            onClick={requestSave}
+          >
+            Retry Save
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={save.isPending || saveState.status === "saved"}
+            onClick={requestSave}
+          >
+            Save Draft
+          </button>
+        )}
+        <span
+          className="builder-save-status"
+          data-status={saveState.status}
+          role="status"
+          aria-live="polite"
+        >
+          {saveStatusLabel(saveState)}
+        </span>
+      </div>
+    );
+  }
+
+  function renderBuilderActions() {
+    if (!form) return null;
+    return (
+      <button
+        type="button"
+        className="btn btn-primary btn-sm"
+        aria-pressed={step === "preview"}
+        disabled={publish.isPending || saveInFlight}
+        onClick={() => {
+          if (step !== "preview") {
+            setStep("preview");
+            return;
+          }
+          publish.mutate();
+        }}
+      >
+        Preview & Publish
+      </button>
+    );
+  }
 
   useEffect(() => {
     if (!onChromeChange) return;
     onChromeChange({
       title: chromeTitle,
-      meta: chromeMeta,
-      actions: (
-        <>
-          <Link
-            className="btn btn-ghost btn-sm"
-            to="/e/$eventId/forms"
-            params={{ eventId }}
-          >
-            All forms
-          </Link>
-          <a className="btn btn-secondary btn-sm" href={`/e/${eventId}/cfp?formId=${formId}`}>
-            Open CFP
-          </a>
-          {form && saveState.status === "failed" ? (
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              disabled={save.isPending}
-              onClick={requestSave}
-            >
-              Retry save
-            </button>
-          ) : null}
-          {form ? (
-            <>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                disabled={save.isPending || saveState.status === "saved"}
-                onClick={requestSave}
-              >
-                Save draft
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                disabled={publish.isPending || saveInFlight}
-                onClick={() => publish.mutate()}
-              >
-                Publish
-              </button>
-            </>
-          ) : null}
-        </>
-      ),
+      meta: saveStatusLabel(saveState),
+      tools: renderBuilderTools(),
+      actions: renderBuilderActions(),
     });
     return () => onChromeChange(null);
   }, [
-    chromeMeta,
     chromeTitle,
+    close.isPending,
     eventId,
     form,
     formId,
+    lifecycleState,
     onChromeChange,
     publish.isPending,
+    reopen.isPending,
     save.isPending,
     saveInFlight,
     saveState.status,
+    step,
   ]);
 
   if (formQuery.isError) {
     return (
-      <section className="builder-work" aria-label="Guided CFP builder">
+      <section className="work builder-work" aria-label="Guided CFP builder">
         <p className="form-message error" role="alert">
           {formQuery.error.message}
         </p>
@@ -525,14 +583,14 @@ export function CfpBuilderWorkspace({
 
   if (formQuery.isPending || !draft || !form) {
     return (
-      <section className="builder-work" aria-label="Guided CFP builder" aria-busy="true">
+      <section className="work builder-work" aria-label="Guided CFP builder" aria-busy="true">
         <p>Loading form builder…</p>
       </section>
     );
   }
 
   return (
-    <section className="builder-work" aria-label="Guided CFP builder">
+      <section className="work builder-work" aria-label="Guided CFP builder">
 
       <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {liveAnnouncement}
@@ -540,75 +598,18 @@ export function CfpBuilderWorkspace({
 
       {!onChromeChange ? (
         <div className="builder-standalone-chrome">
-          <div>
-            <p className="eyebrow">Guided CFP builder</p>
-            <h1>{chromeTitle}</h1>
-            <p className="builder-meta">
-              Status: <strong>{form.lifecycleStatus}</strong>
-              {form.publishedVersion
-                ? ` · Live version ${form.publishedVersion}`
-                : " · Not published"}
-              {" · "}
-              <span className="builder-save-status" role="status">
-                {saveStatusLabel(saveState)}
-              </span>
-            </p>
-          </div>
           <div className="builder-actions">
-            <a className="btn btn-ghost" href={`/e/${eventId}/forms`}>
-              All forms
-            </a>
-            <a className="btn btn-secondary" href={`/e/${eventId}/cfp?formId=${formId}`}>
-              Open CFP
-            </a>
-            {saveState.status === "failed" ? (
-              <button
-                type="button"
-                className="btn btn-secondary"
-                disabled={save.isPending}
-                onClick={requestSave}
-              >
-                Retry save
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="btn btn-secondary"
-              disabled={save.isPending || saveState.status === "saved"}
-              onClick={requestSave}
-            >
-              Save draft
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={publish.isPending || saveInFlight}
-              onClick={() => publish.mutate()}
-            >
-              Publish
-            </button>
+            {renderBuilderTools()}
+            {renderBuilderActions()}
           </div>
         </div>
       ) : null}
 
-      {message ? (
-        <p className={`form-message ${tone}`} role="status">
-          {message}
-        </p>
+      {toast ? (
+        <div className="builder-toast" data-tone={toast.tone} role="status">
+          {toast.text}
+        </div>
       ) : null}
-
-      <nav className="builder-steps" aria-label="Builder steps">
-        {steps.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className={item.id === step ? "active" : undefined}
-            onClick={() => setStep(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </nav>
 
       <div className="builder-layout">
         <section className="builder-editor">
@@ -635,31 +636,27 @@ export function CfpBuilderWorkspace({
             <PreviewStep
               form={form}
               lifecycleState={liveLifecycle?.state ?? form.lifecycleStatus}
-              eventId={eventId}
-              onClose={() => close.mutate()}
-              onReopen={() => reopen.mutate()}
-              closing={close.isPending}
-              reopening={reopen.isPending}
             />
           ) : null}
         </section>
 
-        <aside className="builder-preview" aria-label="Live preview">
-          <div className="builder-preview-header">
-            <h2>Preview</h2>
-            <p>Same runtime as the public form.</p>
+        <aside className="builder-preview" aria-label="Live form preview">
+          <div className="builder-preview-rail" aria-hidden="true">
+            <span>Form preview</span>
           </div>
-          {previewForm ? (
-            <CfpRuntime
-              key={JSON.stringify(previewForm.definition.runtime.survey)}
-              eventId={eventId}
-              form={previewForm}
-              mode="preview"
-              themeAccent={themeAccent}
-            />
-          ) : (
-            <p className="form-message error">Fix draft validation to preview.</p>
-          )}
+          <div className="builder-preview-body">
+            {previewForm ? (
+              <CfpRuntime
+                key={JSON.stringify(previewForm.definition.runtime.survey)}
+                eventId={eventId}
+                form={previewForm}
+                mode="preview"
+                themeAccent={themeAccent}
+              />
+            ) : (
+              <p className="form-message error">Fix draft validation to preview.</p>
+            )}
+          </div>
         </aside>
       </div>
     </section>
@@ -693,63 +690,64 @@ function BasicsStep({
   };
   return (
     <div className="builder-stack">
-      <label>
-        Form name
-        <input value={name} onChange={(event) => onNameChange(event.target.value)} />
-      </label>
-      <label>
-        Welcome title
-        <input
-          value={welcome.title}
-          onChange={(event) =>
-            onChange((current) =>
-              updateWelcome(current, { title: event.target.value }),
-            )
-          }
-        />
-      </label>
-      <label>
-        Welcome body
-        <textarea
-          rows={4}
-          value={welcome.body}
-          onChange={(event) =>
-            onChange((current) =>
-              updateWelcome(current, { body: event.target.value }),
-            )
-          }
-        />
-      </label>
-      <fieldset className="builder-schedule">
-        <legend>Submission schedule</legend>
-        <p>
-          Enter local times in {timezone}. Schedule changes stay private until you
-          publish.
-        </p>
+      <article className="field-card">
+        <header>
+          <strong>Form basics</strong>
+          <span>Details</span>
+        </header>
         <label>
-          Opening time ({timezone})
+          Form name
+          <input value={name} onChange={(event) => onNameChange(event.target.value)} />
+        </label>
+        <label>
+          Welcome title
           <input
-            type="datetime-local"
-            value={draft.opensAt ? instantToLocalDateTime(draft.opensAt, timezone) : ""}
-            onChange={(event) => updateSchedule("opensAt", event.target.value)}
+            value={welcome.title}
+            onChange={(event) =>
+              onChange((current) =>
+                updateWelcome(current, { title: event.target.value }),
+              )
+            }
           />
         </label>
-        <p className="muted-line">
-          Opening instant: {draft.opensAt ?? "No scheduled opening"}
-        </p>
         <label>
-          Closing time ({timezone})
-          <input
-            type="datetime-local"
-            value={draft.closesAt ? instantToLocalDateTime(draft.closesAt, timezone) : ""}
-            onChange={(event) => updateSchedule("closesAt", event.target.value)}
+          Welcome body
+          <textarea
+            rows={4}
+            value={welcome.body}
+            onChange={(event) =>
+              onChange((current) =>
+                updateWelcome(current, { body: event.target.value }),
+              )
+            }
           />
         </label>
-        <p className="muted-line">
-          Closing instant: {draft.closesAt ?? "No scheduled closing"}
-        </p>
+      </article>
+      <article className="field-card">
+        <header>
+          <strong>Submission schedule</strong>
+          <span>{timezone}</span>
+        </header>
+        <div className="builder-schedule-fields">
+          <label>
+            Opening time
+            <input
+              type="datetime-local"
+              value={draft.opensAt ? instantToLocalDateTime(draft.opensAt, timezone) : ""}
+              onChange={(event) => updateSchedule("opensAt", event.target.value)}
+            />
+          </label>
+          <label>
+            Closing time
+            <input
+              type="datetime-local"
+              value={draft.closesAt ? instantToLocalDateTime(draft.closesAt, timezone) : ""}
+              onChange={(event) => updateSchedule("closesAt", event.target.value)}
+            />
+          </label>
+        </div>
         {scheduleError ? <p className="form-message error" role="alert">{scheduleError}</p> : null}
-      </fieldset>
+      </article>
     </div>
   );
 }
@@ -769,9 +767,6 @@ function ProposalStep({
 
   return (
     <div className="builder-stack">
-      <p>
-        Required settings, ordinary validation, and sentence-readable conditions.
-      </p>
       <div className="builder-add-field-row">
         {ADD_FIELD_OPTIONS.map((option) => (
           <button
@@ -883,7 +878,7 @@ function FieldCard({
       <div className="field-card-actions">
         <button
           type="button"
-          className="btn btn-ghost"
+          className="btn btn-secondary btn-sm"
           disabled={index === 0}
           onClick={() => {
             onChange((current) => moveQuestion(current, question.name, "up"));
@@ -896,7 +891,7 @@ function FieldCard({
         </button>
         <button
           type="button"
-          className="btn btn-ghost"
+          className="btn btn-secondary btn-sm"
           disabled={index >= total - 1}
           onClick={() => {
             onChange((current) => moveQuestion(current, question.name, "down"));
@@ -909,7 +904,7 @@ function FieldCard({
         </button>
         <button
           type="button"
-          className="btn btn-ghost"
+          className="btn btn-secondary btn-sm"
           disabled={protectedField}
           onClick={() =>
             onChange((current) => removeQuestion(current, question.name))
@@ -1036,10 +1031,18 @@ function FieldCard({
           <div className="condition-editor-row">
             <label>
               Show this question when
-              <select
+              <AppSelect
+                label="When field"
+                ariaLabel="Show this question when"
                 value={condition?.fieldName ?? ""}
-                onChange={(event) => {
-                  const fieldName = event.target.value;
+                options={[
+                  { value: "", label: "Always show" },
+                  ...sources.map((source) => ({
+                    value: source.name,
+                    label: source.title,
+                  })),
+                ]}
+                onValueChange={(fieldName) => {
                   if (!fieldName) {
                     onChange((current) =>
                       setQuestionCondition(current, question.name, null),
@@ -1055,37 +1058,31 @@ function FieldCard({
                     }),
                   );
                 }}
-              >
-                <option value="">Always show</option>
-                {sources.map((source) => (
-                  <option key={source.name} value={source.name}>
-                    {source.title}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
             <label>
               is
-              <select
-                value={condition?.equals ?? ""}
-                disabled={!selectedSource}
-                onChange={(event) => {
-                  if (!condition) return;
-                  const next: CfpCondition = {
-                    fieldName: condition.fieldName,
-                    equals: event.target.value,
-                  };
-                  onChange((current) =>
-                    setQuestionCondition(current, question.name, next),
-                  );
-                }}
-              >
-                {(selectedSource?.choices ?? []).map((choice) => (
-                  <option key={choice.value} value={choice.value}>
-                    {choice.text}
-                  </option>
-                ))}
-              </select>
+              {selectedSource ? (
+                <AppSelect
+                  label="Equals"
+                  ariaLabel="Condition equals"
+                  value={condition?.equals ?? selectedSource.choices[0]?.value ?? ""}
+                  options={selectedSource.choices.map((choice) => ({
+                    value: choice.value,
+                    label: choice.text,
+                  }))}
+                  onValueChange={(equals) => {
+                    onChange((current) =>
+                      setQuestionCondition(current, question.name, {
+                        fieldName: selectedSource.name,
+                        equals,
+                      }),
+                    );
+                  }}
+                />
+              ) : (
+                <input type="text" disabled value="" aria-label="Condition equals" />
+              )}
             </label>
           </div>
           {condition ? (
@@ -1095,7 +1092,7 @@ function FieldCard({
               </p>
               <button
                 type="button"
-                className="btn btn-ghost"
+                className="btn btn-secondary btn-sm"
                 onClick={() =>
                   onChange((current) =>
                     setQuestionCondition(current, question.name, null),
@@ -1143,67 +1140,72 @@ function SpeakersStep({
   const speakers = getSpeakerSettings(draft);
   return (
     <div className="builder-stack">
-      <p>Primary speaker plus repeatable co-speakers.</p>
-      <label>
-        Minimum speakers
-        <input
-          type="number"
-          min={1}
-          max={8}
-          value={speakers.minCount}
-          onChange={(event) =>
-            onChange((current) =>
-              updateSpeakerSettings(current, {
-                minCount: Number(event.target.value) || 1,
-              }),
-            )
-          }
-        />
-      </label>
-      <label>
-        Maximum speakers
-        <input
-          type="number"
-          min={1}
-          max={8}
-          value={speakers.maxCount}
-          onChange={(event) =>
-            onChange((current) =>
-              updateSpeakerSettings(current, {
-                maxCount: Number(event.target.value) || 1,
-              }),
-            )
-          }
-        />
-      </label>
-      <label className="checkbox-row">
-        <input
-          type="checkbox"
-          checked={speakers.collectBiography}
-          onChange={(event) =>
-            onChange((current) =>
-              updateSpeakerSettings(current, {
-                collectBiography: event.target.checked,
-              }),
-            )
-          }
-        />
-        Collect biography
-      </label>
-      <label className="checkbox-row">
-        <input
-          type="checkbox"
-          checked={speakers.collectHeadshot}
-          onChange={(event) =>
-            onChange((current) =>
-              updateSpeakerSettings(current, {
-                collectHeadshot: event.target.checked,
-              }),
-            )
-          }
-        />
-        Collect headshot
-      </label>
+      <article className="field-card">
+        <header>
+          <strong>Speakers</strong>
+          <span>Settings</span>
+        </header>
+        <label>
+          Minimum speakers
+          <input
+            type="number"
+            min={1}
+            max={8}
+            value={speakers.minCount}
+            onChange={(event) =>
+              onChange((current) =>
+                updateSpeakerSettings(current, {
+                  minCount: Number(event.target.value) || 1,
+                }),
+              )
+            }
+          />
+        </label>
+        <label>
+          Maximum speakers
+          <input
+            type="number"
+            min={1}
+            max={8}
+            value={speakers.maxCount}
+            onChange={(event) =>
+              onChange((current) =>
+                updateSpeakerSettings(current, {
+                  maxCount: Number(event.target.value) || 1,
+                }),
+              )
+            }
+          />
+        </label>
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={speakers.collectBiography}
+            onChange={(event) =>
+              onChange((current) =>
+                updateSpeakerSettings(current, {
+                  collectBiography: event.target.checked,
+                }),
+              )
+            }
+          />
+          Collect biography
+        </label>
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={speakers.collectHeadshot}
+            onChange={(event) =>
+              onChange((current) =>
+                updateSpeakerSettings(current, {
+                  collectHeadshot: event.target.checked,
+                }),
+              )
+            }
+          />
+          Collect headshot
+        </label>
+      </article>
     </div>
   );
 }
@@ -1211,54 +1213,39 @@ function SpeakersStep({
 function PreviewStep({
   form,
   lifecycleState,
-  eventId,
-  onClose,
-  onReopen,
-  closing,
-  reopening,
 }: {
   form: OrganizerCfpForm;
   lifecycleState: "draft" | "scheduled" | "open" | "closed" | "published";
-  eventId: string;
-  onClose: () => void;
-  onReopen: () => void;
-  closing: boolean;
-  reopening: boolean;
 }) {
-  const publicHref = `/e/${eventId}/cfp?formId=${form.id}`;
+  const statusLabel =
+    lifecycleState === "closed"
+      ? "Closed"
+      : lifecycleState === "open"
+        ? "Open"
+        : lifecycleState === "scheduled"
+          ? "Scheduled"
+          : form.publishedVersion
+            ? "Published"
+            : "Draft";
+
   return (
     <div className="builder-stack">
-      <p>
-        Preview uses the same runtime and event theme as the public form. Draft
-        edits stay private until you publish.
-      </p>
-      {form.publishedVersion ? (
-        <a className="btn btn-secondary" href={publicHref}>
-          Open public form
-        </a>
-      ) : (
-        <p>Publish to get a public link.</p>
-      )}
-      {form.publishedVersion && lifecycleState !== "closed" ? (
-        <button
-          type="button"
-          className="btn btn-secondary"
-          disabled={closing}
-          onClick={onClose}
-        >
-          Close submissions
-        </button>
-      ) : null}
-      {form.publishedVersion && lifecycleState === "closed" ? (
-        <button
-          type="button"
-          className="btn btn-secondary"
-          disabled={reopening}
-          onClick={onReopen}
-        >
-          Reopen submissions
-        </button>
-      ) : null}
+      <dl className="builder-status-dl">
+        <div>
+          <dt>Status</dt>
+          <dd>
+            <span className={`flag flag-box flag-${form.lifecycleStatus === "published" && lifecycleState !== "closed" ? "published" : lifecycleState === "closed" ? "closed" : "draft"}`}>
+              {statusLabel}
+            </span>
+          </dd>
+        </div>
+        <div>
+          <dt>Version</dt>
+          <dd className="tabular-nums">
+            {form.publishedVersion != null ? `v${form.publishedVersion}` : "—"}
+          </dd>
+        </div>
+      </dl>
     </div>
   );
 }

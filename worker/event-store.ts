@@ -3100,6 +3100,62 @@ export class EventStore extends DurableObject<AppBindings> {
     );
   }
 
+  seedShowcaseFormsIfEmpty(): void {
+    const event = this.getEvent();
+    if (!event) return;
+    const tracks = event.tracks.map((track) => ({ value: track.id, text: track.name }));
+    const showcase: Array<{
+      id: string;
+      name: string;
+      status: "draft" | "published" | "closed";
+      updatedAt: string;
+      publishedAt: string | null;
+    }> = [
+      { id: "lightning-talks", name: "Lightning talks", status: "draft", updatedAt: "2026-08-11T16:00:00.000Z", publishedAt: null },
+      { id: "workshop-cfp", name: "Workshop CFP", status: "published", updatedAt: "2026-08-08T12:00:00.000Z", publishedAt: "2026-08-08T12:00:00.000Z" },
+      { id: "keynotes", name: "Keynote nominations", status: "closed", updatedAt: "2026-07-22T09:00:00.000Z", publishedAt: "2026-07-01T09:00:00.000Z" },
+      { id: "poster-session", name: "Poster session", status: "draft", updatedAt: "2026-08-10T18:30:00.000Z", publishedAt: null },
+      { id: "tutorial-proposals", name: "Tutorial proposals", status: "published", updatedAt: "2026-08-06T14:00:00.000Z", publishedAt: "2026-08-06T14:00:00.000Z" },
+      { id: "unconference", name: "Unconference topics", status: "draft", updatedAt: "2026-08-12T08:15:00.000Z", publishedAt: null },
+      { id: "student-research", name: "Student research", status: "closed", updatedAt: "2026-07-18T11:00:00.000Z", publishedAt: "2026-07-04T11:00:00.000Z" },
+    ];
+
+    for (const item of showcase) {
+      const draft = createDefaultCfpDefinition({
+        definitionId: item.id,
+        eventId: event.id,
+        trackChoices: tracks,
+      });
+      this.ctx.storage.sql.exec(
+        `INSERT INTO cfp_forms
+          (id, name, lifecycle_status, lifecycle_override, draft_json, draft_updated_at, published_version, published_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO NOTHING`,
+        item.id,
+        item.name,
+        item.status === "draft" ? "draft" : item.status === "closed" ? "closed" : "published",
+        item.status === "closed" ? "closed" : "",
+        JSON.stringify(draft),
+        item.updatedAt,
+        item.publishedAt ? 1 : null,
+        item.publishedAt,
+      );
+      if (!item.publishedAt) continue;
+      const published = { ...draft, status: "published" as const, definitionVersion: 1 };
+      this.ctx.storage.sql.exec(
+        `INSERT INTO cfp_form_versions
+          (id, status, definition_version, definition_json, published_at, name)
+         VALUES (?, 'published', 1, ?, ?, ?)
+         ON CONFLICT(id, definition_version) DO NOTHING`,
+        item.id,
+        JSON.stringify(published),
+        item.publishedAt,
+        item.name,
+      );
+    }
+  }
+
+
   seedProposalsIfNeeded(proposals: OrganizerProposal[]): void {
     const marker = this.ctx.storage.sql
       .exec<{ name: string }>(

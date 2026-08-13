@@ -2258,22 +2258,15 @@ describe("guided CFP builder", () => {
     renderAt("/e/pacific-open-data-summit-2026/forms/main-cfp");
     await screen.findByText("Saved");
 
-    fireEvent.change(screen.getByLabelText("Opening time (America/Los_Angeles)"), {
+    fireEvent.change(screen.getByLabelText("Opening time"), {
       target: { value: "2030-06-01T12:00" },
     });
-    fireEvent.change(screen.getByLabelText("Closing time (America/Los_Angeles)"), {
+    fireEvent.change(screen.getByLabelText("Closing time"), {
       target: { value: "2030-06-10T12:00" },
     });
 
-    expect(screen.getByText("Opening instant: 2030-06-01T19:00:00.000Z"))
-      .toBeVisible();
-    expect(screen.getByText("Closing instant: 2030-06-10T19:00:00.000Z"))
-      .toBeVisible();
-    expect(screen.getByText(/Schedule changes stay private until you publish/))
-      .toBeVisible();
-
-    await user.click(screen.getByRole("button", { name: "Save draft" }));
-    await screen.findByText("Draft saved. Published form is unchanged until you publish.");
+    await user.click(screen.getByRole("button", { name: "Save Draft" }));
+    await screen.findByText("Saved");
     expect(savedDrafts.at(-1)).toMatchObject({
       opensAt: "2030-06-01T19:00:00.000Z",
       closesAt: "2030-06-10T19:00:00.000Z",
@@ -2319,7 +2312,7 @@ describe("guided CFP builder", () => {
     expect(await screen.findByText("Saved")).toBeVisible();
 
     await user.type(screen.getByLabelText("Welcome title"), " first");
-    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await user.click(screen.getByRole("button", { name: "Save Draft" }));
     expect(await screen.findByText("Saving")).toBeVisible();
 
     await user.type(screen.getByLabelText("Welcome title"), " second");
@@ -2369,9 +2362,9 @@ describe("guided CFP builder", () => {
     expect(await screen.findByText("Saved")).toBeVisible();
 
     await user.type(screen.getByLabelText("Welcome title"), " pre-publish");
-    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await user.click(screen.getByRole("button", { name: "Save Draft" }));
     expect(await screen.findByText("Saving")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Preview & Publish" })).toBeDisabled();
 
     resolveSlowSave(
       new Response(
@@ -2384,7 +2377,7 @@ describe("guided CFP builder", () => {
       ),
     );
     expect(await screen.findByText("Saved")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Publish" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Preview & Publish" })).toBeEnabled();
   });
 
   it("publishes the current draft body atomically without a prior save race", async () => {
@@ -2396,9 +2389,11 @@ describe("guided CFP builder", () => {
 
     await user.type(screen.getByLabelText("Welcome title"), " live");
     expect(screen.getByText("Unsaved changes")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Publish" }));
+    await user.click(screen.getByRole("button", { name: "Preview & Publish" }));
+    await user.click(screen.getByRole("button", { name: "Preview & Publish" }));
     expect(await screen.findByText(/Published version/)).toBeVisible();
     expect(screen.getByText("Saved")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Basics" }));
     expect(screen.getByLabelText("Welcome title")).toHaveValue(
       "Submit a proposal live",
     );
@@ -2427,7 +2422,7 @@ describe("guided CFP builder", () => {
     renderAt("/e/pacific-open-data-summit-2026/forms/main-cfp");
     await screen.findByText("Saved");
     await user.type(screen.getByLabelText("Welcome title"), " first");
-    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await user.click(screen.getByRole("button", { name: "Save Draft" }));
     expect(await screen.findByText("Saving")).toBeVisible();
 
     await user.type(screen.getByLabelText("Welcome title"), " second");
@@ -2498,11 +2493,10 @@ describe("guided CFP builder", () => {
     await user.click(within(customCard).getByLabelText("Required"));
     expect(within(customCard).getByLabelText("Required")).toBeChecked();
 
-    await user.selectOptions(
-      within(customCard).getByLabelText("Show this question when"),
-      "sessionFormat",
-    );
-    await user.selectOptions(within(customCard).getByLabelText("is"), "workshop");
+    await user.click(within(customCard).getByLabelText("Show this question when"));
+    await user.click(await screen.findByRole("option", { name: "Session format" }));
+    await user.click(within(customCard).getByLabelText("Condition equals"));
+    await user.click(await screen.findByRole("option", { name: "Workshop" }));
     expect(
       within(customCard).getByText("Show when Session format is Workshop"),
     ).toBeVisible();
@@ -2544,11 +2538,11 @@ describe("guided CFP builder", () => {
     renderAt("/e/pacific-open-data-summit-2026/forms/main-cfp");
     await screen.findByText("Saved");
     await user.type(screen.getByLabelText("Welcome title"), " retry-me");
-    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await user.click(screen.getByRole("button", { name: "Save Draft" }));
 
     expect(await screen.findByText("Save failed")).toBeVisible();
     await user.type(screen.getByLabelText("Welcome title"), " again");
-    await user.click(screen.getByRole("button", { name: "Retry save" }));
+    await user.click(screen.getByRole("button", { name: "Retry Save" }));
 
     expect(await screen.findByText("Saved")).toBeVisible();
     expect(bodies).toHaveLength(2);

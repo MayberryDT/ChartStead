@@ -31,6 +31,7 @@ export async function loadEventWorkspace(
   if (seed) {
     await store.seedIfEmpty(seed);
     await store.seedPublishedFormIfEmpty(createSeedCfp(seed));
+    await store.seedShowcaseFormsIfEmpty();
     await store.seedProposalsIfNeeded(createSeedProposals(seed));
     await store.seedCourseCheckDemoIfNeeded();
   }

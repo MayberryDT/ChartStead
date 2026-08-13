@@ -24,7 +24,13 @@ import {
   type ProposalQueueState,
   type ProposalSort,
 } from "./SubmissionsWorkspace";
-import { FormsWorkspace } from "./FormsWorkspace";
+import {
+  defaultFormsQueue,
+  FormsCommandBar,
+  FormsWorkspace,
+  type FormsQueueState,
+  type FormsSelection,
+} from "./FormsWorkspace";
 import {
   CfpBuilderWorkspace,
   type CfpBuilderChrome,
@@ -180,6 +186,8 @@ function EventDesk({
   const [agendaChrome, setAgendaChrome] = useState<AgendaChrome | null>(null);
   const [messagesChrome, setMessagesChrome] = useState<MessagesChrome | null>(null);
   const [cfpBuilderChrome, setCfpBuilderChrome] = useState<CfpBuilderChrome | null>(null);
+  const [formsQueue, setFormsQueue] = useState<FormsQueueState>(defaultFormsQueue);
+  const [formsSelection, setFormsSelection] = useState<FormsSelection | null>(null);
   const [speakerChrome, setSpeakerChrome] = useState<ReactNode | null>(null);
   const createForm = useMutation({
     mutationFn: ({ eventId, name }: { eventId: string; name: string }) =>
@@ -403,7 +411,6 @@ function EventDesk({
     });
   }
 
-  const cfpHref = `/e/${event.id}/cfp`;
   const topbarTitle =
     activeNav === "Submissions"
       ? "Submissions"
@@ -424,7 +431,7 @@ function EventDesk({
     activeNav === "Submissions"
       ? `${event.submissionCount} total · ${event.unreviewedCount} unreviewed`
       : activeNav === "Forms"
-        ? cfpBuilderChrome?.meta ?? "CFP forms, publish, open and close"
+        ? cfpBuilderChrome?.meta ?? "Forms"
         : activeNav === "Agenda"
           ? `${formatDateRange(event.startsOn, event.endsOn)} · day and room placement`
           : activeNav === "Messages"
@@ -497,7 +504,8 @@ function EventDesk({
           activeNav === "Submissions" ||
           activeNav === "Overview" ||
           activeNav === "Agenda" ||
-          activeNav === "Speakers" ? null : (
+          activeNav === "Speakers" ||
+          activeNav === "Forms" ? null : (
             <div className="topbar-identity" title={topbarMeta}>
               <h1>{topbarTitle}</h1>
               <p className="topbar-meta">{topbarMeta}</p>
@@ -514,6 +522,15 @@ function EventDesk({
               batch={batchChrome}
               review={reviewChrome}
             />
+          ) : activeNav === "Forms" ? (
+            initialFormId ? (
+              cfpBuilderChrome?.tools
+            ) : (
+              <FormsCommandBar
+                queue={formsQueue}
+                onQueueChange={(next) => setFormsQueue((current) => ({ ...current, ...next }))}
+              />
+            )
           ) : activeNav === "Agenda" ? (
             agendaChrome?.tools
           ) : activeNav === "Messages" ? (
@@ -525,21 +542,42 @@ function EventDesk({
         actions={
           activeNav === "Forms" ? (
             initialFormId ? (
-              cfpBuilderChrome?.actions ?? (
-                <>
-                  <a className="btn btn-ghost btn-sm" href={`/e/${event.id}/forms`}>
-                    All forms
-                  </a>
-                  <a className="btn btn-secondary btn-sm" href={cfpHref}>
-                    Open CFP
-                  </a>
-                </>
-              )
+              cfpBuilderChrome?.actions
             ) : (
               <>
-                <a className="btn btn-secondary btn-sm" href={cfpHref}>
-                  Open CFP
-                </a>
+                {formsSelection?.publishedVersion != null ? (
+                  <a
+                    className="btn btn-secondary btn-sm"
+                    href={`/e/${event.id}/cfp?formId=${formsSelection.id}`}
+                  >
+                    View Form
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    disabled
+                    title={
+                      formsSelection
+                        ? "Publish this form to open the public CFP"
+                        : "Select a published form to view"
+                    }
+                  >
+                    View Form
+                  </button>
+                )}
+                {formsSelection ? (
+                  <a
+                    className="btn btn-secondary btn-sm"
+                    href={`/e/${event.id}/forms/${formsSelection.id}`}
+                  >
+                    Open Form Builder
+                  </a>
+                ) : (
+                  <button type="button" className="btn btn-secondary btn-sm" disabled>
+                    Open Form Builder
+                  </button>
+                )}
                 <button
                   type="button"
                   className="btn btn-primary btn-sm"
@@ -551,7 +589,7 @@ function EventDesk({
                     })
                   }
                 >
-                  Create form
+                  Create Form
                 </button>
               </>
             )
@@ -594,7 +632,12 @@ function EventDesk({
               onChromeChange={setCfpBuilderChrome}
             />
           ) : (
-            <FormsWorkspace eventId={event.id} />
+            <FormsWorkspace
+              eventId={event.id}
+              queue={formsQueue}
+              onQueueChange={(next) => setFormsQueue((current) => ({ ...current, ...next }))}
+              onSelectionChange={setFormsSelection}
+            />
           )
         ) : activeNav === "Agenda" ? (
           <AgendaWorkspace

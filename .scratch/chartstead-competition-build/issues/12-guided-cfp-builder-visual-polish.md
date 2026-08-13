@@ -24,3 +24,4 @@ Filed from Ticket 03 human QA (2026-08-10): end-user public form is solid after 
 
 - 2026-08-13 — frontier-reconcile: Blockers satisfied; remains human-tandem only (not agent-ready).
 - 2026-08-13 — Started with Tyler in tandem alongside Competition 38. Status → in-progress. Builder chrome, step buttons, toasts, and Preview & publish are in this ticket; field-card redesign still open.
+- 2026-08-13 — Tyler feedback: strip instructional copy (speakers / required-settings / same-runtime preview blurb); restore 50/50 editor↔preview; differentiate builder (tool surface, blue rail) vs live form canvas (agenda-style desk density). Save status chip in toolbar. Demo: `http://100.105.117.93:5278/demo` → organizer → Forms → open a form.
