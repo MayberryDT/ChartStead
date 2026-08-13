@@ -10,7 +10,8 @@ import {
   handleDemoPersonaRequest,
   resolveDemoPrincipal,
 } from "./demo-personas";
-import { listAllEventWorkspaceIds } from "./event-catalog";
+import { listAllEventWorkspaceIds, loadEventWorkspace } from "./event-catalog";
+import { seedEvents } from "./seed-events";
 import type { AppBindings } from "./types";
 
 export { EventStore } from "./event-store";
@@ -34,9 +35,18 @@ const app = createApp({
   signingSecret: "demo-local-signing-secret-not-for-production",
 });
 
+async function ensureDemoShowcase(env: AppBindings): Promise<void> {
+  for (const seed of seedEvents) {
+    await loadEventWorkspace(env, seed.id);
+    env.EVENT_STORE.getByName(seed.id).seedDemoShowcaseIfNeeded();
+  }
+}
+
 export default {
-  fetch: async (request: Request, env: AppBindings, ctx: ExecutionContext) =>
-    (await handleDemoPersonaRequest(request, env)) ?? app.fetch(request, env, ctx),
+  fetch: async (request: Request, env: AppBindings, ctx: ExecutionContext) => {
+    await ensureDemoShowcase(env);
+    return (await handleDemoPersonaRequest(request, env)) ?? app.fetch(request, env, ctx);
+  },
   async scheduled(_controller, env) {
     const sender = createResendSender(env);
     const communicationSender = createResendCommunicationSender(env);

@@ -13,6 +13,13 @@ Conference programming and speaker management: CFP → shared review → Course 
 **Submission package (form blurbs):** [docs/competition-submission.md](docs/competition-submission.md)  
 **Course Check deep dive:** [docs/course-check-killer-walkthrough.md](docs/course-check-killer-walkthrough.md)
 
+## Source repositories
+
+- **Forge:** https://forge.smol.ai/tylermayberry/ChartStead
+- **GitHub:** https://github.com/MayberryDT/ChartStead
+
+Both repositories publish the same `main` source tree. Forge is the competition-native mirror; GitHub is the public source mirror.
+
 ## Requirements
 
 - Node.js 22.12 or newer

@@ -7,6 +7,7 @@ import {
 const EVENT_PREFIXES: Record<string, string> = {
   "pacific-open-data-summit-2026": "PODS",
   "ai-engineer-worlds-fair-2026": "AEWF",
+  "civic-tech-summit-2026": "CTS",
 };
 
 const DECIDED_STATUSES: ProposalStatus[] = ["approve", "maybe", "deny"];

@@ -10,7 +10,8 @@ Paste-ready material for the open-source competition form and judges.
 
 | Item | Value |
 | --- | --- |
-| Repository | https://forge.smol.ai/mayberrydt/ChartStead (or the public GitHub mirror if published) |
+| Forge repository | https://forge.smol.ai/tylermayberry/ChartStead |
+| GitHub mirror | https://github.com/MayberryDT/ChartStead |
 | License | MIT (`LICENSE`) |
 | **Demo evaluator entry (no login)** | https://chartstead-demo.mayberrydt.workers.dev/demo |
 | Production | https://chartstead.mayberrydt.workers.dev |
@@ -23,8 +24,8 @@ Paste-ready material for the open-source competition form and judges.
 ## Seeded demo event
 
 - **Pacific Open Data Summit 2026** (`pacific-open-data-summit-2026`)
-- ~57 submissions, 5 tracks (including **Course Check Demo** fixtures `SUB-PODS0048`–`0057`), 3 rooms
-- Second event: **AI Engineer World's Fair 2026** for multi-event switch
+- 36 submissions, 5 tracks, 3 rooms, 14 seeded speakers, and a populated public program
+- Second event: **AI Engineer World's Fair 2026**; third event: **Civic Tech Summit 2026**
 
 ## What works without external secrets
 

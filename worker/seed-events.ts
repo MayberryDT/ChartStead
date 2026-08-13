@@ -48,4 +48,25 @@ export const seedEvents: EventRecord[] = [
       { id: "workshop-hall", name: "Workshop Hall", readiness: "pending" },
     ],
   },
+  {
+    id: "civic-tech-summit-2026",
+    name: "Civic Tech Summit 2026",
+    startsOn: "2026-11-12",
+    endsOn: "2026-11-13",
+    timezone: "America/New_York",
+    submissionCount: 36,
+    unreviewedCount: 12,
+    themeAccent: "#7d4e2a",
+    tracks: [
+      { id: "civic-data", name: "Civic Data", proposalCount: 10 },
+      { id: "public-interest", name: "Public Interest Technology", proposalCount: 9 },
+      { id: "community-power", name: "Community Power", proposalCount: 9 },
+      { id: "workshops", name: "Workshops", proposalCount: 8 },
+    ],
+    rooms: [
+      { id: "assembly-hall", name: "Assembly Hall", readiness: "ready" },
+      { id: "commons-room", name: "Commons Room", readiness: "ready" },
+      { id: "studio-b", name: "Studio B", readiness: "pending" },
+    ],
+  },
 ];

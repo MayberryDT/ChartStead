@@ -3155,6 +3155,254 @@ export class EventStore extends DurableObject<AppBindings> {
     }
   }
 
+  /** Demo-only enrichment. Idempotent and additive so evaluator changes survive refreshes. */
+  seedDemoShowcaseIfNeeded(): void {
+    const event = this.getEvent();
+    if (!event) return;
+    const marker = this.ctx.storage.sql
+      .exec<{ name: string }>(
+        "SELECT name FROM seed_markers WHERE name = 'demo-showcase-v4'",
+      )
+      .toArray()[0];
+    if (marker) return;
+
+    const eventIndex = [
+      "pacific-open-data-summit-2026",
+      "ai-engineer-worlds-fair-2026",
+      "civic-tech-summit-2026",
+    ].indexOf(event.id);
+    const now = new Date().toISOString();
+    const extraCount = event.id === "pacific-open-data-summit-2026" ? 24 : 18;
+    const proposals = this.ctx.storage.sql
+      .exec<{ id: string; track_id: string; track_name: string }>(
+        `SELECT id, track_id, track_name FROM proposals ORDER BY submitted_at ASC, id ASC`,
+      )
+      .toArray();
+
+    this.ctx.storage.transactionSync(() => {
+      for (let index = 0; index < extraCount; index += 1) {
+        const track = event.tracks[index % event.tracks.length];
+        const sequence = 100 + index + eventIndex * 30;
+        const id = `SUB-${event.id.slice(0, 4).toUpperCase()}X${String(sequence).padStart(3, "0")}`;
+        const speakerName = [
+          "Avery Morgan", "Jordan Okafor", "Riley Santos", "Samira Haddad",
+          "Theo Nguyen", "Priya Shah", "Morgan Ellis", "Casey Brooks",
+        ][index % 8];
+        const email = `showcase-${eventIndex}-${index}@chartstead-demo.invalid`;
+        const title = `${track.name}: ${[
+          "Designing for the last mile", "A practical field guide", "What changed in the real world",
+          "From pilot to public service", "Patterns for teams that ship",
+        ][index % 5]}`;
+        const abstract = `A practical ${track.name.toLowerCase()} session with examples, trade-offs, and a clear takeaway for event teams.`;
+        const status = index % 7 === 0 ? "unreviewed" : index % 3 === 0 ? "maybe" : "approve";
+        this.ctx.storage.sql.exec(
+          `INSERT INTO proposals
+            (id, form_id, form_definition_version, answers_json, title, abstract,
+             track_id, track_name, speaker_name, speaker_email, biography,
+             supporting_link, session_format, workshop_duration, co_speakers_json,
+             supporting_file_json, status, committee_note, private_note, review_version,
+             submitted_at, confirmation_email_status)
+           VALUES (?, 'main-cfp', 1, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, '', '[]', '', ?, ?, ?, 0, ?, 'sent')
+           ON CONFLICT(id) DO NOTHING`,
+          id,
+          JSON.stringify({ title, abstract, trackId: track.id, speakers: [{ name: speakerName, email }] }),
+          title,
+          abstract,
+          track.id,
+          track.name,
+          speakerName,
+          email,
+          `${speakerName} works with teams turning ${track.name.toLowerCase()} ideas into durable programs.`,
+          index % 4 === 0 ? "workshop" : "talk",
+          status,
+          index % 3 === 0 ? "Strong fit for the current program." : "",
+          index % 5 === 0 ? "Follow up on examples before final release." : "",
+          `2026-08-${String((index % 20) + 1).padStart(2, "0")}T${String(9 + (index % 8)).padStart(2, "0")}:00:00.000Z`,
+        );
+        proposals.push({ id, track_id: track.id, track_name: track.name });
+      }
+
+      const accepted = proposals.filter((proposal) => proposal.track_id !== "course-check-demo").slice(0, 14);
+      accepted.forEach((proposal, index) => {
+        const speakerId = `demo-speaker-${eventIndex}-${index}`;
+        const speakerName = [
+          "Maya Chen", "Luis Romero", "Nina Patel", "Owen Williams", "Fatima Zahra",
+          "Elena Petrova", "Marcus Lee", "Jo Ellis", "Dara Kim", "Tomas Silva",
+          "Amina Yusuf", "Grace Park", "Ben Carter", "Inez Flores",
+        ][index % 14];
+        const email = `speaker-${eventIndex}-${index}@chartstead-demo.invalid`;
+        const assetId = `demo-headshot-${String(eventIndex * 14 + index + 1).padStart(3, "0")}`;
+        const objectKey = `demo/headshots/${String((eventIndex * 14 + index) % 42 + 1).padStart(3, "0")}.jpg`;
+        const planId = `demo-accepted-plan-${eventIndex}-${index}`;
+        const sessionId = `demo-session-${eventIndex}-${index}`;
+        const startsAt = `${event.startsOn}T${String(9 + (index % 7)).padStart(2, "0")}:00:00.000Z`;
+        const endsAt = `${event.startsOn}T${String(10 + (index % 7)).padStart(2, "0")}:00:00.000Z`;
+        this.ctx.storage.sql.exec(
+          `UPDATE proposals SET program_outcome = 'accepted', speaker_name = ?, speaker_email = ? WHERE id = ?`,
+          speakerName,
+          email,
+          proposal.id,
+        );
+        this.ctx.storage.sql.exec(
+          `INSERT INTO speakers (id, name, email, biography, social_links_json, headshot_asset_id, created_at)
+           VALUES (?, ?, ?, ?, '{}', ?, ?)
+           ON CONFLICT(id) DO UPDATE SET headshot_asset_id = excluded.headshot_asset_id`,
+          speakerId,
+          speakerName,
+          email,
+          `${speakerName} is a demo speaker exploring practical ways to make programs more useful, inclusive, and easier to run.`,
+          assetId,
+          now,
+        );
+        this.ctx.storage.sql.exec(
+          `INSERT INTO assets
+            (asset_id, object_key, file_name, mime, size_bytes, status, created_at,
+             form_id, form_definition_version, question_name, max_bytes,
+             claimed_proposal_id, completed_at, owner_speaker_id, purpose)
+           VALUES (?, ?, ?, 'image/jpeg', 19000, 'complete', ?, 'portal', 0, 'headshot', 5242880, ?, ?, ?, 'portal_headshot')
+           ON CONFLICT(asset_id) DO NOTHING`,
+          assetId,
+          objectKey,
+          `${speakerName.toLowerCase().replaceAll(" ", "-")}.jpg`,
+          now,
+          proposal.id,
+          now,
+          speakerId,
+        );
+        this.ctx.storage.sql.exec(
+          `INSERT INTO event_participations
+            (id, speaker_id, proposal_id, course_check_plan_id, title_snapshot,
+             organization_snapshot, role, workflow_status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'speaker', 'confirmed', ?)
+           ON CONFLICT(id) DO NOTHING`,
+          `demo-participation-${eventIndex}-${index}`,
+          speakerId,
+          proposal.id,
+          planId,
+          this.ctx.storage.sql.exec<{ title: string }>(`SELECT title FROM proposals WHERE id = ?`, proposal.id).toArray()[0]?.title ?? "Demo session",
+          "ChartStead Demo",
+          now,
+        );
+        this.ctx.storage.sql.exec(
+          `INSERT INTO sessions
+            (id, proposal_id, course_check_plan_id, title, content_abstract, public_content,
+             content_status, content_version, format, track_id, room_id, starts_at, ends_at, created_at)
+           SELECT ?, id, ?, title, abstract, abstract, 'approved', 1, session_format, track_id, ?, ?, ?, ?
+           FROM proposals WHERE id = ?
+           ON CONFLICT(id) DO NOTHING`,
+          sessionId,
+          planId,
+          event.rooms[index % event.rooms.length]?.id ?? null,
+          startsAt,
+          endsAt,
+          now,
+          proposal.id,
+        );
+        const demoTasks = [
+          ["profile", "Confirm your speaker profile"],
+          ["headshot", "Upload a recent headshot"],
+          ["session_details", "Review your session details"],
+        ] as const;
+        demoTasks.forEach(([taskKind, taskTitle], taskIndex) => {
+          this.ctx.storage.sql.exec(
+            `INSERT INTO onboarding_tasks
+              (id, speaker_id, session_id, proposal_id, course_check_plan_id, title, kind,
+               status, due_at, created_at, instructions, completion_requirement, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'demo-seed')
+             ON CONFLICT(id) DO NOTHING`,
+            `demo-task-${eventIndex}-${index}-${taskIndex}`,
+            speakerId,
+            sessionId,
+            proposal.id,
+            planId,
+            taskTitle,
+            taskKind,
+            taskIndex === 0 && index % 3 === 0 ? "completed" : "open",
+            `${event.startsOn}T00:00:00.000Z`,
+            now,
+            `Demo task for ${speakerName}.`,
+            taskKind === "headshot" ? "file" : taskKind === "profile" ? "profile" : "manual",
+          );
+        });
+        const draftId = `demo-message-${eventIndex}-${index}`;
+        this.ctx.storage.sql.exec(
+          `INSERT INTO communication_drafts
+            (id, plan_id, plan_version, group_id, proposal_id, session_id, to_email,
+             recipient_name, subject, body_text, body_html, status, frozen_payload_json, created_at)
+           VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, 'frozen', '{}', ?)
+           ON CONFLICT(id) DO NOTHING`,
+          draftId,
+          planId,
+          `demo-group-${eventIndex}-${index}`,
+          proposal.id,
+          sessionId,
+          email,
+          speakerName,
+          index % 2 === 0 ? "Welcome to the ChartStead program" : "A quick detail for your session",
+          `Hi ${speakerName},\n\nThanks for being part of the ${event.name} program. This demo message shows the communication workflow in context.`,
+          `<p>Hi ${speakerName},</p><p>Thanks for being part of the ${event.name} program. This demo message shows the communication workflow in context.</p>`,
+          now,
+        );
+        this.ctx.storage.sql.exec(
+          `INSERT INTO outbox_messages
+            (id, kind, to_email, subject, html_body, text_body, status, proposal_id,
+             error, created_at, updated_at, sent_at, attempt_count, next_attempt_at)
+           VALUES (?, 'submission_confirmation', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 1, NULL)
+           ON CONFLICT(id) DO NOTHING`,
+          `demo-outbox-${eventIndex}-${index}`,
+          email,
+          index % 2 === 0 ? "Welcome to the ChartStead program" : "A quick detail for your session",
+          `<p>Hi ${speakerName},</p><p>Your demo program details are ready to review.</p>`,
+          `Hi ${speakerName},\n\nYour demo program details are ready to review.`,
+          index % 4 === 0 ? "queued" : "sent",
+          proposal.id,
+          now,
+          now,
+          index % 4 === 0 ? null : now,
+        );
+      });
+
+      for (const proposal of proposals.slice(0, Math.min(32, proposals.length))) {
+        this.ctx.storage.sql.exec(
+          `INSERT INTO review_evidence
+            (proposal_id, round_id, reviewer_id, reviewer_name, recommendation,
+             completion_status, aggregate_score, criteria_json, completed_at, updated_at)
+           VALUES (?, 'demo-round-1', 'demo-track-reviewer', 'Platform Track Reviewer', ?, 'complete', ?, '[]', ?, ?)
+           ON CONFLICT(proposal_id, round_id, reviewer_id) DO NOTHING`,
+          proposal.id,
+          proposal.id.endsWith("1") ? "maybe" : proposal.id.endsWith("2") ? "deny" : "approve",
+          3.4 + (proposal.id.length % 14) / 10,
+          now,
+          now,
+        );
+      }
+      const trackCounts = event.tracks.map((track) => ({
+        ...track,
+        proposalCount:
+          this.ctx.storage.sql
+            .exec<{ total: number }>(
+              `SELECT COUNT(*) AS total FROM proposals WHERE track_id = ?`,
+              track.id,
+            )
+            .toArray()[0]?.total ?? 0,
+      }));
+      this.ctx.storage.sql.exec(
+        `UPDATE events
+         SET submission_count = (SELECT COUNT(*) FROM proposals),
+             unreviewed_count = (SELECT COUNT(*) FROM proposals WHERE status = 'unreviewed'),
+             tracks_json = ?
+         WHERE id = ?`,
+        JSON.stringify(trackCounts),
+        event.id,
+      );
+      this.ctx.storage.sql.exec(
+          `INSERT INTO seed_markers (name, applied_at) VALUES ('demo-showcase-v4', ?)`,
+        now,
+      );
+    });
+    this.publishPublicProgramRevisionFromWorking("demo-showcase");
+  }
+
 
   seedProposalsIfNeeded(proposals: OrganizerProposal[]): void {
     const marker = this.ctx.storage.sql

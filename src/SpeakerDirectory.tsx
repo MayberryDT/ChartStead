@@ -271,7 +271,7 @@ export function SpeakerDirectoryAddPanel({
         </label>
         <AppSelect
           label="Event role"
-          value={input.role}
+          value={input.role ?? "invited"}
           options={speakerRoleOptions}
           onValueChange={(role) => setInput({ ...input, role })}
         />
