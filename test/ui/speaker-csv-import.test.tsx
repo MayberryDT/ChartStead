@@ -140,19 +140,19 @@ describe("Ticket 25 speaker CSV import UI", () => {
     );
     await user.upload(screen.getByLabelText(/csv file/i), file);
 
-    expect(await screen.findByRole("combobox", { name: /^name column$/i })).toHaveValue(
+    expect(await screen.findByRole("combobox", { name: /^name column$/i })).toHaveTextContent(
       "Full Name",
     );
-    expect(screen.getByRole("combobox", { name: /^email column$/i })).toHaveValue(
+    expect(screen.getByRole("combobox", { name: /^email column$/i })).toHaveTextContent(
       "Email Address",
     );
-    expect(screen.getByRole("combobox", { name: /^biography column$/i })).toHaveValue(
+    expect(screen.getByRole("combobox", { name: /^biography column$/i })).toHaveTextContent(
       "Bio",
     );
-    expect(screen.getByRole("combobox", { name: /^title column$/i })).toHaveValue(
+    expect(screen.getByRole("combobox", { name: /^title column$/i })).toHaveTextContent(
       "Job Title",
     );
-    expect(screen.getByRole("combobox", { name: /^organization column$/i })).toHaveValue(
+    expect(screen.getByRole("combobox", { name: /^organization column$/i })).toHaveTextContent(
       "Company",
     );
     expect(
@@ -165,14 +165,14 @@ describe("Ticket 25 speaker CSV import UI", () => {
     expect(within(previewTable).getByText("New CSV Person")).toBeVisible();
     expect(within(previewTable).getByText("Existing CSV Person")).toBeVisible();
     expect(within(previewTable).getByText("Email is required.")).toBeVisible();
-    expect(within(previewTable).getByLabelText(/action for csv row 2/i)).toHaveValue(
-      "create",
+    expect(within(previewTable).getByRole("combobox", { name: /action for csv row 2/i })).toHaveTextContent(
+      "Create",
     );
-    expect(within(previewTable).getByLabelText(/action for csv row 3/i)).toHaveValue(
-      "update:sp-existing",
+    expect(within(previewTable).getByRole("combobox", { name: /action for csv row 3/i })).toHaveTextContent(
+      "Update match",
     );
-    expect(within(previewTable).getByLabelText(/action for csv row 4/i)).toHaveValue(
-      "skip",
+    expect(within(previewTable).getByRole("combobox", { name: /action for csv row 4/i })).toHaveTextContent(
+      "Skip",
     );
 
     await user.click(screen.getByRole("button", { name: /apply 2 changes/i }));

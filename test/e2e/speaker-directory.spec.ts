@@ -23,14 +23,13 @@ test("organizer can add, search, filter, and correct an event speaker", async ({
   await page.getByRole("searchbox", { name: "Search speakers" }).fill(email);
   await expect(page.getByRole("button", { name: new RegExp(name) })).toBeVisible();
   await expect(page.getByText(/1(?: of \d+)? speakers?/)).toBeVisible();
-  await page
-    .getByRole("combobox", { name: "Directory filter" })
-    .selectOption("ready");
+  await page.getByRole("combobox", { name: "Directory filter" }).click();
+  await page.getByRole("option", { name: "Ready — no open work" }).click();
   await expect(page.getByRole("button", { name: new RegExp(name) })).toBeVisible();
 
-  await page.getByRole("button", { name: "Edit current profile" }).click();
+  await expect(page.getByText(/Invited Engineer · Harbor Systems/)).toBeVisible();
+  await page.getByRole("button", { name: "Edit profile" }).click();
   const edit = page.getByRole("form", { name: "Edit current profile" });
-  await expect(edit.getByText(/Invited Engineer · Harbor Systems/)).toBeVisible();
   await edit.getByLabel("Name").fill(corrected);
   await edit.getByRole("button", { name: "Save profile" }).click();
   await expect(page.getByText(/Event-time details were preserved/i)).toBeVisible();
