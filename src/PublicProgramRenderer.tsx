@@ -758,7 +758,7 @@ function SignalRailGallery({ data, mode, theme, fields, filters, speakers, selec
         <p className="signal-gallery-count" role="status" aria-live="polite">{speakers.length} {countNoun(speakers.length, "speaker")}</p>
         {speakers.length ? <ul className="signal-gallery-grid">{speakers.map((speaker) => <li key={speaker.id}><SpeakerGalleryButton speaker={speaker} selected={active?.id === speaker.id} fields={fields} onSelect={() => onSelectSpeaker(speaker.id)} /></li>)}</ul> : <div className="signal-gallery-empty"><h2>No speakers found</h2><p>Try clearing or changing the current filters.</p><button type="button" onClick={() => onSetFilters(() => ({}))}>Clear filters</button></div>}
       </section>
-      {active ? <aside className="signal-speaker-panel" aria-label={`Selected speaker: ${active.name}`} aria-live="polite" key={active.id}>
+      {active ? <aside className="signal-speaker-panel t-panel-slide" data-open="true" aria-label={`Selected speaker: ${active.name}`} aria-live="polite" key={active.id}>
         <p className="signal-selected-label">Selected speaker</p>
         <Button className="signal-panel-close" type="button" aria-label="Reset selected speaker" onClick={() => onSelectSpeaker(null)}>×</Button>
         <div className="signal-speaker-intro">{fields.headshots ? <SpeakerAvatar speaker={active} large /> : null}<div><h2>{active.name}</h2><p>{active.title || "Professional details pending"}</p><p>{active.company || ""}</p><strong>{data.event.tracks.find((track) => linked.some((session) => session.trackId === track.id))?.name ?? "Data Leadership"}</strong><span>⌖ Wellington, New Zealand</span></div></div>

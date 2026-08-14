@@ -9155,20 +9155,22 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
 }
 /* Speaker Gallery · locked Direction 03 “Signal Rail” */
 .program-shell:has(.signal-rail-gallery) { padding: 0; max-width: none; min-height: 100vh; background: #fff; }
-.program-shell:has(.signal-rail-gallery) > .program-footer { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; width: 100%; min-height: 42px; margin: 0; padding: 0 40px; border: 0; background: #031d43; color: #fff; align-items: center; }
-.program-renderer.signal-rail-gallery.widget-speaker-gallery { width: 100%; max-width: none; min-height: calc(100vh - 42px); padding: 0; border: 0; border-radius: 0; box-shadow: none; color: #071b43; background: #fff; }
-.signal-gallery-main { display: grid; grid-template-columns: minmax(0, 65.2%) minmax(430px, 34.8%); min-height: calc(100vh - 42px); }
+.program-shell:has(.signal-rail-gallery) > .program-footer { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; width: 100%; min-height: 34px; margin: 0; padding: 0; border: 0; justify-content: center; background: rgba(255,255,255,.94); color: #526071; font-size: 12px; text-align: center; backdrop-filter: blur(8px); }
+.program-renderer.signal-rail-gallery.widget-speaker-gallery { width: 100%; max-width: none; min-height: calc(100vh - 34px); padding: 0; border: 0; border-radius: 0; box-shadow: none; color: #071b43; background: #fff; }
+.signal-gallery-main { display: grid; grid-template-columns: minmax(0, 65.2%) minmax(430px, 34.8%); min-height: calc(100vh - 34px); }
 .signal-gallery-index { padding: 31px 50px 24px; overflow: hidden; }
 .signal-gallery-heading p { margin: 0 0 7px; font-size: 18px; line-height: 1.2; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
 .signal-gallery-heading h1 { margin: 0; font-size: 54px; line-height: 1.02; letter-spacing: -.035em; }
 .signal-gallery-heading span { display: block; margin-top: 9px; font-size: 15.5px; color: #566582; }
-.signal-gallery-filters { display: grid; grid-template-columns: minmax(290px, 408px) 168px 168px; gap: 23px; align-items: end; margin-top: 23px; }
+.signal-gallery-filters { display: grid; grid-template-columns: minmax(260px, 1fr) 168px 168px auto; gap: 16px; align-items: end; margin-top: 23px; }
 .signal-gallery-filters label { display: grid; gap: 7px; font-size: 13px; color: #071b43; }
 .signal-gallery-filters input, .signal-gallery-filters select { width: 100%; height: 47px; padding: 0 14px; border: 1px solid #cdd6e3; border-radius: 4px; background: #fff; color: #1e3154; font: inherit; font-size: 15px; }
 .signal-search { position: relative; }
 .signal-search::before { content: ""; position: absolute; z-index: 1; left: 17px; bottom: 17px; width: 10px; height: 10px; border: 1.5px solid #52617c; border-radius: 50%; pointer-events: none; }
 .signal-search::after { content: ""; position: absolute; z-index: 1; left: 27px; bottom: 15px; width: 6px; height: 1.5px; background: #52617c; transform: rotate(45deg); transform-origin: left center; pointer-events: none; }
 .signal-gallery-filters input { padding-left: 42px; }
+.signal-clear-filters { min-height: 47px; padding: 0 12px; border: 0; background: transparent; color: #0756b8; font-weight: 600; cursor: pointer; }
+.signal-clear-filters:disabled { color: #8c98a8; cursor: default; }
 .signal-gallery-filters input:focus-visible, .signal-gallery-filters select:focus-visible, .signal-gallery-grid button:focus-visible, .signal-speaker-panel button:focus-visible { outline: 3px solid #83b8ee; outline-offset: 2px; }
 .signal-gallery-count { margin: 19px 0 12px; font-size: 12.5px; color: #42516d; }
 .signal-gallery-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); column-gap: 28px; row-gap: 0; margin: 0; padding: 0; list-style: none; }
@@ -9183,7 +9185,9 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
 .signal-gallery-grid li:nth-child(3n+2) .program-speaker-gallery-card span span::after { content: "Governance & Policy"; border-color: #06a7ac; color: #007b83; }
 .signal-gallery-grid li:nth-child(3n) .program-speaker-gallery-card span span::after { content: "Data Practice"; border-color: #7b32c7; color: #6720a8; }
 .signal-gallery-grid li:nth-child(4n) .program-speaker-gallery-card span span::after { content: "Open Communities"; border-color: #ef5b20; color: #d6440f; }
-.signal-speaker-panel { position: relative; padding: 31px 31px 24px 23px; border-left: 1px solid #d6dde7; background: #fff; }
+.signal-speaker-panel { --panel-open-dur: 400ms; --panel-close-dur: 350ms; --panel-translate-y: 8px; --panel-blur: 2px; --panel-ease: cubic-bezier(0.22, 1, 0.36, 1); position: relative; padding: 31px 31px 40px 23px; border-left: 1px solid #d6dde7; background: #fff; }
+.t-panel-slide { transform: translateY(var(--panel-translate-y)); opacity: 0; filter: blur(var(--panel-blur)); pointer-events: none; transition: transform var(--panel-close-dur) var(--panel-ease), opacity var(--panel-close-dur) var(--panel-ease), filter var(--panel-close-dur) var(--panel-ease); will-change: transform, opacity, filter; }
+.t-panel-slide[data-open="true"] { transform: translateY(0); opacity: 1; filter: blur(0); pointer-events: auto; transition: transform var(--panel-open-dur) var(--panel-ease), opacity var(--panel-open-dur) var(--panel-ease), filter var(--panel-open-dur) var(--panel-ease); }
 .signal-selected-label { margin: 0 0 9px; font-size: 13px; text-transform: uppercase; letter-spacing: .02em; color: #35435f; }
 .signal-panel-close { position: absolute; top: 18px; right: 21px; width: 44px; height: 44px; border: 0; background: transparent; font-size: 30px; font-weight: 200; color: #111; cursor: pointer; }
 .signal-speaker-intro { display: grid; grid-template-columns: 166px 1fr; gap: 24px; align-items: start; padding: 0 3px 25px; }
@@ -9203,12 +9207,14 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
 .signal-linked-sessions strong { color: #0756b8; font-size: 15px; }
 .signal-linked-sessions span { color: #465574; font-size: 12.5px; }
 .signal-linked-sessions b { position: absolute; right: 18px; top: 25px; font-size: 28px; font-weight: 300; color: #111; }
-.signal-profile-button { width: 100%; min-height: 45px; margin-top: 20px; border: 1px solid #0756b8; border-radius: 4px; background: #fff; color: #0756b8; font-size: 15px; font-weight: 600; cursor: pointer; }
+.signal-profile-button { width: 100%; min-height: 45px; display: flex; align-items: center; justify-content: center; margin-top: 20px; border: 1px solid #0756b8; border-radius: 4px; background: #fff; color: #0756b8; font-size: 15px; font-weight: 600; text-decoration: none; cursor: pointer; transition: background-color 150ms ease-out, color 150ms ease-out; }
+.signal-profile-button:hover { background: #0756b8; color: #fff; }
 .signal-gallery-empty { display: grid; place-items: center; min-height: 420px; padding: 40px; border: 1px dashed #aebac8; text-align: center; }
 .signal-gallery-empty h2, .signal-gallery-empty p { margin: 0; }
 .signal-gallery-empty button { min-height: 44px; margin-top: 16px; padding: 0 18px; border: 1px solid #0756b8; background: #fff; color: #0756b8; }
 @media (max-width: 1000px) { .signal-gallery-main { grid-template-columns: 1fr; } .signal-speaker-panel { border-left: 0; border-top: 1px solid #d6dde7; } .signal-gallery-filters { grid-template-columns: 1fr 1fr; } .signal-search { grid-column: 1 / -1; } }
 @media (max-width: 650px) { .signal-gallery-index { padding: 24px 16px; } .signal-gallery-heading h1 { font-size: 39px; } .signal-gallery-filters { grid-template-columns: 1fr; } .signal-search { grid-column: auto; } .signal-gallery-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .signal-gallery-grid .program-speaker-gallery-card { padding-inline: 8px; } .signal-speaker-panel { padding: 24px 16px; } .signal-speaker-intro { grid-template-columns: 110px 1fr; gap: 16px; } .signal-speaker-intro .program-speaker-avatar.is-large { width: 110px; height: 110px; } .signal-speaker-intro h2 { font-size: 26px; } }
+@media (prefers-reduced-motion: reduce) { .t-panel-slide, .signal-profile-button { transition: none !important; } }
 
 .embed-manager-workspace {
   display: grid;
