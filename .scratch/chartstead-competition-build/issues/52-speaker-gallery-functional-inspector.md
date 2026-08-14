@@ -1,6 +1,6 @@
 # 52 — Make the Speaker Gallery and inspector fully functional
 
-**Status:** in-progress
+**Status:** done
 
 **Blocked by:** Competition 46
 
@@ -24,6 +24,9 @@ Complete the Signal Rail gallery interaction model. Selecting any speaker must u
 - [ ] A Tailscale demo and interaction checklist are recorded before `in-review`.
 
 ## Comments
+
+- 2026-08-14 — Functional inspector completed test-first: controlled and URL-backed selection, deterministic filter fallback, Base UI speaker actions, functional search/track/role/clear, public profile/session targets, persistent inspector, and public-safe fallback states. Focused tests and build pass. Competition 57 may start.
+- 2026-08-14 — Continued in fresh isolated worktree `/home/halla/ChartStead/.worktrees/ticket-52-57-speaker-gallery-functional` on branch `ticket-52-57-speaker-gallery-functional`, based on accepted embed-polish integration commit `9b25c5f`.
 
 - 2026-08-14 — Started on integration branch `orchestrate/embed-polish-42-46` in `/home/halla/ChartStead/.worktrees/embed-polish-integration` after Tyler authorized the complete follow-up wave.
 - 2026-08-14 — Created from Tyler's functional embed sweep. Visual refinement and motion are Competition 57.

@@ -19,6 +19,7 @@ function parseProgramFilters(search: Record<string, unknown>): PublicProgramFilt
     roomId: typeof search.roomId === "string" ? search.roomId : undefined,
     format: typeof search.format === "string" ? search.format : undefined,
     speakerId: typeof search.speakerId === "string" ? search.speakerId : undefined,
+    role: typeof search.role === "string" ? search.role : undefined,
   };
 }
 
@@ -39,6 +40,7 @@ function programSearch(
     roomId: filters.roomId,
     format: filters.format,
     speakerId: filters.speakerId,
+    role: filters.role,
     session: selectedSessionId ?? undefined,
     speaker: selectedSpeakerId ?? undefined,
     itinerary: itinerarySessionIds.length ? itinerarySessionIds.join(",") : undefined,

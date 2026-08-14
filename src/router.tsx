@@ -217,6 +217,8 @@ function validateProgramSearch(search: Record<string, unknown>) {
     roomId: typeof search.roomId === "string" ? search.roomId : undefined,
     format: typeof search.format === "string" ? search.format : undefined,
     speakerId: typeof search.speakerId === "string" ? search.speakerId : undefined,
+    role: typeof search.role === "string" ? search.role : undefined,
+    speaker: typeof search.speaker === "string" ? search.speaker : undefined,
     session: typeof search.session === "string" ? search.session : undefined,
     speaker: typeof search.speaker === "string" ? search.speaker : undefined,
     itinerary: typeof search.itinerary === "string" ? search.itinerary : undefined,

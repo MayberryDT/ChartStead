@@ -1419,6 +1419,7 @@ export interface PublicProgramFilters {
   roomId?: string;
   format?: string;
   speakerId?: string;
+  role?: string;
 }
 
 export type PublicEmbedWidget =

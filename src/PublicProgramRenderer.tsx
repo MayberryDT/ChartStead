@@ -293,13 +293,14 @@ export function PublicProgramRenderer({
         ? data.speakers.filter((speaker) => {
             if (!speaker.sessionIds.some((id) => visibleIds.has(id))) return false;
             const query = filters.query?.trim().toLocaleLowerCase();
+            if (filters.role && speaker.title !== filters.role) return false;
             return !query || [speaker.name, speaker.title, speaker.company]
               .filter(Boolean).join(" ").toLocaleLowerCase().includes(query);
           })
         : filterPublicSpeakers(data.speakers, visibleIds).sort((a, b) =>
             speakerSortKey(a).localeCompare(speakerSortKey(b)),
           ),
-    [currentWidget, data.speakers, filters.query, visibleIds],
+    [currentWidget, data.speakers, filters.query, filters.role, visibleIds],
   );
 
   const days = useMemo(() => {
@@ -324,7 +325,9 @@ export function PublicProgramRenderer({
     null;
   const selectedSpeaker =
     speakers.find((speaker) => speaker.id === selectedSpeakerId) ??
-    data.speakers.find((speaker) => speaker.id === selectedSpeakerId) ??
+    (currentWidget === "speaker-gallery"
+      ? null
+      : data.speakers.find((speaker) => speaker.id === selectedSpeakerId)) ??
     null;
 
   const toggleSpeakerBiography = (speakerId: string) => {
@@ -749,19 +752,20 @@ function SignalRailGallery({ data, mode, theme, fields, filters, speakers, selec
         <section className="signal-gallery-filters" aria-label="Program filters">
           <label className="signal-search"><span className="sr-only">Search speakers</span><input type="search" value={filters.query ?? ""} placeholder="Search speakers…" onChange={(event) => onSetFilters((current) => ({ ...current, query: event.target.value || undefined }))} /></label>
           <label>Track<select value={filters.trackId ?? ""} onChange={(event) => onSetFilters((current) => ({ ...current, trackId: event.target.value || undefined }))}><option value="">All Tracks</option>{data.event.tracks.map((track) => <option key={track.id} value={track.id}>{track.name}</option>)}</select></label>
-          <label>Role<select value={filters.format ?? ""} onChange={(event) => onSetFilters((current) => ({ ...current, format: event.target.value || undefined }))}><option value="">All Roles</option>{Array.from(new Set(data.sessions.map((session) => session.format))).map((format) => <option key={format}>{format}</option>)}</select></label>
+          <label>Role<select value={filters.role ?? ""} onChange={(event) => onSetFilters((current) => ({ ...current, role: event.target.value || undefined }))}><option value="">All Roles</option>{Array.from(new Set(data.speakers.map((speaker) => speaker.title).filter(Boolean))).map((role) => <option key={role} value={role ?? ""}>{role}</option>)}</select></label>
+          <Button type="button" className="signal-clear-filters" disabled={!filters.query && !filters.trackId && !filters.role} onClick={() => onSetFilters(() => ({}))}>Clear filters</Button>
         </section>
         <p className="signal-gallery-count" role="status" aria-live="polite">{speakers.length} {countNoun(speakers.length, "speaker")}</p>
         {speakers.length ? <ul className="signal-gallery-grid">{speakers.map((speaker) => <li key={speaker.id}><SpeakerGalleryButton speaker={speaker} selected={active?.id === speaker.id} fields={fields} onSelect={() => onSelectSpeaker(speaker.id)} /></li>)}</ul> : <div className="signal-gallery-empty"><h2>No speakers found</h2><p>Try clearing or changing the current filters.</p><button type="button" onClick={() => onSetFilters(() => ({}))}>Clear filters</button></div>}
       </section>
-      {active ? <aside className="signal-speaker-panel" aria-label={`Selected speaker: ${active.name}`}>
+      {active ? <aside className="signal-speaker-panel" aria-label={`Selected speaker: ${active.name}`} aria-live="polite" key={active.id}>
         <p className="signal-selected-label">Selected speaker</p>
-        <button className="signal-panel-close" type="button" aria-label="Close selected speaker" onClick={() => onSelectSpeaker(null)}>×</button>
+        <Button className="signal-panel-close" type="button" aria-label="Reset selected speaker" onClick={() => onSelectSpeaker(null)}>×</Button>
         <div className="signal-speaker-intro">{fields.headshots ? <SpeakerAvatar speaker={active} large /> : null}<div><h2>{active.name}</h2><p>{active.title || "Professional details pending"}</p><p>{active.company || ""}</p><strong>{data.event.tracks.find((track) => linked.some((session) => session.trackId === track.id))?.name ?? "Data Leadership"}</strong><span>⌖ Wellington, New Zealand</span></div></div>
         <section><h3>About {active.name.split(" ")[0]}</h3><p>{fields.biography && active.biography ? active.biography : "Biography pending."}</p></section>
         <section><h3>Expertise</h3><ul className="signal-expertise"><li>◇ Data Governance</li><li>♙ Privacy &amp; Ethics</li><li>△ Public Policy</li><li>▥ Data Strategy</li></ul></section>
         <section><h3>Linked Sessions ({linked.length})</h3><ul className="signal-linked-sessions">{linked.map((session) => <li key={session.id}><button type="button" onClick={() => onSelectSession(session.id)}><strong>{session.title}</strong><span>{session.format}　•　{session.day ? dayLabel(session.day) : "Date TBD"}　•　{formatClock(session.startsAt)}</span><b>›</b></button></li>)}</ul></section>
-        <button className="signal-profile-button" type="button">View Full Profile</button>
+        <a className="signal-profile-button" href={`#speaker-${active.id}`}>View Full Profile</a>
       </aside> : null}
   </main></div>;
 }
