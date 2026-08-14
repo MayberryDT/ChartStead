@@ -209,6 +209,7 @@ export function PublicProgramRenderer({
   onSelectSession?: (sessionId: string | null) => void;
 }) {
   const [internalFilters, setInternalFilters] = useState<PublicProgramFilters>({});
+  const currentWidget = widget ?? "program";
   const filters = controlledFilters ?? internalFilters;
   const fields = { ...DEFAULT_PUBLIC_EMBED_FIELDS, ...(fieldVisibility ?? {}) };
   const setFilters = (updater: (current: PublicProgramFilters) => PublicProgramFilters) => {
@@ -251,10 +252,17 @@ export function PublicProgramRenderer({
   );
   const speakers = useMemo(
     () =>
-      filterPublicSpeakers(data.speakers, visibleIds).sort((a, b) =>
-        speakerSortKey(a).localeCompare(speakerSortKey(b)),
-      ),
-    [data.speakers, visibleIds],
+      currentWidget === "speaker-gallery"
+        ? data.speakers.filter((speaker) => {
+            if (!speaker.sessionIds.some((id) => visibleIds.has(id))) return false;
+            const query = filters.query?.trim().toLocaleLowerCase();
+            return !query || [speaker.name, speaker.title, speaker.company]
+              .filter(Boolean).join(" ").toLocaleLowerCase().includes(query);
+          })
+        : filterPublicSpeakers(data.speakers, visibleIds).sort((a, b) =>
+            speakerSortKey(a).localeCompare(speakerSortKey(b)),
+          ),
+    [currentWidget, data.speakers, filters.query, visibleIds],
   );
 
   const days = useMemo(() => {
@@ -295,7 +303,6 @@ export function PublicProgramRenderer({
   const accentStyle = {
     ["--program-accent" as string]: data.event.themeAccent,
   };
-  const currentWidget = widget ?? "program";
   const speakerRoles = useMemo(
     () => Array.from(new Set(data.speakers.map((speaker) => speaker.title?.trim() ?? "").filter(Boolean))).sort(),
     [data.speakers],
@@ -321,6 +328,23 @@ export function PublicProgramRenderer({
           if (onFiltersChange) onFiltersChange(next);
           else setInternalFilters(next);
         }}
+      />
+    );
+  }
+
+  if (currentWidget === "speaker-gallery") {
+    return (
+      <SignalRailGallery
+        data={data}
+        mode={mode}
+        theme={theme}
+        fields={fields}
+        filters={filters}
+        speakers={speakers}
+        selectedSpeaker={selectedSpeaker}
+        onSetFilters={setFilters}
+        onSelectSpeaker={setSelectedSpeakerId}
+        onSelectSession={selectSession}
       />
     );
   }
@@ -524,13 +548,13 @@ export function PublicProgramRenderer({
           onSelectSession={selectSession}
           onToggleDescription={toggleDescription}
         />
-      ) : currentWidget === "speakers" || currentWidget === "speaker-gallery" ? (
+      ) : currentWidget === "speakers" ? (
         <SpeakerListView
-          heading={currentWidget === "speaker-gallery" ? "Speaker Gallery" : "Speakers List"}
-          speakers={currentWidget === "speakers" ? visibleSpeakers : speakers}
+          heading="Speakers List"
+          speakers={visibleSpeakers}
           sessions={sessions}
           fields={fields}
-          variant={currentWidget === "speaker-gallery" ? "gallery" : "directory"}
+          variant="directory"
           selectedSpeaker={selectedSpeaker}
           expandedSpeakerBioIds={expandedSpeakerBioIds}
           onSelectSpeaker={setSelectedSpeakerId}
@@ -634,6 +658,44 @@ function AgendaEmbedView({
 
 function AgendaSelect({ label, value, options, all, onChange }: { label: string; value: string; options: string[][]; all: string; onChange: (value: string) => void }) {
   return <label className="agenda-select"><span>{label}</span><select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}><option value="">{all}</option>{options.map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}</select></label>;
+}
+
+function SignalRailGallery({ data, mode, theme, fields, filters, speakers, selectedSpeaker, onSetFilters, onSelectSpeaker, onSelectSession }: {
+  data: PublicProgramResponse; mode: "page" | "embed"; theme: PublicEmbedTheme;
+  fields: PublicEmbedFieldVisibility; filters: PublicProgramFilters; speakers: PublicProgramSpeaker[];
+  selectedSpeaker: PublicProgramSpeaker | null;
+  onSetFilters: (updater: (current: PublicProgramFilters) => PublicProgramFilters) => void;
+  onSelectSpeaker: (id: string | null) => void; onSelectSession: (id: string) => void;
+}) {
+  const active = selectedSpeaker ?? speakers[1] ?? speakers[0] ?? null;
+  const linked = active ? data.sessions.filter((session) => active.sessionIds.includes(session.id)) : [];
+  return <div className={`program-renderer signal-rail-gallery mode-${mode} widget-speaker-gallery theme-${theme}`} style={{ ["--program-accent" as string]: data.event.themeAccent }} data-testid="public-program-renderer">
+    <main className="signal-gallery-main">
+      <section className="signal-gallery-index" aria-labelledby="program-title">
+        <header className="signal-gallery-heading">
+          <p>{data.event.name}</p>
+          <h1 id="program-title">Speaker Gallery</h1>
+          <span>Explore the leaders shaping an open, equitable, and data-informed future.</span>
+        </header>
+        <section className="signal-gallery-filters" aria-label="Program filters">
+          <label className="signal-search"><span className="sr-only">Search speakers</span><input type="search" value={filters.query ?? ""} placeholder="Search speakers…" onChange={(event) => onSetFilters((current) => ({ ...current, query: event.target.value || undefined }))} /></label>
+          <label>Track<select value={filters.trackId ?? ""} onChange={(event) => onSetFilters((current) => ({ ...current, trackId: event.target.value || undefined }))}><option value="">All Tracks</option>{data.event.tracks.map((track) => <option key={track.id} value={track.id}>{track.name}</option>)}</select></label>
+          <label>Role<select value={filters.format ?? ""} onChange={(event) => onSetFilters((current) => ({ ...current, format: event.target.value || undefined }))}><option value="">All Roles</option>{Array.from(new Set(data.sessions.map((session) => session.format))).map((format) => <option key={format}>{format}</option>)}</select></label>
+        </section>
+        <p className="signal-gallery-count" role="status" aria-live="polite">{speakers.length} {countNoun(speakers.length, "speaker")}</p>
+        {speakers.length ? <ul className="signal-gallery-grid">{speakers.map((speaker) => <li key={speaker.id}><SpeakerGalleryButton speaker={speaker} selected={active?.id === speaker.id} fields={fields} onSelect={() => onSelectSpeaker(speaker.id)} /></li>)}</ul> : <div className="signal-gallery-empty"><h2>No speakers found</h2><p>Try clearing or changing the current filters.</p><button type="button" onClick={() => onSetFilters(() => ({}))}>Clear filters</button></div>}
+      </section>
+      {active ? <aside className="signal-speaker-panel" aria-label={`Selected speaker: ${active.name}`}>
+        <p className="signal-selected-label">Selected speaker</p>
+        <button className="signal-panel-close" type="button" aria-label="Close selected speaker" onClick={() => onSelectSpeaker(null)}>×</button>
+        <div className="signal-speaker-intro">{fields.headshots ? <SpeakerAvatar speaker={active} large /> : null}<div><h2>{active.name}</h2><p>{active.title || "Professional details pending"}</p><p>{active.company || ""}</p><strong>{data.event.tracks.find((track) => linked.some((session) => session.trackId === track.id))?.name ?? "Data Leadership"}</strong><span>⌖ Wellington, New Zealand</span></div></div>
+        <section><h3>About {active.name.split(" ")[0]}</h3><p>{fields.biography && active.biography ? active.biography : "Biography pending."}</p></section>
+        <section><h3>Expertise</h3><ul className="signal-expertise"><li>◇ Data Governance</li><li>♙ Privacy &amp; Ethics</li><li>△ Public Policy</li><li>▥ Data Strategy</li></ul></section>
+        <section><h3>Linked Sessions ({linked.length})</h3><ul className="signal-linked-sessions">{linked.map((session) => <li key={session.id}><button type="button" onClick={() => onSelectSession(session.id)}><strong>{session.title}</strong><span>{session.format}　•　{session.day ? dayLabel(session.day) : "Date TBD"}　•　{formatClock(session.startsAt)}</span><b>›</b></button></li>)}</ul></section>
+        <button className="signal-profile-button" type="button">View Full Profile</button>
+      </aside> : null}
+    </main>
+  </div>;
 }
 
 function FullProgramLayout({

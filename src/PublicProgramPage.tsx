@@ -6,6 +6,7 @@ import { isPublicEmbedWidget } from "../shared/public-program";
 import markOnLightUrl from "../design/assets/brand/chartstead-mark-on-light.png";
 import { ApiError, fetchPublicEmbed, fetchPublicProgram } from "./api";
 import { PublicProgramRenderer } from "./PublicProgramRenderer";
+import { demoSpeakerGalleryFixture } from "./demoSpeakerGalleryFixture";
 
 type ProgramSurface = PublicEmbedWidget | "program";
 
@@ -56,6 +57,7 @@ export function PublicProgramPage({
     typeof search.revision === "string" ? search.revision : undefined;
   const searchWidget = isPublicEmbedWidget(search.widget) ? search.widget : undefined;
   const surface = widget ?? searchWidget ?? "program";
+  const useSignalRailFixture = surface === "speaker-gallery" && search.fixture === "signal-rail";
   const navigate = useNavigate();
   const filters = parseProgramFilters(search);
   const selectedSessionId =
@@ -118,7 +120,7 @@ export function PublicProgramPage({
         </div>
       ) : null}
       <PublicProgramRenderer
-        data={program.data}
+        data={useSignalRailFixture ? demoSpeakerGalleryFixture : program.data}
         mode={mode}
         widget={surface}
         filters={filters}

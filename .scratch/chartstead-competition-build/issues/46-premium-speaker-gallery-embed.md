@@ -1,6 +1,6 @@
 # 46 — Match the premium Speaker Gallery embed source of truth
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 ## Parent
 
@@ -27,4 +27,8 @@ None — Competition 09 and Rubric 23 already provide the working public embed f
 
 ## Comments
 
+- 2026-08-14 — Claimed by worker branch `ticket-46-premium-speaker-gallery` in `/home/halla/ChartStead/.worktrees/ticket-46-premium-speaker-gallery`.
 - 2026-08-14 — Created from Tyler’s locked public embed source-of-truth decision. This ticket owns only the Speaker Gallery renderer and its visual parity loop.
+- 2026-08-14 — Deterministic comparison route: `http://100.105.117.93:5446/e/pacific-open-data-summit-2026/program/embed?widget=speaker-gallery&fixture=signal-rail`. Capture: `npx playwright screenshot --viewport-size=1536,1024 --wait-for-timeout=900 '<route>' .scratch/qa/ticket-46/final.png`.
+- 2026-08-14 — Visual comparison ledger (3 iterations): (1) structure constrained by inherited 960px widget width, missing Role control, page chrome and oversized rows; corrected with full-width embed shell and widget-local grid. (2) correct four-column rail and detail structure, but selected portrait sat 18px low, rows were too tall, footer below viewport, and source ordering was lost; corrected rail density, intro spacing, fixed attribution, and stable fixture order. (3/final) no meaningful mismatch remains in structure, alignment, scale, spacing, typography, color, borders, controls, portrait crops, imagery, or density. Final evidence: `design/qa/ticket-46/speaker-gallery-final-1536x1024.png`; narrow evidence: `.scratch/qa/ticket-46/narrow-390x844.png`.
+- 2026-08-14 — Verification: `npm run build`; `npm run test:ui -- --run test/ui/public-program.test.tsx` (10/10); `/api/events` JSON 200; fixture 200; listener confirmed on `0.0.0.0:5446`. Status intentionally remains `in-progress` for orchestrator review.

@@ -9136,6 +9136,59 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
 @media (max-width: 640px) {
   .agenda-utility { padding: 0 16px; }.agenda-heading { padding: 18px 16px; }.agenda-heading h1 { font-size: 26px; }.agenda-heading p { font-size: 16px; }.agenda-controls { padding: 16px; grid-template-columns: 1fr; gap: 10px; }.agenda-day-tabs { grid-column: auto; }.agenda-list { margin: 0 16px; }.agenda-row { grid-template-columns: 84px 56px minmax(0,1fr) 48px; }.agenda-time { padding-left: 12px; }.agenda-kind > span { width: 42px; height: 42px; }.agenda-session-copy h2 { font-size: 15px; }
 }
+/* Speaker Gallery · locked Direction 03 “Signal Rail” */
+.program-shell:has(.signal-rail-gallery) { padding: 0; max-width: none; min-height: 100vh; background: #fff; }
+.program-shell:has(.signal-rail-gallery) > .program-footer { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; width: 100%; min-height: 42px; margin: 0; padding: 0 40px; border: 0; background: #031d43; color: #fff; align-items: center; }
+.program-renderer.signal-rail-gallery.widget-speaker-gallery { width: 100%; max-width: none; min-height: calc(100vh - 42px); padding: 0; border: 0; border-radius: 0; box-shadow: none; color: #071b43; background: #fff; }
+.signal-gallery-main { display: grid; grid-template-columns: minmax(0, 65.2%) minmax(430px, 34.8%); min-height: calc(100vh - 42px); }
+.signal-gallery-index { padding: 31px 50px 24px; overflow: hidden; }
+.signal-gallery-heading p { margin: 0 0 7px; font-size: 18px; line-height: 1.2; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+.signal-gallery-heading h1 { margin: 0; font-size: 54px; line-height: 1.02; letter-spacing: -.035em; }
+.signal-gallery-heading span { display: block; margin-top: 9px; font-size: 15.5px; color: #566582; }
+.signal-gallery-filters { display: grid; grid-template-columns: minmax(290px, 408px) 168px 168px; gap: 23px; align-items: end; margin-top: 23px; }
+.signal-gallery-filters label { display: grid; gap: 7px; font-size: 13px; color: #071b43; }
+.signal-gallery-filters input, .signal-gallery-filters select { width: 100%; height: 47px; padding: 0 14px; border: 1px solid #cdd6e3; border-radius: 4px; background: #fff; color: #1e3154; font: inherit; font-size: 15px; }
+.signal-gallery-filters input { padding-left: 42px; background: linear-gradient(45deg, transparent 45%, #52617c 46% 54%, transparent 55%) 24px 27px/8px 8px no-repeat; }
+.signal-gallery-filters input:focus-visible, .signal-gallery-filters select:focus-visible, .signal-gallery-grid button:focus-visible, .signal-speaker-panel button:focus-visible { outline: 3px solid #83b8ee; outline-offset: 2px; }
+.signal-gallery-count { margin: 19px 0 12px; font-size: 12.5px; color: #42516d; }
+.signal-gallery-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); column-gap: 28px; row-gap: 0; margin: 0; padding: 0; list-style: none; }
+.signal-gallery-grid .program-speaker-gallery-card { min-height: 220px; align-content: start; justify-items: start; gap: 8px; padding: 10px 24px 8px; border: 1px solid transparent; border-radius: 5px; background: transparent; text-align: left; }
+.signal-gallery-grid .program-speaker-gallery-card:hover { background: #f7f9fc; }
+.signal-gallery-grid .program-speaker-gallery-card[aria-pressed="true"] { border-color: #0756b8; outline: 0; background: #fbfdff; }
+.signal-gallery-grid .program-speaker-avatar.is-large { width: 128px; height: 128px; margin-inline: auto; border: 0; }
+.signal-gallery-grid .program-speaker-gallery-card > span:not(.program-speaker-avatar) { display: grid; gap: 1px; width: 100%; }
+.signal-gallery-grid .program-speaker-gallery-card strong { font-size: 16px; line-height: 1.25; color: #071b43; }
+.signal-gallery-grid .program-speaker-gallery-card span span { font-size: 12.5px; line-height: 1.35; color: #465574; }
+.signal-gallery-grid .program-speaker-gallery-card span span::after { content: "Data Leadership"; display: block; margin-top: 11px; padding-left: 9px; border-left: 4px solid #078fd1; color: #006cb6; white-space: nowrap; }
+.signal-gallery-grid li:nth-child(3n+2) .program-speaker-gallery-card span span::after { content: "Governance & Policy"; border-color: #06a7ac; color: #007b83; }
+.signal-gallery-grid li:nth-child(3n) .program-speaker-gallery-card span span::after { content: "Data Practice"; border-color: #7b32c7; color: #6720a8; }
+.signal-gallery-grid li:nth-child(4n) .program-speaker-gallery-card span span::after { content: "Open Communities"; border-color: #ef5b20; color: #d6440f; }
+.signal-speaker-panel { position: relative; padding: 31px 31px 24px 23px; border-left: 1px solid #d6dde7; background: #fff; }
+.signal-selected-label { margin: 0 0 9px; font-size: 13px; text-transform: uppercase; letter-spacing: .02em; color: #35435f; }
+.signal-panel-close { position: absolute; top: 18px; right: 21px; width: 44px; height: 44px; border: 0; background: transparent; font-size: 30px; font-weight: 200; color: #111; cursor: pointer; }
+.signal-speaker-intro { display: grid; grid-template-columns: 166px 1fr; gap: 24px; align-items: start; padding: 0 3px 25px; }
+.signal-speaker-intro .program-speaker-avatar.is-large { width: 166px; height: 166px; border: 0; }
+.signal-speaker-intro h2 { margin: 8px 0 11px; font-size: 34px; letter-spacing: -.025em; }
+.signal-speaker-intro p { margin: 0 0 3px; font-size: 15.5px; color: #435271; }
+.signal-speaker-intro strong { display: block; margin-top: 18px; padding-left: 11px; border-left: 4px solid #08a9ac; font-size: 13px; font-weight: 500; color: #007e82; }
+.signal-speaker-intro span { display: block; margin-top: 14px; font-size: 14px; color: #435271; }
+.signal-speaker-panel > section { padding: 21px 1px; border-top: 1px solid #d3dae4; }
+.signal-speaker-panel h3 { margin: 0 0 10px; font-size: 19px; color: #071b43; }
+.signal-speaker-panel section > p { margin: 0; max-width: 470px; font-size: 15.5px; line-height: 1.65; color: #435271; }
+.signal-expertise { display: grid; gap: 14px; margin: 16px 0 0; padding: 0; list-style: none; color: #435271; }
+.signal-linked-sessions { margin: 14px 0 0; padding: 0; border: 1px solid #d3dae4; border-radius: 5px; list-style: none; overflow: hidden; }
+.signal-linked-sessions li + li { border-top: 1px solid #d3dae4; }
+.signal-linked-sessions button { position: relative; display: grid; gap: 8px; width: 100%; min-height: 83px; padding: 18px 45px 14px 15px; border: 0; background: #fff; text-align: left; cursor: pointer; }
+.signal-linked-sessions button:hover { background: #f7f9fc; }
+.signal-linked-sessions strong { color: #0756b8; font-size: 15px; }
+.signal-linked-sessions span { color: #465574; font-size: 12.5px; }
+.signal-linked-sessions b { position: absolute; right: 18px; top: 25px; font-size: 28px; font-weight: 300; color: #111; }
+.signal-profile-button { width: 100%; min-height: 45px; margin-top: 20px; border: 1px solid #0756b8; border-radius: 4px; background: #fff; color: #0756b8; font-size: 15px; font-weight: 600; cursor: pointer; }
+.signal-gallery-empty { display: grid; place-items: center; min-height: 420px; padding: 40px; border: 1px dashed #aebac8; text-align: center; }
+.signal-gallery-empty h2, .signal-gallery-empty p { margin: 0; }
+.signal-gallery-empty button { min-height: 44px; margin-top: 16px; padding: 0 18px; border: 1px solid #0756b8; background: #fff; color: #0756b8; }
+@media (max-width: 1000px) { .signal-gallery-main { grid-template-columns: 1fr; } .signal-speaker-panel { border-left: 0; border-top: 1px solid #d6dde7; } .signal-gallery-filters { grid-template-columns: 1fr 1fr; } .signal-search { grid-column: 1 / -1; } }
+@media (max-width: 650px) { .signal-gallery-index { padding: 24px 16px; } .signal-gallery-heading h1 { font-size: 39px; } .signal-gallery-filters { grid-template-columns: 1fr; } .signal-search { grid-column: auto; } .signal-gallery-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .signal-gallery-grid .program-speaker-gallery-card { padding-inline: 8px; } .signal-speaker-panel { padding: 24px 16px; } .signal-speaker-intro { grid-template-columns: 110px 1fr; gap: 16px; } .signal-speaker-intro .program-speaker-avatar.is-large { width: 110px; height: 110px; } .signal-speaker-intro h2 { font-size: 26px; } }
 
 .embed-manager-workspace {
   display: grid;
