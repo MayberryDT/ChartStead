@@ -1,6 +1,6 @@
 # 43 — Match the premium Speakers List embed source of truth
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 ## Parent
 
@@ -27,4 +27,6 @@ None — Competition 09 and Rubric 23 already provide the working public embed f
 
 ## Comments
 
+- 2026-08-14 — Completed three build → 1536×1024 capture → Vision inspection passes. Evidence: `.scratch/qa/ticket-43/final.png`; mismatch history and capture command: `.scratch/qa/ticket-43/parity-ledger.md`. Final inspection found no meaningful mismatch in structure, alignment, scale, spacing, typography, color, borders, controls, portrait crops, imagery treatment, or density. Demo: `http://100.105.117.93:5443/fixtures/embeds/speakers-list`.
+- 2026-08-14 — Claimed by worker branch `ticket-43-premium-speakers-list` in `/home/halla/ChartStead/.worktrees/ticket-43-premium-speakers-list`.
 - 2026-08-14 — Created from Tyler’s locked public embed source-of-truth decision. This ticket owns only the Speakers List renderer and its visual parity loop.

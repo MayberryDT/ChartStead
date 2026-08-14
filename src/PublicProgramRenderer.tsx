@@ -195,6 +195,7 @@ export function PublicProgramRenderer({
     () => new Set(),
   );
   const [selectedSpeakerId, setSelectedSpeakerId] = useState<string | null>(null);
+  const [speakerRole, setSpeakerRole] = useState("");
   const [expandedSpeakerBioIds, setExpandedSpeakerBioIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -269,6 +270,19 @@ export function PublicProgramRenderer({
     ["--program-accent" as string]: data.event.themeAccent,
   };
   const currentWidget = widget ?? "program";
+  const speakerRoles = useMemo(
+    () => Array.from(new Set(data.speakers.map((speaker) => speaker.title?.trim() ?? "").filter(Boolean))).sort(),
+    [data.speakers],
+  );
+  const visibleSpeakers = useMemo(
+    () => {
+      const filtered = speakerRole ? speakers.filter((speaker) => speaker.title === speakerRole) : speakers;
+      if (currentWidget !== "speakers") return filtered;
+      const order = new Map(data.speakers.map((speaker, index) => [speaker.id, index]));
+      return [...filtered].sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+    },
+    [currentWidget, data.speakers, speakerRole, speakers],
+  );
 
   if (currentWidget === "agenda") {
     return (
@@ -293,18 +307,33 @@ export function PublicProgramRenderer({
     >
       <header className="program-header">
         <p className="eyebrow">{widgetLabel(currentWidget)}</p>
-        <h1 id="program-title">{data.event.name}</h1>
-        <p>
+        <div className="program-title-line">
+          <h1 id="program-title">{data.event.name}</h1>
+          {currentWidget === "speakers" ? <span>Speakers list</span> : null}
+        </div>
+        <p>{currentWidget === "speakers" ? "Find and explore speakers by name, company, track, or role." : <>
           {data.event.startsOn === data.event.endsOn
             ? dayLabel(data.event.startsOn)
             : `${dayLabel(data.event.startsOn)} – ${dayLabel(data.event.endsOn)}`}
           {" · "}
           Published revision {data.revision.version}
           {data.revision.isCurrent ? " (current)" : " (archived)"}
-        </p>
+        </>}</p>
       </header>
 
-      <section className="program-filters" aria-label="Program filters">
+      {currentWidget === "speakers" ? (
+        <section className="speaker-directory-filters" aria-label="Speaker filters">
+          <label className="speaker-directory-search">
+            <span className="sr-only">Search by name or company</span>
+            <span aria-hidden="true" className="speaker-search-icon">⌕</span>
+            <input type="search" value={filters.query ?? ""} placeholder="Search by name or company" onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value || undefined }))} />
+            <span aria-hidden="true" className="speaker-search-submit">⌕</span>
+          </label>
+          <label>Track<select value={filters.trackId ?? ""} onChange={(event) => setFilters((current) => ({ ...current, trackId: event.target.value || undefined }))}><option value="">All Tracks</option>{data.event.tracks.map((track) => <option key={track.id} value={track.id}>{track.name}</option>)}</select></label>
+          <label>Role<select value={speakerRole} onChange={(event) => setSpeakerRole(event.target.value)}><option value="">All Roles</option>{speakerRoles.map((role) => <option key={role} value={role}>{role}</option>)}</select></label>
+          <div className="speaker-directory-filter-actions"><span role="status" aria-live="polite">{visibleSpeakers.length} {countNoun(visibleSpeakers.length, "speaker", "speakers")}</span><button type="button" onClick={() => { setSpeakerRole(""); setFilters(() => ({})); }}>↻&nbsp; Clear filters</button></div>
+        </section>
+      ) : <section className="program-filters" aria-label="Program filters">
         <label className="program-search-field">
           Search sessions or speakers
           <input
@@ -421,9 +450,9 @@ export function PublicProgramRenderer({
             ))}
           </select>
         </label>
-      </section>
+      </section>}
 
-      <p className="program-counts" role="status" aria-live="polite" data-testid="program-result-count">
+      {currentWidget !== "speakers" ? <p className="program-counts" role="status" aria-live="polite" data-testid="program-result-count">
         {sessions.length === data.sessions.length ? (
           <>
             <strong>{sessions.length}</strong>{" "}
@@ -438,7 +467,7 @@ export function PublicProgramRenderer({
         {" · "}
         <strong>{speakers.length}</strong>{" "}
         {countNoun(speakers.length, "speaker", "speakers")}
-      </p>
+      </p> : null}
 
       {currentWidget === "program" ? (
         <FullProgramLayout
@@ -468,7 +497,7 @@ export function PublicProgramRenderer({
       ) : currentWidget === "speakers" || currentWidget === "speaker-gallery" ? (
         <SpeakerListView
           heading={currentWidget === "speaker-gallery" ? "Speaker Gallery" : "Speakers List"}
-          speakers={speakers}
+          speakers={currentWidget === "speakers" ? visibleSpeakers : speakers}
           sessions={sessions}
           fields={fields}
           variant={currentWidget === "speaker-gallery" ? "gallery" : "directory"}
@@ -1075,12 +1104,13 @@ function SpeakerListView({
         <div className="program-speaker-surfaces">
           {showDirectory ? (
             <section className="program-speaker-surface" aria-labelledby="program-speaker-directory-title">
-              <h3 id="program-speaker-directory-title">Speakers List</h3>
+              <h3 id="program-speaker-directory-title" className="sr-only">Speakers List</h3>
               <ul className="program-speaker-directory">
                 {speakers.map((speaker) => (
                   <li key={speaker.id}>
                     <SpeakerDirectoryButton
                       speaker={speaker}
+                      sessions={sessions.filter((session) => speaker.sessionIds.includes(session.id))}
                       selected={selectedSpeaker?.id === speaker.id}
                       fields={fields}
                       onSelect={() => onSelectSpeaker(speaker.id)}
@@ -1126,11 +1156,13 @@ function SpeakerListView({
 
 function SpeakerDirectoryButton({
   speaker,
+  sessions,
   selected,
   fields,
   onSelect,
 }: {
   speaker: PublicProgramSpeaker;
+  sessions: PublicProgramSession[];
   selected: boolean;
   fields: PublicEmbedFieldVisibility;
   onSelect: () => void;
@@ -1143,9 +1175,16 @@ function SpeakerDirectoryButton({
       onClick={onSelect}
     >
       {fields.headshots ? <SpeakerAvatar speaker={speaker} /> : null}
-      <span>
+      <span className="program-speaker-list-copy">
+        <span className="program-speaker-list-heading">
         <strong>{speaker.name}</strong>
-        <span>{speakerSubtitle(speaker)}</span>
+          <span>View profile&nbsp; ›</span>
+        </span>
+        <span>{speaker.title || "Professional details pending"}</span>
+        <b>{speaker.company || "Organization pending"}</b>
+        {sessions.length > 0 ? <span className={`program-speaker-session-links ${trackClass(sessions[0]!.trackId)}`}>
+          {sessions.map((session, index) => <span key={session.id}>{index > 0 ? <i aria-hidden="true">•</i> : null}{session.title}</span>)}
+        </span> : null}
       </span>
     </button>
   );
@@ -1186,8 +1225,8 @@ function SpeakerAvatar({
   large?: boolean;
 }) {
   return (
-    <span className={large ? "program-speaker-avatar is-large" : "program-speaker-avatar"} aria-hidden="true">
-      {speaker.headshotUrl ? <img src={speaker.headshotUrl} alt="" /> : speakerInitials(speaker)}
+    <span className={large ? "program-speaker-avatar is-large" : "program-speaker-avatar"}>
+      {speaker.headshotUrl ? <img src={speaker.headshotUrl} alt={`Portrait of ${speaker.name}`} /> : <span aria-hidden="true">{speakerInitials(speaker)}</span>}
     </span>
   );
 }
