@@ -9112,7 +9112,7 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
 .agenda-select select { width: 100%; border: 0; outline: 0; appearance: auto; background: transparent; color: #081d3a; font: 15px Inter, sans-serif; }
 .agenda-clear { min-height: 44px; border: 0; background: transparent; color: #075ec5; font: 600 14px Inter, sans-serif; }
 .agenda-list { margin: 0 56px 0 46px; border: 1px solid #d7dee7; border-radius: 7px; overflow: hidden; }
-.agenda-row { box-sizing: border-box; height: 76px; display: grid; grid-template-columns: 132px 84px minmax(380px, 1fr) 175px 260px 62px; align-items: center; border-bottom: 1px solid #d7dee7; background: #fff; }
+.agenda-row { box-sizing: border-box; min-height: max(76px, calc(var(--agenda-duration, 45) * .92px)); display: grid; grid-template-columns: 132px 84px minmax(380px, 1fr) 175px 260px 62px; align-items: center; border-bottom: 1px solid #d7dee7; background: #fff; }
 .agenda-row:last-child { border-bottom: 0; }
 .agenda-row.is-meal { background: #fffaf0; border-color: #f1dfbd; }
 .agenda-row.tone-blue:nth-child(2) { box-shadow: inset 9px 0 #2978c7; }

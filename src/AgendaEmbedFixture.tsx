@@ -14,7 +14,7 @@ const row = (id: string, title: string, format: string, start: string, minutes: 
   speakers: speakerIds.map((speakerId) => { const speaker = speakers.find((item) => item.id === speakerId)!; return { id: speaker.id, name: speaker.name, title: "", company: "", role: "primary" as const }; }),
 });
 
-const data: PublicProgramResponse = {
+export const agendaEmbedFixtureData: PublicProgramResponse = {
   event: {
     id: "agenda-fixture", name: "Pacific Open Data Summit 2026", startsOn: "2026-10-07", endsOn: "2026-10-08", timezone: "UTC", themeAccent: "#2f5d98",
     tracks: [{ id: "keynote", name: "Keynote" }, { id: "governance", name: "Governance" }, { id: "capacity", name: "Capacity Building" }, { id: "applications", name: "Applications" }, { id: "emerging", name: "Emerging Tech" }, { id: "community", name: "Community" }],
@@ -38,5 +38,5 @@ const data: PublicProgramResponse = {
 };
 
 export function AgendaEmbedFixture() {
-  return <main className="program-shell mode-embed"><PublicProgramRenderer data={data} mode="embed" widget="agenda" /><footer className="program-footer"><p>Powered by <strong>ChartStead</strong></p></footer></main>;
+  return <main className="program-shell mode-embed"><PublicProgramRenderer data={agendaEmbedFixtureData} mode="embed" widget="agenda" /><footer className="program-footer"><p>Powered by <strong>ChartStead</strong></p></footer></main>;
 }

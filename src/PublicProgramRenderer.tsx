@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
 import { Button } from "@base-ui/react/button";
+import type { ReactNode } from "react";
 
 import type {
   PublicEmbedFieldVisibility,
@@ -678,7 +678,7 @@ function AgendaEmbedView({
   return (
     <div className="agenda-embed program-renderer widget-agenda" data-testid="public-program-renderer">
       <div className="agenda-utility">
-        <button type="button" className="agenda-itinerary-action"><AgendaIcon name="bookmark" />Save to itinerary</button>
+        <Button className="agenda-itinerary-action" aria-label="Save to itinerary"><AgendaIcon name="bookmark" />My itinerary ({saved.size})</Button>
       </div>
       <header className="agenda-heading">
         <div>
@@ -689,19 +689,21 @@ function AgendaEmbedView({
       </header>
       <section className="agenda-controls" aria-label="Agenda filters">
         <div className="agenda-day-tabs" role="group" aria-label="Event day">
-          {days.map((day, index) => <button key={day} type="button" className={filters.day === day || (!filters.day && day === days[0]) ? "is-active" : ""} onClick={() => onFiltersChange({ ...filters, day })}>{data.event.id === "agenda-fixture" ? `${index === 0 ? "Tue" : "Wed"}, Oct ${7 + index}` : dayLabel(day)}</button>)}
+          {days.map((day, index) => <Button key={day} className={filters.day === day || (!filters.day && day === days[0]) ? "is-active" : ""} onClick={() => onFiltersChange({ ...filters, day })}>{data.event.id === "agenda-fixture" ? `${index === 0 ? "Tue" : "Wed"}, Oct ${7 + index}` : dayLabel(day)}</Button>)}
         </div>
         <AgendaSelect label="Track" value={filters.trackId ?? ""} onChange={(value) => onFiltersChange({ ...filters, trackId: value || undefined })} options={data.event.tracks.map((track) => [track.id, track.name])} all="All" />
         <AgendaSelect label="Room" value={filters.roomId ?? ""} onChange={(value) => onFiltersChange({ ...filters, roomId: value || undefined })} options={data.event.rooms.map((room) => [room.id, room.name])} all="All" />
         <AgendaSelect label="Session type" value={filters.format ?? ""} onChange={(value) => onFiltersChange({ ...filters, format: value || undefined })} options={formats.map((format) => [format, format])} all="All" />
         <AgendaSelect label="Speaker" value={filters.speakerId ?? ""} onChange={(value) => onFiltersChange({ ...filters, speakerId: value || undefined })} options={speakers.map((speaker) => [speaker.id, speaker.name])} all="All" />
-        <button type="button" className="agenda-clear" onClick={clearFilters}>Clear filters</button>
+        <Button className="agenda-clear" onClick={clearFilters}>Clear filters</Button>
       </section>
-      <section className="agenda-list" aria-label="Agenda sessions">
+      <section className="agenda-list" aria-label="Agenda sessions" role="grid">
         {visibleSessions.length === 0 ? <p className="agenda-empty">No sessions match these filters.</p> : visibleSessions.map((session) => {
           const kind = agendaKind(session.format);
           const isSaved = saved.has(session.id);
-          return <article key={session.id} className={`agenda-row tone-${kind.tone}${session.format.toLowerCase().includes("lunch") ? " is-meal" : ""}`}>
+          const duration = session.startsAt && session.endsAt ? Math.max(15, Math.round((new Date(session.endsAt).getTime() - new Date(session.startsAt).getTime()) / 60000)) : 45;
+          const gridSpan = Math.max(2, Math.ceil(duration / 30));
+          return <article key={session.id} role="article" aria-label={session.title} data-duration={duration} data-grid-span={gridSpan} style={{ ["--agenda-duration" as string]: duration }} className={`agenda-row tone-${kind.tone}${session.format.toLowerCase().includes("lunch") ? " is-meal" : ""}`}>
             <div className="agenda-time">{fields.dateTime ? <><strong>{formatClock(session.startsAt)}</strong><span>{session.startsAt && session.endsAt ? `${Math.round((new Date(session.endsAt).getTime() - new Date(session.startsAt).getTime()) / 60000)} min` : "Time TBD"}</span></> : null}</div>
             <div className="agenda-kind"><span><AgendaIcon name={kind.icon} /></span></div>
             <div className="agenda-session-copy">
@@ -711,7 +713,7 @@ function AgendaEmbedView({
             </div>
             {fields.track && session.trackName ? <span className="agenda-track">{session.trackName}</span> : <span />}
             {fields.room && session.speakers.length ? <p className="agenda-room"><AgendaIcon name="pin" />{roomLabel(session)}</p> : <span />}
-            <button type="button" className="agenda-save" aria-label={`${isSaved ? "Remove" : "Save"} ${session.title} ${isSaved ? "from" : "to"} itinerary`} aria-pressed={isSaved} onClick={() => { const next = new Set(saved); if (next.has(session.id)) next.delete(session.id); else next.add(session.id); onItinerarySessionIdsChange(next); }}><AgendaIcon name="bookmark" /></button>
+            <Button className="agenda-save" aria-label={`${isSaved ? "Remove" : "Save"} ${session.title} ${isSaved ? "from" : "to"} itinerary`} aria-pressed={isSaved} onClick={() => { const next = new Set(saved); if (next.has(session.id)) next.delete(session.id); else next.add(session.id); onItinerarySessionIdsChange(next); }}><AgendaIcon name="bookmark" /></Button>
           </article>;
         })}
       </section>

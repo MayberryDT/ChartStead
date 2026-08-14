@@ -1,6 +1,6 @@
 # 50 — Make the public Agenda time grid fully functional
 
-**Status:** in-progress
+**Status:** done
 
 **Blocked by:** Competition 44
 
@@ -24,6 +24,8 @@ Replace the brittle public Agenda interaction layer with the proven state and gr
 - [ ] A Tailscale demo and interaction checklist are recorded before `in-review`.
 
 ## Comments
+
+- 2026-08-14 — Completed on `ticket-50-agenda-functionality`: duration-derived non-overlapping flow grid, working filter/day/search/clear controls, revision-scoped persistent itinerary save/remove, Base UI keyboard controls, and focused behavior tests.
 
 - 2026-08-14 — Started on integration branch `orchestrate/embed-polish-42-46` in `/home/halla/ChartStead/.worktrees/embed-polish-integration` after Tyler authorized the complete follow-up wave.
 - 2026-08-14 — Created from Tyler's functional embed sweep and request to reuse the polished organizer Agenda technology. Visual refinement is Competition 55.
