@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -6,6 +6,14 @@ import { agendaEmbedFixtureData } from "../../src/AgendaEmbedFixture";
 import { PublicProgramRenderer } from "../../src/PublicProgramRenderer";
 
 afterEach(() => { cleanup(); localStorage.clear(); });
+
+async function chooseOption(user: ReturnType<typeof userEvent.setup>, label: string, option: string) {
+  const trigger = screen.getByRole("combobox", { name: label });
+  await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded", "false"));
+  await user.click(trigger);
+  await user.click(await screen.findByRole("option", { name: option }));
+  await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded", "false"));
+}
 
 describe("functional public agenda", () => {
   it("places sessions by real duration without collision and filters the grid", async () => {
@@ -18,7 +26,7 @@ describe("functional public agenda", () => {
     expect(workshop).toHaveAttribute("data-duration", "75");
     expect(Number(workshop.getAttribute("data-grid-span"))).toBeGreaterThan(Number(keynote.getAttribute("data-grid-span")));
 
-    await user.selectOptions(screen.getByLabelText("Track"), "capacity");
+    await chooseOption(user, "Track", "Capacity Building");
     expect(within(grid).getByText("From Open Data to Public Value")).toBeInTheDocument();
     expect(within(grid).queryByText("Public Infrastructure for Everyone")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Clear filters" }));

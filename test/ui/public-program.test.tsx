@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -135,6 +135,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+async function chooseOption(user: ReturnType<typeof userEvent.setup>, label: string, option: string) {
+  const trigger = screen.getByRole("combobox", { name: label });
+  await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded", "false"));
+  await user.click(trigger);
+  await user.click(await screen.findByRole("option", { name: option }));
+  await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded", "false"));
+}
+
 describe("PublicProgramRenderer", () => {
   it("keeps itinerary state controlled across sessions, agenda, and itinerary widgets", async () => {
     const user = userEvent.setup();
@@ -215,11 +223,11 @@ describe("PublicProgramRenderer", () => {
     expect(screen.getByRole("group", { name: "Event day" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Save Opening Keynote to itinerary/ })).toHaveAttribute("aria-pressed", "false");
 
-    await user.selectOptions(screen.getByLabelText("Track"), "platform");
+    await chooseOption(user, "Track", "Platform");
     expect(screen.getByText("Opening Keynote")).toBeInTheDocument();
     expect(screen.queryByText("Community Circle")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Clear filters" }));
-    expect(screen.getByLabelText("Track")).toHaveValue("");
+    expect(screen.getByRole("combobox", { name: "Track" })).toHaveTextContent("All");
     expect(screen.getByText("Opening Keynote")).toBeInTheDocument();
   });
 
@@ -234,9 +242,9 @@ describe("PublicProgramRenderer", () => {
     await user.click(save);
     expect(save).toHaveAttribute("aria-pressed", "true");
 
-    await user.selectOptions(screen.getByLabelText("Track"), "community");
+    await chooseOption(user, "Track", "Community");
     expect(within(screen.getByRole("grid", { name: "Schedule itinerary" })).queryByText("Opening Keynote")).not.toBeInTheDocument();
-    await user.selectOptions(screen.getByLabelText("Track"), "platform");
+    await chooseOption(user, "Track", "Platform");
     expect(screen.getAllByRole("button", { name: "Remove Opening Keynote from itinerary" })
       .some((button) => button.getAttribute("aria-pressed") === "true")).toBe(true);
   });
@@ -273,7 +281,7 @@ describe("PublicProgramRenderer", () => {
     expect(within(speakers()).getAllByText("Ada Lovelace").length).toBeGreaterThan(0);
     expect(within(speakers()).getAllByText("Grace Hopper").length).toBeGreaterThan(0);
 
-    await user.selectOptions(screen.getByLabelText("Track"), "platform");
+    await chooseOption(user, "Track", "Platform");
     expect(within(schedule()).getByText("Opening Keynote")).toBeInTheDocument();
     expect(within(schedule()).queryByText("Community Circle")).not.toBeInTheDocument();
     expect(within(speakers()).getAllByText("Ada Lovelace").length).toBeGreaterThan(0);
@@ -306,7 +314,7 @@ describe("PublicProgramRenderer", () => {
     expect(within(card).getByText("keynote")).toBeInTheDocument();
     expect(within(card).getByText("Platform")).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("Track"), "platform");
+    await chooseOption(user, "Track", "Platform");
     await user.type(screen.getByRole("searchbox", { name: "Search sessions or speakers" }), "Ada");
     await user.click(within(card).getByRole("button", { name: "Opening Keynote" }));
     const expand = within(card).getByRole("button", { name: "Show more" });
@@ -314,7 +322,7 @@ describe("PublicProgramRenderer", () => {
 
     expect(expand).toHaveAttribute("aria-expanded", "true");
     expect(within(card).getByText(longDescription)).toBeInTheDocument();
-    expect(screen.getByLabelText("Track")).toHaveValue("platform");
+    expect(screen.getByRole("combobox", { name: "Track" })).toHaveTextContent("Platform");
     expect(screen.getByRole("searchbox", { name: "Search sessions or speakers" })).toHaveValue(
       "Ada",
     );
@@ -338,13 +346,13 @@ describe("PublicProgramRenderer", () => {
     expect(screen.queryByTestId("public-session-card-ses-1")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("1 of 2 sessions");
 
-    await user.selectOptions(screen.getByLabelText("Track"), "community");
-    await user.selectOptions(screen.getByLabelText("Format"), "talk");
-    await user.selectOptions(screen.getByLabelText("Location"), "tbd");
+    await chooseOption(user, "Track", "Community");
+    await chooseOption(user, "Format", "talk");
+    await chooseOption(user, "Location", "Location pending");
     expect(screen.getByTestId("public-session-card-ses-2")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("1 of 2 sessions");
 
-    await user.selectOptions(screen.getByLabelText("Track"), "platform");
+    await chooseOption(user, "Track", "Platform");
     expect(screen.getByText("No sessions match these filters.")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("0 of 2 sessions");
   });

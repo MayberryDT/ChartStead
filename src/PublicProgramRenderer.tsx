@@ -467,117 +467,21 @@ export function PublicProgramRenderer({
             }
           />
         </label>
-        {currentWidget !== "sessions" ? <label>
-          Day
-          <select
-            id="program-day-filter"
-            value={filters.day ?? ""}
-            onChange={(event) =>
-              setFilters((current) => ({
-                ...current,
-                day: event.target.value || undefined,
-              }))
-            }
-          >
-            <option value="">All days</option>
-            {days.map((day) => (
-              <option key={day} value={day}>
-                {day === "tbd" ? "Time TBD" : dayLabel(day)}
-              </option>
-            ))}
-          </select>
-        </label> : null}
+        {currentWidget !== "sessions" ? <AppSelect label="Day" value={filters.day ?? ""} options={[{ value: "", label: "All days" }, ...days.map((day) => ({ value: day, label: day === "tbd" ? "Time TBD" : dayLabel(day) }))]} onValueChange={(value) => setFilters((current) => ({ ...current, day: value || undefined }))} /> : null}
         {currentWidget === "sessions" ? <AppSelect
           label="Track"
           value={filters.trackId ?? ""}
           options={[{ value: "", label: "All tracks" }, ...data.event.tracks.map((track) => ({ value: track.id, label: track.name }))]}
           onValueChange={(value) => setFilters((current) => ({ ...current, trackId: value || undefined }))}
-        /> : <label>
-          Track
-          <select
-            id="program-track-filter"
-            value={filters.trackId ?? ""}
-            onChange={(event) =>
-              setFilters((current) => ({
-                ...current,
-                trackId: event.target.value || undefined,
-              }))
-            }
-          >
-            <option value="">All tracks</option>
-            {data.event.tracks.map((track) => (
-              <option key={track.id} value={track.id}>
-                {track.name}
-              </option>
-            ))}
-          </select>
-        </label>}
-        {currentWidget !== "sessions" ? <label>
-          Location
-          <select
-            id="program-location-filter"
-            value={filters.roomId ?? ""}
-            onChange={(event) =>
-              setFilters((current) => ({
-                ...current,
-                roomId: event.target.value || undefined,
-              }))
-            }
-          >
-            <option value="">All rooms</option>
-            {data.event.rooms.map((room) => (
-              <option key={room.id} value={room.id}>
-                {room.name}
-              </option>
-            ))}
-            <option value="tbd">Location pending</option>
-          </select>
-        </label> : null}
+        /> : <AppSelect label="Track" value={filters.trackId ?? ""} options={[{ value: "", label: "All tracks" }, ...data.event.tracks.map((track) => ({ value: track.id, label: track.name }))]} onValueChange={(value) => setFilters((current) => ({ ...current, trackId: value || undefined }))} />}
+        {currentWidget !== "sessions" ? <AppSelect label="Location" value={filters.roomId ?? ""} options={[{ value: "", label: "All rooms" }, ...data.event.rooms.map((room) => ({ value: room.id, label: room.name })), { value: "tbd", label: "Location pending" }]} onValueChange={(value) => setFilters((current) => ({ ...current, roomId: value || undefined }))} /> : null}
         {currentWidget === "sessions" ? <AppSelect
           label="Session type"
           value={filters.format ?? ""}
           options={[{ value: "", label: "All session types" }, ...formats.map((format) => ({ value: format, label: format }))]}
           onValueChange={(value) => setFilters((current) => ({ ...current, format: value || undefined }))}
-        /> : <label>
-          Format
-          <select
-            id="program-format-filter"
-            value={filters.format ?? ""}
-            onChange={(event) =>
-              setFilters((current) => ({
-                ...current,
-                format: event.target.value || undefined,
-              }))
-            }
-          >
-            <option value="">All formats</option>
-            {formats.map((format) => (
-              <option key={format} value={format}>
-                {format}
-              </option>
-            ))}
-          </select>
-        </label>}
-        {currentWidget !== "sessions" ? <label>
-          Speaker
-          <select
-            id="program-speaker-filter"
-            value={filters.speakerId ?? ""}
-            onChange={(event) =>
-              setFilters((current) => ({
-                ...current,
-                speakerId: event.target.value || undefined,
-              }))
-            }
-          >
-            <option value="">All speakers</option>
-            {data.speakers.map((speaker) => (
-              <option key={speaker.id} value={speaker.id}>
-                {speaker.name}
-              </option>
-            ))}
-          </select>
-        </label> : null}
+        /> : <AppSelect label="Format" value={filters.format ?? ""} options={[{ value: "", label: "All formats" }, ...formats.map((format) => ({ value: format, label: format }))]} onValueChange={(value) => setFilters((current) => ({ ...current, format: value || undefined }))} />}
+        {currentWidget !== "sessions" ? <AppSelect label="Speaker" value={filters.speakerId ?? ""} options={[{ value: "", label: "All speakers" }, ...data.speakers.map((speaker) => ({ value: speaker.id, label: speaker.name }))]} onValueChange={(value) => setFilters((current) => ({ ...current, speakerId: value || undefined }))} /> : null}
         {currentWidget === "sessions" ? <Button type="button" className="sessions-clear" onClick={() => setFilters(() => ({}))}>Clear filters</Button> : null}
       </section>}
 
@@ -729,7 +633,7 @@ function AgendaEmbedView({
 }
 
 function AgendaSelect({ label, value, options, all, onChange }: { label: string; value: string; options: string[][]; all: string; onChange: (value: string) => void }) {
-  return <label className="agenda-select"><span>{label}</span><select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}><option value="">{all}</option>{options.map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}</select></label>;
+  return <div className="agenda-select"><AppSelect label={label} value={value} options={[{ value: "", label: all }, ...options.map(([optionValue, optionLabel]) => ({ value: optionValue ?? "", label: optionLabel ?? optionValue ?? "" }))]} onValueChange={onChange} /></div>;
 }
 
 function SignalRailGallery({ data, mode, theme, fields, filters, speakers, selectedSpeaker, onSetFilters, onSelectSpeaker, onSelectSession }: {
@@ -751,8 +655,8 @@ function SignalRailGallery({ data, mode, theme, fields, filters, speakers, selec
         </header>
         <section className="signal-gallery-filters" aria-label="Program filters">
           <label className="signal-search"><span className="sr-only">Search speakers</span><input type="search" value={filters.query ?? ""} placeholder="Search speakers…" onChange={(event) => onSetFilters((current) => ({ ...current, query: event.target.value || undefined }))} /></label>
-          <label>Track<select value={filters.trackId ?? ""} onChange={(event) => onSetFilters((current) => ({ ...current, trackId: event.target.value || undefined }))}><option value="">All Tracks</option>{data.event.tracks.map((track) => <option key={track.id} value={track.id}>{track.name}</option>)}</select></label>
-          <label>Role<select value={filters.role ?? ""} onChange={(event) => onSetFilters((current) => ({ ...current, role: event.target.value || undefined }))}><option value="">All Roles</option>{Array.from(new Set(data.speakers.map((speaker) => speaker.title).filter(Boolean))).map((role) => <option key={role} value={role ?? ""}>{role}</option>)}</select></label>
+          <AppSelect label="Track" value={filters.trackId ?? ""} options={[{ value: "", label: "All Tracks" }, ...data.event.tracks.map((track) => ({ value: track.id, label: track.name }))]} onValueChange={(value) => onSetFilters((current) => ({ ...current, trackId: value || undefined }))} />
+          <AppSelect label="Role" value={filters.role ?? ""} options={[{ value: "", label: "All Roles" }, ...Array.from(new Set(data.speakers.map((speaker) => speaker.title).filter(Boolean))).map((role) => ({ value: role ?? "", label: role ?? "" }))]} onValueChange={(value) => onSetFilters((current) => ({ ...current, role: value || undefined }))} />
           <Button type="button" className="signal-clear-filters" disabled={!filters.query && !filters.trackId && !filters.role} onClick={() => onSetFilters(() => ({}))}>Clear filters</Button>
         </section>
         <p className="signal-gallery-count" role="status" aria-live="polite">{speakers.length} {countNoun(speakers.length, "speaker")}</p>
@@ -825,9 +729,9 @@ function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, 
       <section className="itinerary-controls" aria-label="Program filters">
         <div className="itinerary-days" role="tablist" aria-label="Event day">{days.filter((day) => day !== "tbd").map((day) => <Button role="tab" aria-selected={activeDay === day} key={day} className={activeDay === day ? "is-active" : ""} onClick={() => update("day", day)}>{dayLabel(day)}</Button>)}</div>
         <label className="itinerary-search"><span aria-hidden="true">⌕</span><span className="sr-only">Search sessions or speakers</span><input type="search" value={filters.query ?? ""} placeholder="Search sessions, speakers, topics..." onChange={(event) => update("query", event.target.value)} /></label>
-        <label><span className="sr-only">Track</span><select aria-label="Track" value={filters.trackId ?? ""} onChange={(event) => update("trackId", event.target.value)}><option value="">Track</option>{data.event.tracks.map((track) => <option key={track.id} value={track.id}>{track.name}</option>)}</select></label>
-        <label><span className="sr-only">Location</span><select aria-label="Location" value={filters.roomId ?? ""} onChange={(event) => update("roomId", event.target.value)}><option value="">Room</option>{data.event.rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}<option value="tbd">Location pending</option></select></label>
-        <label><span className="sr-only">Format</span><select aria-label="Format" value={filters.format ?? ""} onChange={(event) => update("format", event.target.value)}><option value="">Session type</option>{formats.map((format) => <option key={format}>{format}</option>)}</select></label>
+        <AppSelect label="Track" value={filters.trackId ?? ""} options={[{ value: "", label: "Track" }, ...data.event.tracks.map((track) => ({ value: track.id, label: track.name }))]} onValueChange={(value) => update("trackId", value)} hideLabel />
+        <AppSelect label="Location" value={filters.roomId ?? ""} options={[{ value: "", label: "Room" }, ...data.event.rooms.map((room) => ({ value: room.id, label: room.name })), { value: "tbd", label: "Location pending" }]} onValueChange={(value) => update("roomId", value)} hideLabel />
+        <AppSelect label="Format" value={filters.format ?? ""} options={[{ value: "", label: "Session type" }, ...formats.map((format) => ({ value: format, label: format }))]} onValueChange={(value) => update("format", value)} hideLabel />
         <Button className="itinerary-clear" type="button" onClick={clearFilters}>Clear filters</Button>
       </section>
       {sessions.length === 0 ? <p className="itinerary-empty" role="status">No sessions match these filters.</p> : <div className="itinerary-grid-wrap">

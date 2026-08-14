@@ -10202,3 +10202,10 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
 .widget-sessions .program-search-field { height: 48px; padding-left: 0 !important; }
 .widget-sessions .program-search-field input { height: 48px; padding: 0 12px 0 42px; border: 1px solid #cfd8e6; border-radius: 4px; }
 .widget-sessions .sessions-search-icon { left: 14px; top: 11px; }
+.program-filters > .app-select,
+.agenda-select .app-select,
+.signal-gallery-filters > .app-select,
+.itinerary-controls > .app-select { min-width: 0; width: 100%; }
+.agenda-select .app-select-trigger,
+.itinerary-controls .app-select-trigger { width: 100%; min-height: 44px; background: #fff; }
+.signal-gallery-filters .app-select-trigger { width: 100%; min-height: 47px; background: #fff; }
