@@ -10194,3 +10194,11 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
   .program-renderer .app-select-trigger { transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease; }
   .program-renderer button:active { transform: translateY(1px); }
 }
+
+/* Final Sessions/Speakers decluttering: one control surface, never a card inside a card. */
+.program-renderer.widget-speakers { border: 0; border-radius: 0; box-shadow: none; }
+.widget-sessions .program-filters label,
+.widget-sessions .program-filters > .app-select { padding: 0; border: 0; }
+.widget-sessions .program-search-field { height: 48px; padding-left: 0 !important; }
+.widget-sessions .program-search-field input { height: 48px; padding: 0 12px 0 42px; border: 1px solid #cfd8e6; border-radius: 4px; }
+.widget-sessions .sessions-search-icon { left: 14px; top: 11px; }
