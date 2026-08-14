@@ -1,6 +1,6 @@
 # 55 — Give the public Agenda final premium grid polish
 
-**Status:** blocked — waiting for Competition 50
+**Status:** in-review
 
 **Blocked by:** Competition 50
 
@@ -24,6 +24,9 @@ Polish the functional public Agenda into a minimal attendee-facing schedule that
 - [ ] A Tailscale demo and what-to-test checklist are recorded before `in-review`.
 
 ## Comments
+
+- 2026-08-14 — Ready for QA at `http://100.105.117.93:5450/fixtures/agenda-embed`. Verify desktop/narrow layout, filter/day/search/clear behavior, itinerary save/remove persistence, duration-proportional rows, keyboard focus, and centered footer. Evidence: `.scratch/visual-qa/ticket-55/agenda-desktop.png` and `agenda-narrow.png`.
+- 2026-08-14 — Started after Competition 50 completed on `ticket-50-agenda-functionality`.
 
 - 2026-08-14 — Created from Tyler's agenda overlap, shared-tech, branding-removal, and premium-polish notes.
 

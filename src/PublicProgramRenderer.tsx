@@ -677,15 +677,13 @@ function AgendaEmbedView({
 
   return (
     <div className="agenda-embed program-renderer widget-agenda" data-testid="public-program-renderer">
-      <div className="agenda-utility">
-        <Button className="agenda-itinerary-action" aria-label="Save to itinerary"><AgendaIcon name="bookmark" />My itinerary ({saved.size})</Button>
-      </div>
       <header className="agenda-heading">
         <div>
           <h1>{data.event.name}</h1>
           <p>{data.event.startsOn === data.event.endsOn ? dayLabel(data.event.startsOn) : `${new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", timeZone: "UTC" }).format(new Date(`${data.event.startsOn}T00:00:00Z`))}–${new Date(`${data.event.endsOn}T00:00:00Z`).getUTCDate()}, ${new Date(`${data.event.endsOn}T00:00:00Z`).getUTCFullYear()}`}</p>
         </div>
         <label className="agenda-search"><span className="sr-only">Search agenda</span><AgendaIcon name="search" /><input type="search" value={filters.query ?? ""} placeholder="Search agenda" onChange={(event) => onFiltersChange({ ...filters, query: event.target.value || undefined })} /></label>
+        <Button className="agenda-itinerary-action" aria-label="Save to itinerary"><AgendaIcon name="bookmark" />My itinerary ({saved.size})</Button>
       </header>
       <section className="agenda-controls" aria-label="Agenda filters">
         <div className="agenda-day-tabs" role="group" aria-label="Event day">
