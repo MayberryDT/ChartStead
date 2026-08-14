@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import { Button } from "@base-ui/react/button";
 
@@ -64,20 +64,36 @@ export function PublicProgramPage({
   const surface = widget ?? searchWidget ?? "program";
   const useSignalRailFixture = surface === "speaker-gallery" && search.fixture === "signal-rail";
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const filters = parseProgramFilters(search);
   const selectedSessionId =
     typeof search.session === "string" ? search.session : null;
   const selectedSpeakerId =
     typeof search.speaker === "string" ? search.speaker : null;
-  const itinerarySessionIds = typeof search.itinerary === "string"
+  const itineraryFromUrl = typeof search.itinerary === "string"
     ? Array.from(new Set(search.itinerary.split(",").map((id) => id.trim()).filter(Boolean)))
     : [];
+  const itineraryStorageKey = `chartstead:itinerary:${eventId}:${revisionId ?? "current"}`;
+  const itinerary = useQuery({
+    queryKey: ["public-itinerary", eventId, revisionId ?? "current"],
+    queryFn: () => {
+      if (itineraryFromUrl.length) return itineraryFromUrl;
+      try { return JSON.parse(localStorage.getItem(itineraryStorageKey) ?? "[]") as string[]; }
+      catch { return []; }
+    },
+    initialData: () => {
+      if (itineraryFromUrl.length) return itineraryFromUrl;
+      try { return JSON.parse(localStorage.getItem(itineraryStorageKey) ?? "[]") as string[]; }
+      catch { return []; }
+    },
+    staleTime: Infinity,
+  });
 
   const updateProgramSearch = (
     nextFilters: PublicProgramFilters,
     nextSessionId: string | null,
     nextSpeakerId = selectedSpeakerId,
-    nextItinerarySessionIds = itinerarySessionIds,
+    nextItinerarySessionIds = itinerary.data,
   ) => {
     const nextSearch = programSearch(
       revisionId,
@@ -101,6 +117,28 @@ export function PublicProgramPage({
       search: nextSearch,
     });
   };
+
+  const itineraryMutation = useMutation({
+    mutationFn: async (nextIds: string[]) => {
+      localStorage.setItem(itineraryStorageKey, JSON.stringify(nextIds));
+      return nextIds;
+    },
+    onMutate: async (nextIds) => {
+      const key = ["public-itinerary", eventId, revisionId ?? "current"] as const;
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<string[]>(key) ?? [];
+      queryClient.setQueryData(key, nextIds);
+      updateProgramSearch(filters, selectedSessionId, selectedSpeakerId, nextIds);
+      return { previous, key };
+    },
+    onError: (_error, _nextIds, context) => {
+      if (context) {
+        queryClient.setQueryData(context.key, context.previous);
+        updateProgramSearch(filters, selectedSessionId, selectedSpeakerId, context.previous);
+      }
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["public-itinerary", eventId] }),
+  });
 
   const program = useQuery({
     queryKey: ["public-program", eventId, revisionId ?? "current"],
@@ -149,23 +187,25 @@ export function PublicProgramPage({
         onSelectSession={(sessionId) => updateProgramSearch(filters, sessionId)}
         selectedSpeakerId={selectedSpeakerId}
         onSelectSpeaker={(speakerId) => updateProgramSearch(filters, selectedSessionId, speakerId)}
-        itinerarySessionIds={itinerarySessionIds}
-        onItinerarySessionIdsChange={(sessionIds) => updateProgramSearch(filters, selectedSessionId, selectedSpeakerId, sessionIds)}
+        itinerarySessionIds={itinerary.data}
+        onItinerarySessionIdsChange={(sessionIds) => itineraryMutation.mutate(sessionIds)}
+        itineraryPending={itineraryMutation.isPending}
+        itineraryError={itineraryMutation.isError ? "We couldn't save that itinerary change." : null}
       />
-      <footer className="program-footer">
+      {surface !== "itinerary" ? <footer className="program-footer">
         <p>Powered by ChartStead</p>
         {mode === "page" ? (
           <p>
             <Link
               to="/e/$eventId/program/embed"
               params={{ eventId }}
-              search={programSearch(revisionId, filters, selectedSessionId, surface, selectedSpeakerId, itinerarySessionIds)}
+              search={programSearch(revisionId, filters, selectedSessionId, surface, selectedSpeakerId, itinerary.data)}
             >
               Embed view
             </Link>
           </p>
         ) : null}
-      </footer>
+      </footer> : null}
     </main>
   );
 }

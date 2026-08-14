@@ -241,6 +241,24 @@ describe("PublicProgramRenderer", () => {
       .some((button) => button.getAttribute("aria-pressed") === "true")).toBe(true);
   });
 
+  it("keeps controlled itinerary saves atomic, duplicate-free, and restorable", async () => {
+    const user = userEvent.setup();
+    const onItineraryChange = vi.fn();
+    const { rerender } = render(
+      <PublicProgramRenderer data={programResponse()} widget="itinerary" mode="embed"
+        itinerarySessionIds={[]} onItinerarySessionIdsChange={onItineraryChange} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Save Opening Keynote" }));
+    expect(onItineraryChange).toHaveBeenLastCalledWith(["ses-1"]);
+
+    rerender(<PublicProgramRenderer data={programResponse()} widget="itinerary" mode="embed"
+      itinerarySessionIds={["ses-1", "ses-1"]} onItinerarySessionIdsChange={onItineraryChange} />);
+    expect(screen.getByText("1 saved")).toBeInTheDocument();
+    await user.click(within(screen.getByRole("grid", { name: "Schedule itinerary" }))
+      .getByRole("button", { name: "Remove Opening Keynote from itinerary" }));
+    expect(onItineraryChange).toHaveBeenLastCalledWith([]);
+  });
+
   it("filters schedule and speaker lineup together", async () => {
     const user = userEvent.setup();
     render(<PublicProgramRenderer data={programResponse()} />);
