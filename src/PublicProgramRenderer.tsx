@@ -52,6 +52,9 @@ function trackClass(trackId: string): string {
     "economy",
     "environment",
     "privacy",
+    "keynote",
+    "technology",
+    "applications",
   ];
   if (known.includes(trackId)) return `track-${trackId}`;
   const index = (trackId.charCodeAt(0) % 4) + 1;
@@ -349,6 +352,24 @@ export function PublicProgramRenderer({
     );
   }
 
+  if (currentWidget === "itinerary") {
+    return (
+      <IndexedItinerary
+        data={data}
+        sessions={sessions}
+        filters={filters}
+        setFilters={setFilters}
+        days={days}
+        formats={formats}
+        selectedId={selectedId}
+        onSelectSession={selectSession}
+        mode={mode}
+        theme={theme}
+        accentStyle={accentStyle}
+      />
+    );
+  }
+
   return (
     <div
       className={`program-renderer mode-${mode} widget-${currentWidget} theme-${theme}`}
@@ -561,16 +582,6 @@ export function PublicProgramRenderer({
           onSelectSession={selectSession}
           onToggleSpeakerBiography={toggleSpeakerBiography}
         />
-      ) : currentWidget === "itinerary" ? (
-        <ItineraryView
-          sessions={sessions}
-          timeZone={data.event.timezone ?? "UTC"}
-          selectedId={selectedId}
-          expandedSessionIds={expandedSessionIds}
-          fields={fields}
-          onSelectSession={selectSession}
-          onToggleDescription={toggleDescription}
-        />
       ) : (
         <FullProgramLayout
           data={data}
@@ -694,6 +705,63 @@ function SignalRailGallery({ data, mode, theme, fields, filters, speakers, selec
         <section><h3>Linked Sessions ({linked.length})</h3><ul className="signal-linked-sessions">{linked.map((session) => <li key={session.id}><button type="button" onClick={() => onSelectSession(session.id)}><strong>{session.title}</strong><span>{session.format}　•　{session.day ? dayLabel(session.day) : "Date TBD"}　•　{formatClock(session.startsAt)}</span><b>›</b></button></li>)}</ul></section>
         <button className="signal-profile-button" type="button">View Full Profile</button>
       </aside> : null}
+  </main></div>;
+}
+
+function BookmarkIcon({ filled = false }: { filled?: boolean }) {
+  return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6.5 3.5h11v17l-5.5-3.7-5.5 3.7z" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.7" /></svg>;
+}
+
+function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, selectedId, onSelectSession, mode, theme, accentStyle }: {
+  data: PublicProgramResponse; sessions: PublicProgramSession[]; filters: PublicProgramFilters;
+  setFilters: (updater: (current: PublicProgramFilters) => PublicProgramFilters) => void;
+  days: string[]; formats: string[]; selectedId: string | null;
+  onSelectSession: (sessionId: string | null) => void; mode: "page" | "embed";
+  theme: PublicEmbedTheme; accentStyle: Record<string, string>;
+}) {
+  const scheduled = sessions.filter((session) => session.startsAt && session.day);
+  const pending = sessions.filter((session) => !session.startsAt || !session.day);
+  const roomIds = data.event.rooms.map((room) => room.id);
+  const times = Array.from(new Set(scheduled.map((session) => session.startsAt!.slice(11, 16)))).sort();
+  const activeDay = filters.day && filters.day !== "tbd" ? filters.day : days.find((day) => day !== "tbd");
+  const clearFilters = () => setFilters(() => ({}));
+  const update = (key: keyof PublicProgramFilters, value: string) => setFilters((current) => ({ ...current, [key]: value || undefined }));
+  return <div className={`program-renderer indexed-itinerary mode-${mode} widget-itinerary theme-${theme}`} style={accentStyle} data-testid="public-program-renderer">
+    <aside className="itinerary-rail" aria-label="My itinerary">
+      <div className="itinerary-brand"><span className="itinerary-mark" aria-hidden="true">▦</span><strong>ChartStead</strong></div>
+      <section className="itinerary-saved">
+        <header><h2>My itinerary</h2><span>{selectedId ? "1 saved" : "0 saved"}</span></header>
+        {selectedId ? sessions.filter((session) => session.id === selectedId).map((session) => <article key={session.id}>
+          <span>{session.day ? dayLabel(session.day).toUpperCase() : "TIME TBD"} {formatClock(session.startsAt)}</span>
+          <button type="button" onClick={() => onSelectSession(null)} aria-label={`Remove ${session.title} from itinerary`}><BookmarkIcon filled /></button>
+          <h3>{session.title}</h3><p>{session.speakers.map((speaker) => speaker.name).join(", ") || session.format}</p>
+          <small>{session.trackName} · {session.startsAt && session.endsAt ? `${(new Date(session.endsAt).getTime() - new Date(session.startsAt).getTime()) / 60000} min` : "TBD"}</small>
+        </article>) : <p className="itinerary-none">Save sessions to build your personal schedule.</p>}
+      </section>
+      <button className="itinerary-view" type="button" disabled={!selectedId}>View my itinerary <span>→</span></button>
+      <section className="itinerary-legend"><h2>Tracks</h2>{data.event.tracks.map((track) => <span key={track.id} className={trackClass(track.id)}><i />{track.name}</span>)}</section>
+      <p className="itinerary-powered">Powered by <strong>ChartStead</strong></p>
+    </aside>
+    <main className="itinerary-main">
+      <header className="itinerary-heading"><h1>{data.event.name}</h1><p>{new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" }).format(new Date(`${data.event.startsOn}T00:00:00Z`))}–{new Date(`${data.event.endsOn}T00:00:00Z`).getUTCDate()}, {new Date(`${data.event.endsOn}T00:00:00Z`).getUTCFullYear()}</p></header>
+      <section className="itinerary-controls" aria-label="Program filters">
+        <div className="itinerary-days">{days.filter((day) => day !== "tbd").map((day) => <button key={day} className={activeDay === day ? "is-active" : ""} onClick={() => update("day", day)}>{dayLabel(day)}</button>)}</div>
+        <label className="itinerary-search"><span aria-hidden="true">⌕</span><span className="sr-only">Search sessions or speakers</span><input type="search" value={filters.query ?? ""} placeholder="Search sessions, speakers, topics..." onChange={(event) => update("query", event.target.value)} /></label>
+        <label><span className="sr-only">Track</span><select aria-label="Track" value={filters.trackId ?? ""} onChange={(event) => update("trackId", event.target.value)}><option value="">Track</option>{data.event.tracks.map((track) => <option key={track.id} value={track.id}>{track.name}</option>)}</select></label>
+        <label><span className="sr-only">Location</span><select aria-label="Location" value={filters.roomId ?? ""} onChange={(event) => update("roomId", event.target.value)}><option value="">Room</option>{data.event.rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}<option value="tbd">Location pending</option></select></label>
+        <label><span className="sr-only">Format</span><select aria-label="Format" value={filters.format ?? ""} onChange={(event) => update("format", event.target.value)}><option value="">Session type</option>{formats.map((format) => <option key={format}>{format}</option>)}</select></label>
+        <button className="itinerary-clear" type="button" onClick={clearFilters}>Clear filters</button>
+      </section>
+      {sessions.length === 0 ? <p className="itinerary-empty" role="status">No sessions match these filters.</p> : <div className="itinerary-grid-wrap">
+        <div className="itinerary-grid" role="grid" aria-label="Schedule itinerary" style={{ ["--room-count" as string]: roomIds.length }}>
+          <div className="itinerary-corner" role="columnheader">Time</div>{data.event.rooms.map((room) => <div key={room.id} className="itinerary-room" role="columnheader" aria-label={room.name}>{room.name}<small>{room.readiness === "ready" ? "Ready" : "Pending"}</small></div>)}
+          {times.map((time) => <div className="itinerary-time-row" role="row" key={time}><time>{formatClock(`2026-10-07T${time}:00.000Z`)}</time>{roomIds.map((roomId) => { const items = scheduled.filter((session) => session.startsAt!.slice(11, 16) === time && session.roomId === roomId); return <div className="itinerary-cell" role="gridcell" key={roomId}>{items.map((session) => <article key={session.id} className={`itinerary-card ${trackClass(session.trackId)} ${selectedId === session.id ? "is-saved" : ""}`}>
+            <span>{timeLabel(session)}</span><button type="button" aria-label={selectedId === session.id ? `Remove ${session.title} from itinerary` : `Save ${session.title}`} aria-pressed={selectedId === session.id} onClick={() => onSelectSession(selectedId === session.id ? null : session.id)}><BookmarkIcon filled={selectedId === session.id} /></button>
+            <h2>{session.title}</h2>{session.speakers.length ? <p>{session.speakers.map((speaker) => speaker.name).join(", ")}</p> : null}<small><i />{session.trackName || session.format}</small>
+          </article>)}</div>})}</div>)}
+        </div>
+      </div>}
+      {pending.length ? <section className="itinerary-pending" aria-label="Time or location pending"><h2>To be scheduled</h2>{pending.map((session) => <span key={session.id}>{session.title} · {roomLabel(session)}</span>)}</section> : null}
     </main>
   </div>;
 }

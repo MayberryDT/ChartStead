@@ -154,6 +154,23 @@ describe("PublicProgramRenderer", () => {
     expect(screen.getByText("Opening Keynote")).toBeInTheDocument();
   });
 
+  it("renders itinerary as an accessible time-by-room grid and preserves saved state while filtering", async () => {
+    const user = userEvent.setup();
+    render(<PublicProgramRenderer data={programResponse()} widget="itinerary" mode="embed" />);
+
+    expect(screen.getByRole("grid", { name: "Schedule itinerary" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Harbor Hall" })).toBeInTheDocument();
+    const save = screen.getByRole("button", { name: "Save Opening Keynote" });
+    await user.click(save);
+    expect(save).toHaveAttribute("aria-pressed", "true");
+
+    await user.selectOptions(screen.getByLabelText("Track"), "community");
+    expect(screen.queryByText("Opening Keynote")).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Track"), "platform");
+    expect(screen.getAllByRole("button", { name: "Remove Opening Keynote from itinerary" })
+      .some((button) => button.getAttribute("aria-pressed") === "true")).toBe(true);
+  });
+
   it("filters schedule and speaker lineup together", async () => {
     const user = userEvent.setup();
     render(<PublicProgramRenderer data={programResponse()} />);
