@@ -7,6 +7,7 @@ import {
   createEventWorkspace,
   updateEventConfiguration,
 } from "./api";
+import { SettingsTextField, SettingsSelectField } from "./SettingsFields";
 
 const TIMEZONES = [
   "America/Los_Angeles",
@@ -242,18 +243,12 @@ export function EventConfigurationCard({
     setMessage(null);
   }
 
+  const resourceRowCount = Math.max(tracks.length, rooms.length);
+
   return (
-    <section className="settings-card event-configuration-card" aria-labelledby="event-configuration-heading">
-      <div className="settings-card-header">
-        <div>
-          <h2 id="event-configuration-heading">Event configuration</h2>
-          <p className="muted">
-            Dates and timezone drive the workspace. Permanent identifiers keep links stable.
-          </p>
-        </div>
-        <code>{event.id}</code>
-      </div>
+    <section className="settings-card event-configuration-card" aria-label="Event">
       <form
+        id="event-configuration-form"
         className="settings-form"
         onSubmit={(formEvent: FormEvent) => {
           formEvent.preventDefault();
@@ -262,88 +257,110 @@ export function EventConfigurationCard({
         }}
       >
         <div className="event-config-details">
-          <label className="settings-label">
-            Event name
-            <input className="settings-input" value={name} onChange={(change) => setName(change.target.value)} />
-          </label>
-          <label className="settings-label">
-            Start date
-            <input className="settings-input" type="date" value={startsOn} onChange={(change) => setStartsOn(change.target.value)} />
-          </label>
-          <label className="settings-label">
-            End date
-            <input className="settings-input" type="date" value={endsOn} onChange={(change) => setEndsOn(change.target.value)} />
-          </label>
-          <label className="settings-label">
-            Timezone
-            <select className="settings-input" value={timezone} onChange={(change) => setTimezone(change.target.value)}>
-              {TIMEZONES.map((value) => <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}
-            </select>
-          </label>
+          <SettingsTextField label="Name" value={name} onChange={setName} />
+          <SettingsTextField label="Starts" type="date" value={startsOn} onChange={setStartsOn} />
+          <SettingsTextField label="Ends" type="date" value={endsOn} onChange={setEndsOn} />
+          <SettingsSelectField
+            label="Timezone"
+            value={timezone}
+            onChange={setTimezone}
+            options={TIMEZONES.map((value) => ({
+              value,
+              label: value.replaceAll("_", " "),
+            }))}
+          />
         </div>
 
-        <div className="event-resource-grid">
-          <fieldset>
-            <legend>Tracks</legend>
-            <p className="muted">Submission and reviewer routing categories.</p>
-            <div className="event-resource-list">
-              {tracks.length === 0 ? <p className="empty-state">No tracks configured yet.</p> : null}
-              {tracks.map((track) => (
-                <div className="event-resource-row" key={track.id}>
-                  <label>
-                    <span>Track name {track.id}</span>
-                    <input
-                      className="settings-input"
-                      value={track.name}
-                      onChange={(change) => setTracks(tracks.map((candidate) => candidate.id === track.id ? { ...candidate, name: change.target.value } : candidate))}
-                    />
-                  </label>
-                  <code>{track.id}</code>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setTracks(tracks.filter((candidate) => candidate.id !== track.id))}>
-                    Remove track {track.name}
-                  </button>
-                </div>
-              ))}
-            </div>
-            <div className="event-resource-add">
-              <label className="settings-label">
-                New track name
-                <input className="settings-input" value={newTrackName} onChange={(change) => setNewTrackName(change.target.value)} />
-              </label>
-              <button type="button" className="btn btn-secondary" disabled={!newTrackName.trim()} onClick={addTrack}>Add track</button>
-            </div>
-          </fieldset>
+        <div className="event-resource-table" role="table" aria-label="Tracks and rooms">
+          <div className="event-resource-table-header" role="row">
+            <span role="columnheader">Tracks</span>
+            <span role="columnheader">Rooms</span>
+          </div>
+          {Array.from({ length: resourceRowCount }, (_, index) => {
+            const track = tracks[index];
+            const room = rooms[index];
 
-          <fieldset>
-            <legend>Rooms</legend>
-            <p className="muted">Physical or virtual agenda locations.</p>
-            <div className="event-resource-list">
-              {rooms.length === 0 ? <p className="empty-state">No rooms configured yet.</p> : null}
-              {rooms.map((room) => (
-                <div className="event-resource-row" key={room.id}>
-                  <label>
-                    <span>Room name {room.id}</span>
-                    <input
-                      className="settings-input"
-                      value={room.name}
-                      onChange={(change) => setRooms(rooms.map((candidate) => candidate.id === room.id ? { ...candidate, name: change.target.value } : candidate))}
-                    />
-                  </label>
-                  <code>{room.id}</code>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRooms(rooms.filter((candidate) => candidate.id !== room.id))}>
-                    Remove room {room.name}
-                  </button>
+            return (
+              <div className="event-resource-table-row" role="row" key={`resource-${index}`}>
+                <div className="event-resource-cell" role="cell">
+                  {track ? (
+                    <>
+                      <SettingsTextField
+                        label={`Track ${index + 1}`}
+                        value={track.name}
+                        onChange={(next) =>
+                          setTracks(
+                            tracks.map((candidate) =>
+                              candidate.id === track.id ? { ...candidate, name: next } : candidate,
+                            ),
+                          )
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() =>
+                          setTracks(tracks.filter((candidate) => candidate.id !== track.id))
+                        }
+                      >
+                        Remove
+                      </button>
+                    </>
+                  ) : null}
                 </div>
-              ))}
+                <div className="event-resource-cell" role="cell">
+                  {room ? (
+                    <>
+                      <SettingsTextField
+                        label={`Room ${index + 1}`}
+                        value={room.name}
+                        onChange={(next) =>
+                          setRooms(
+                            rooms.map((candidate) =>
+                              candidate.id === room.id ? { ...candidate, name: next } : candidate,
+                            ),
+                          )
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() =>
+                          setRooms(rooms.filter((candidate) => candidate.id !== room.id))
+                        }
+                      >
+                        Remove
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+          <div className="event-resource-table-row event-resource-composer" role="row">
+            <div className="event-resource-cell" role="cell">
+              <SettingsTextField label="New track" value={newTrackName} onChange={setNewTrackName} />
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={!newTrackName.trim()}
+                onClick={addTrack}
+              >
+                Add track
+              </button>
             </div>
-            <div className="event-resource-add">
-              <label className="settings-label">
-                New room name
-                <input className="settings-input" value={newRoomName} onChange={(change) => setNewRoomName(change.target.value)} />
-              </label>
-              <button type="button" className="btn btn-secondary" disabled={!newRoomName.trim()} onClick={addRoom}>Add room</button>
+            <div className="event-resource-cell" role="cell">
+              <SettingsTextField label="New room" value={newRoomName} onChange={setNewRoomName} />
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={!newRoomName.trim()}
+                onClick={addRoom}
+              >
+                Add room
+              </button>
             </div>
-          </fieldset>
+          </div>
         </div>
 
         {message ? (
@@ -351,9 +368,13 @@ export function EventConfigurationCard({
             {message}
           </p>
         ) : null}
-        <div className="settings-actions">
-          <button type="submit" className="btn btn-primary" disabled={save.isPending}>
-            {save.isPending ? "Saving…" : "Save event configuration"}
+        <div className="settings-card-actions settings-card-actions-end">
+          <button
+            type="submit"
+            className="btn btn-primary btn-sm"
+            disabled={save.isPending}
+          >
+            {save.isPending ? "Saving…" : "Save"}
           </button>
         </div>
       </form>

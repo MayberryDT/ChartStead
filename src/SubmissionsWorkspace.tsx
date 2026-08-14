@@ -51,6 +51,7 @@ import {
 } from "./api";
 import { AppSelect } from "./AppSelect";
 import { createClientId } from "./id";
+import { SettingsCheckbox, SettingsTextField } from "./SettingsFields";
 
 export type ProposalSort =
   | "newest"
@@ -1471,32 +1472,28 @@ export function ReviewerRouting({ event }: { event: EventRecord }) {
           mutation.mutate();
         }}
       >
-        <label>
-          Reviewer email
-          <input
-            type="email"
-            required
-            value={email}
-            onChange={(change) => setEmail(change.target.value)}
-          />
-        </label>
+        <SettingsTextField
+          label="Reviewer email"
+          type="email"
+          required
+          value={email}
+          onChange={setEmail}
+        />
         <fieldset>
           <legend>Assigned tracks</legend>
           {event.tracks.map((track) => (
-            <label key={track.id}>
-              <input
-                type="checkbox"
-                checked={trackIds.includes(track.id)}
-                onChange={(change) =>
-                  setTrackIds((current) =>
-                    change.target.checked
-                      ? [...current, track.id]
-                      : current.filter((trackId) => trackId !== track.id),
-                  )
-                }
-              />
-              {track.name}
-            </label>
+            <SettingsCheckbox
+              key={track.id}
+              label={track.name}
+              checked={trackIds.includes(track.id)}
+              onChange={(checked) =>
+                setTrackIds((current) =>
+                  checked
+                    ? [...current, track.id]
+                    : current.filter((trackId) => trackId !== track.id),
+                )
+              }
+            />
           ))}
         </fieldset>
         <button
@@ -1619,20 +1616,18 @@ export function ReviewerRouting({ event }: { event: EventRecord }) {
                   <legend>Edit assigned tracks</legend>
                   <div className="reviewer-track-options">
                     {event.tracks.map((track) => (
-                      <label key={track.id}>
-                        <input
-                          type="checkbox"
-                          checked={editTrackIds.includes(track.id)}
-                          onChange={(change) =>
-                            setEditTrackIds((current) =>
-                              change.target.checked
-                                ? [...current, track.id]
-                                : current.filter((trackId) => trackId !== track.id),
-                            )
-                          }
-                        />
-                        {track.name}
-                      </label>
+                      <SettingsCheckbox
+                        key={track.id}
+                        label={track.name}
+                        checked={editTrackIds.includes(track.id)}
+                        onChange={(checked) =>
+                          setEditTrackIds((current) =>
+                            checked
+                              ? [...current, track.id]
+                              : current.filter((trackId) => trackId !== track.id),
+                          )
+                        }
+                      />
                     ))}
                   </div>
                   <div className="reviewer-track-actions">
@@ -1678,14 +1673,11 @@ export function ReviewerRouting({ event }: { event: EventRecord }) {
                 {progressQuery.data.round.roundName}: {progressQuery.data.round.completedCount} of {progressQuery.data.round.assignedCount} assigned reviews complete · {progressQuery.data.round.outstandingCount} outstanding
               </p>
             </div>
-            <label className="review-progress-filter">
-              <input
-                type="checkbox"
-                checked={showIncompleteOnly}
-                onChange={(change) => setShowIncompleteOnly(change.target.checked)}
-              />
-              Show incomplete only
-            </label>
+            <SettingsCheckbox
+              label="Show incomplete only"
+              checked={showIncompleteOnly}
+              onChange={setShowIncompleteOnly}
+            />
           </div>
           <div className="review-progress-summary">
             <span><strong>{progressQuery.data.round.percentComplete}%</strong> complete</span>
@@ -1697,21 +1689,18 @@ export function ReviewerRouting({ event }: { event: EventRecord }) {
               {visibleReviewProgressRows.map((reviewer) => (
                 <li key={reviewer.reviewerId} data-overdue={reviewer.overdue ? "true" : "false"}>
                   <div>
-                    <label className="review-progress-select">
-                      <input
-                        type="checkbox"
-                        checked={selectedReminderIds.includes(reviewer.reviewerId)}
-                        disabled={reviewer.outstandingCount === 0}
-                        onChange={(change) =>
-                          setSelectedReminderIds((current) =>
-                            change.target.checked
-                              ? [...new Set([...current, reviewer.reviewerId])]
-                              : current.filter((id) => id !== reviewer.reviewerId),
-                          )
-                        }
-                      />
-                      <strong>{reviewer.reviewerName}</strong>
-                    </label>
+                    <SettingsCheckbox
+                      label={reviewer.reviewerName}
+                      checked={selectedReminderIds.includes(reviewer.reviewerId)}
+                      disabled={reviewer.outstandingCount === 0}
+                      onChange={(checked) =>
+                        setSelectedReminderIds((current) =>
+                          checked
+                            ? [...new Set([...current, reviewer.reviewerId])]
+                            : current.filter((id) => id !== reviewer.reviewerId),
+                        )
+                      }
+                    />
                     <span>{reviewer.email || "No email on file"}</span>
                   </div>
                   <span className="reviewer-tracks">
@@ -1845,22 +1834,20 @@ export function ReviewerRouting({ event }: { event: EventRecord }) {
                 Advanced review is enabled. Reviewer queues only show proposals explicitly assigned here.
               </p>
             </div>
-            <label>
-              Round
-              <select
-                value={selectedRound?.id ?? ""}
-                onChange={(change) => {
-                  setSelectedRoundId(change.target.value);
-                  setDistributionPreview(null);
-                }}
-              >
-                {rounds.map((round) => (
-                  <option key={round.id} value={round.id}>
-                    {round.name} ({round.state})
-                  </option>
-                ))}
-              </select>
-            </label>
+            <AppSelect
+              label="Round"
+              ariaLabel="Round"
+              variant="field"
+              value={selectedRound?.id ?? ""}
+              options={rounds.map((round) => ({
+                value: round.id,
+                label: `${round.name} (${round.state})`,
+              }))}
+              onValueChange={(roundId) => {
+                setSelectedRoundId(roundId);
+                setDistributionPreview(null);
+              }}
+            />
           </div>
 
           {selectedRound && roundReviewers.length > 0 ? (
@@ -1870,42 +1857,38 @@ export function ReviewerRouting({ event }: { event: EventRecord }) {
                 {roundReviewers.map((reviewerId) => {
                   const reviewer = reviewersById.get(reviewerId);
                   return (
-                    <label key={reviewerId}>
-                      <input
-                        type="checkbox"
-                        checked={bulkReviewerIds.includes(reviewerId)}
-                        onChange={(change) => {
-                          setDistributionPreview(null);
-                          setBulkReviewerIds((current) =>
-                            change.target.checked
-                              ? [...new Set([...current, reviewerId])]
-                              : current.filter((id) => id !== reviewerId),
-                          );
-                        }}
-                      />
-                      {reviewer?.name ?? reviewerId}
-                    </label>
+                    <SettingsCheckbox
+                      key={reviewerId}
+                      label={reviewer?.name ?? reviewerId}
+                      checked={bulkReviewerIds.includes(reviewerId)}
+                      onChange={(checked) => {
+                        setDistributionPreview(null);
+                        setBulkReviewerIds((current) =>
+                          checked
+                            ? [...new Set([...current, reviewerId])]
+                            : current.filter((id) => id !== reviewerId),
+                        );
+                      }}
+                    />
                   );
                 })}
               </fieldset>
               <fieldset>
                 <legend>Filter proposals by track</legend>
                 {event.tracks.map((track) => (
-                  <label key={track.id}>
-                    <input
-                      type="checkbox"
-                      checked={bulkTrackIds.includes(track.id)}
-                      onChange={(change) => {
-                        setDistributionPreview(null);
-                        setBulkTrackIds((current) =>
-                          change.target.checked
-                            ? [...new Set([...current, track.id])]
-                            : current.filter((trackId) => trackId !== track.id),
-                        );
-                      }}
-                    />
-                    {track.name}
-                  </label>
+                  <SettingsCheckbox
+                    key={track.id}
+                    label={track.name}
+                    checked={bulkTrackIds.includes(track.id)}
+                    onChange={(checked) => {
+                      setDistributionPreview(null);
+                      setBulkTrackIds((current) =>
+                        checked
+                          ? [...new Set([...current, track.id])]
+                          : current.filter((trackId) => trackId !== track.id),
+                      );
+                    }}
+                  />
                 ))}
                 <span className="muted">Leave all unchecked to include every track.</span>
               </fieldset>
@@ -1975,21 +1958,19 @@ export function ReviewerRouting({ event }: { event: EventRecord }) {
                         const key = `${reviewerId}::${proposal.id}`;
                         const reviewer = reviewersById.get(reviewerId);
                         return (
-                          <label key={key}>
-                            <input
-                              type="checkbox"
-                              checked={assignmentKeys.has(key)}
-                              disabled={roundAssignmentMutation.isPending}
-                              onChange={(change) =>
-                                roundAssignmentMutation.mutate({
-                                  proposalId: proposal.id,
-                                  reviewerId,
-                                  assigned: change.target.checked,
-                                })
-                              }
-                            />
-                            {reviewer?.name ?? reviewerId}
-                          </label>
+                          <SettingsCheckbox
+                            key={key}
+                            label={reviewer?.name ?? reviewerId}
+                            checked={assignmentKeys.has(key)}
+                            disabled={roundAssignmentMutation.isPending}
+                            onChange={(assigned) =>
+                              roundAssignmentMutation.mutate({
+                                proposalId: proposal.id,
+                                reviewerId,
+                                assigned,
+                              })
+                            }
+                          />
                         );
                       })}
                     </div>

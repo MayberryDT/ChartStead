@@ -12,14 +12,17 @@ export function AppSelect({
   onValueChange,
   variant = "toolbar",
   ariaLabel,
+  hideLabel = false,
 }: {
   label: string;
   value: string;
   options: AppSelectOption[];
   onValueChange: (value: string) => void;
-  variant?: "toolbar" | "sidebar";
+  variant?: "toolbar" | "sidebar" | "field";
   ariaLabel?: string;
+  hideLabel?: boolean;
 }) {
+  const labelHidden = hideLabel || variant === "sidebar" || variant === "field";
   return (
     <Select.Root
       items={options}
@@ -30,7 +33,7 @@ export function AppSelect({
     >
       <div className={`app-select app-select-${variant}`}>
         <Select.Trigger className="app-select-trigger" aria-label={ariaLabel ?? label}>
-          <span className={variant === "sidebar" ? "app-select-label sr-only" : "app-select-label"}>
+          <span className={labelHidden ? "app-select-label sr-only" : "app-select-label"}>
             {label}
           </span>
           <Select.Value className="app-select-value" />

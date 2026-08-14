@@ -14,7 +14,11 @@ import {
   MessagesWorkspace,
   type MessagesChrome,
 } from "./MessagesWorkspace";
-import { SettingsWorkspace } from "./SettingsWorkspace";
+import {
+  SettingsCommandBar,
+  SettingsWorkspace,
+  type SettingsChrome,
+} from "./SettingsWorkspace";
 import { CreateEventDialog } from "./EventWorkspaceManagement";
 import {
   SubmissionsCommandBar,
@@ -185,6 +189,7 @@ function EventDesk({
   const [reviewChrome, setReviewChrome] = useState<ReviewChrome | null>(null);
   const [agendaChrome, setAgendaChrome] = useState<AgendaChrome | null>(null);
   const [messagesChrome, setMessagesChrome] = useState<MessagesChrome | null>(null);
+  const [settingsChrome, setSettingsChrome] = useState<SettingsChrome | null>(null);
   const [cfpBuilderChrome, setCfpBuilderChrome] = useState<CfpBuilderChrome | null>(null);
   const [formsQueue, setFormsQueue] = useState<FormsQueueState>(defaultFormsQueue);
   const [formsSelection, setFormsSelection] = useState<FormsSelection | null>(null);
@@ -252,6 +257,7 @@ function EventDesk({
     localStorage.setItem("chartstead:event", eventId);
     setSelectedEventId(eventId);
     setMessagesChrome(null);
+    setSettingsChrome(null);
     setAgendaChrome(null);
     setCfpBuilderChrome(null);
     if (activeNav === "Submissions") {
@@ -318,6 +324,7 @@ function EventDesk({
     }
     if (item !== "Agenda") setAgendaChrome(null);
     if (item !== "Messages") setMessagesChrome(null);
+    if (item !== "Settings") setSettingsChrome(null);
     if (item !== "Speakers") setSpeakerChrome(null);
     if (item !== "Forms") setCfpBuilderChrome(null);
     if (item === "Submissions") {
@@ -506,7 +513,8 @@ function EventDesk({
           activeNav === "Agenda" ||
           activeNav === "Speakers" ||
           activeNav === "Forms" ||
-          activeNav === "Messages" ? null : (
+          activeNav === "Messages" ||
+          activeNav === "Settings" ? null : (
             <div className="topbar-identity" title={topbarMeta}>
               <h1>{topbarTitle}</h1>
               <p className="topbar-meta">{topbarMeta}</p>
@@ -538,6 +546,8 @@ function EventDesk({
             <MessagesCommandBar chrome={messagesChrome} />
           ) : activeNav === "Speakers" ? (
             speakerChrome
+          ) : activeNav === "Settings" ? (
+            <SettingsCommandBar chrome={settingsChrome} />
           ) : null
         }
         actions={
@@ -670,7 +680,11 @@ function EventDesk({
         ) : activeNav === "Embeds" ? (
           <EmbedManagerWorkspace event={event} />
         ) : activeNav === "Settings" ? (
-          <SettingsWorkspace event={event} onEventUpdated={updateEvent} />
+          <SettingsWorkspace
+            event={event}
+            onEventUpdated={updateEvent}
+            onChromeChange={setSettingsChrome}
+          />
         ) : (
           <div className="workspace">
             <section className="operations-panel">

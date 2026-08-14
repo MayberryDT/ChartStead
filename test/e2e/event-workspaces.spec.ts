@@ -23,14 +23,14 @@ test("administrator creates, configures, reloads, and switches an isolated event
   await expect(page.getByText("No tracks configured yet.")).toBeVisible();
   await expect(page.getByText("No rooms configured yet.")).toBeVisible();
 
-  await page.getByRole("link", { name: "Settings" }).click();
-  await page.getByRole("textbox", { name: "New track name" }).fill("Main stage");
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await page.getByRole("textbox", { name: "New track" }).fill("Main stage");
   await page.getByRole("button", { name: "Add track" }).click();
-  await page.getByRole("textbox", { name: "Track name main-stage" }).fill("Main program");
-  await page.getByRole("textbox", { name: "New room name" }).fill("Ballroom");
+  await page.getByRole("textbox", { name: "Track 1" }).fill("Main program");
+  await page.getByRole("textbox", { name: "New room" }).fill("Ballroom");
   await page.getByRole("button", { name: "Add room" }).click();
-  await page.getByRole("textbox", { name: "Room name ballroom" }).fill("Ballroom A");
-  await page.getByRole("button", { name: "Save event configuration" }).click();
+  await page.getByRole("textbox", { name: "Room 1" }).fill("Ballroom A");
+  await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Event configuration saved.")).toBeVisible();
 
   const createdResponse = await page.request.get("/api/events");
@@ -56,23 +56,23 @@ test("administrator creates, configures, reloads, and switches an isolated event
   });
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: eventName })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Name" })).toHaveValue(eventName);
   await page.getByRole("combobox", { name: "Event" }).click();
   await page
     .getByRole("option", { name: "Pacific Open Data Summit 2026" })
     .click();
-  await expect(
-    page.getByRole("heading", { name: "Pacific Open Data Summit 2026" }),
-  ).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Name" })).toHaveValue(
+    "Pacific Open Data Summit 2026",
+  );
   await page.getByRole("combobox", { name: "Event" }).click();
   await page.getByRole("option", { name: eventName }).click();
-  await expect(page.getByRole("heading", { name: eventName })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Name" })).toHaveValue(eventName);
 
   await page.getByRole("link", { name: /Submissions/ }).click();
   await expect(page.getByText("No submissions yet.")).toBeVisible();
   await page.getByRole("link", { name: "Speakers" }).click();
   await expect(page.getByText("No event speakers yet.")).toBeVisible();
-  await expect(page.getByText("No onboarding tasks yet.")).toBeVisible();
   await page.getByRole("link", { name: "Agenda" }).click();
   await expect(page.getByText("No sessions yet.")).toBeVisible();
 

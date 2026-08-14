@@ -171,8 +171,8 @@ test("competition spine: CFP through public program with Airtable unconfigured",
   await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible({
     timeout: 15_000,
   });
-  await expect(page.getByRole("heading", { name: "Event configuration", level: 2 })).toBeVisible();
-  await expect(page.getByText(/Airtable sync|Not connected|Airtable/i).first()).toBeVisible();
+  await expect(page.getByLabel("Name")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Airtable" })).toBeVisible();
 });
 
 test("seeded volume stays responsive on submissions search", async ({ page }) => {

@@ -29,11 +29,8 @@ import {
   type EventApiKeySummary,
 } from "./api";
 import { EventConfigurationCard } from "./EventWorkspaceManagement";
+import { SettingsCheckbox, SettingsSelectField, SettingsTextField } from "./SettingsFields";
 import { ReviewerRouting } from "./SubmissionsWorkspace";
-
-/** Must match worker/airtable/demo-sandbox.ts */
-const DEMO_BASE_ID = "appChartSteadDemo";
-const DEMO_TOKEN = "pat_demo_sandbox";
 
 const MODE_LABELS: Record<AgentOperatingMode, string> = {
   propose_only: "Propose only",
@@ -71,16 +68,77 @@ function healthLabel(health: AirtableSyncHealth): string {
 function healthTone(health: AirtableSyncHealth): string {
   switch (health) {
     case "healthy":
-      return "sync-pill sync-pill-ok";
+      return "settings-status settings-status-ok";
     case "pending":
-      return "sync-pill sync-pill-pending";
+      return "settings-status settings-status-pending";
     case "delayed":
-      return "sync-pill sync-pill-delayed";
+      return "settings-status settings-status-delayed";
     case "failed":
-      return "sync-pill sync-pill-failed";
+      return "settings-status settings-status-failed";
     default:
-      return "sync-pill";
+      return "settings-status";
   }
+}
+
+export type SettingsSectionId =
+  | "event"
+  | "reviewers"
+  | "evaluation"
+  | "course-check"
+  | "automation"
+  | "airtable";
+
+export type SettingsSection = {
+  id: SettingsSectionId;
+  label: string;
+};
+
+export type SettingsChrome = {
+  section: SettingsSectionId;
+  sections: SettingsSection[];
+  onSectionChange: (section: SettingsSectionId) => void;
+};
+
+const EVENT_SECTIONS: SettingsSection[] = [
+  { id: "event", label: "Event" },
+  { id: "reviewers", label: "Reviewers" },
+  { id: "evaluation", label: "Evaluation" },
+  { id: "course-check", label: "Course Check" },
+  { id: "automation", label: "Automation" },
+  { id: "airtable", label: "Airtable" },
+];
+
+const EVENTLESS_SECTIONS: SettingsSection[] = [
+  { id: "course-check", label: "Course Check" },
+  { id: "automation", label: "Automation" },
+  { id: "airtable", label: "Airtable" },
+];
+
+export function SettingsCommandBar({ chrome }: { chrome: SettingsChrome | null }) {
+  if (!chrome) {
+    return (
+      <div className="topbar-tools-inner settings-shell-tools" aria-busy="true">
+        <span className="muted">Loading settings…</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="topbar-tools-inner settings-shell-tools">
+      <div className="seg settings-section-seg" role="group" aria-label="Settings section">
+        {chrome.sections.map((section) => (
+          <button
+            key={section.id}
+            type="button"
+            aria-pressed={chrome.section === section.id}
+            onClick={() => chrome.onSectionChange(section.id)}
+          >
+            {section.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function formatTimestamp(value: string | null): string {
@@ -266,34 +324,17 @@ function EvaluationPlanCard({ eventId }: { eventId: string }) {
   }
 
   return (
-    <section className="settings-card" aria-labelledby="evaluation-plan-heading">
-      <div className="settings-card-header">
-        <div>
-          <h2 id="evaluation-plan-heading">Advanced evaluation plan</h2>
-          <p className="muted">
-            Optional named rounds. Turn this on only when reviewers need round-specific access;
-            otherwise the shared track queue stays in use.
-          </p>
-        </div>
-        {draft ? (
-          <button
-            className="btn btn-secondary btn-sm"
-            type="button"
-            disabled={enabledMutation.isPending}
-            onClick={() => enabledMutation.mutate(!draft.enabled)}
-          >
-            {draft.enabled ? "Disable advanced review" : "Enable advanced review"}
-          </button>
-        ) : null}
-      </div>
+    <section className="settings-card" aria-label="Evaluation">
+      <h2>Proposal evaluation rounds</h2>
       {planQuery.isPending || reviewersQuery.isPending ? (
-        <p className="muted">Loading evaluation configuration…</p>
+        <p className="empty-state padded">Loading evaluation configuration…</p>
       ) : planQuery.isError || reviewersQuery.isError ? (
         <p className="form-message error" role="alert">
           Unable to load evaluation configuration.
         </p>
       ) : (
         <form
+          id="evaluation-plan-form"
           className="evaluation-plan-form"
           onSubmit={(event) => {
             event.preventDefault();
@@ -304,93 +345,93 @@ function EvaluationPlanCard({ eventId }: { eventId: string }) {
           {rounds.map((round, index) => (
             <fieldset className="evaluation-round-card" key={round.id ?? `new-${index}`}>
               <legend>Round {index + 1}</legend>
-              <label>
-                Name
-                <input
+              <div className="evaluation-round-fields">
+                <SettingsTextField
+                  label="Name"
                   required
                   value={round.name}
-                  onChange={(event) =>
+                  onChange={(name) =>
                     setDraft((current) => ({
                       enabled: current?.enabled ?? true,
                       version: current?.version ?? 0,
                       rounds: (current?.rounds ?? rounds).map((candidate, candidateIndex) =>
-                        candidateIndex === index ? { ...candidate, name: event.target.value } : candidate,
+                        candidateIndex === index ? { ...candidate, name } : candidate,
                       ),
                     }))
                   }
                 />
-              </label>
-              <label>
-                Opens
-                <input
-                  required
+                <SettingsTextField
+                  label="Opens"
                   type="date"
+                  required
                   value={round.startsOn}
-                  onChange={(event) =>
+                  onChange={(startsOn) =>
                     setDraft((current) => ({
-                      enabled: current?.enabled ?? true, version: current?.version ?? 0,
+                      enabled: current?.enabled ?? true,
+                      version: current?.version ?? 0,
                       rounds: (current?.rounds ?? rounds).map((candidate, candidateIndex) =>
-                        candidateIndex === index ? { ...candidate, startsOn: event.target.value } : candidate,
+                        candidateIndex === index ? { ...candidate, startsOn } : candidate,
                       ),
                     }))
                   }
                 />
-              </label>
-              <label>
-                Closes
-                <input
-                  required
+                <SettingsTextField
+                  label="Closes"
                   type="date"
+                  required
                   value={round.endsOn}
-                  onChange={(event) =>
+                  onChange={(endsOn) =>
                     setDraft((current) => ({
-                      enabled: current?.enabled ?? true, version: current?.version ?? 0,
+                      enabled: current?.enabled ?? true,
+                      version: current?.version ?? 0,
                       rounds: (current?.rounds ?? rounds).map((candidate, candidateIndex) =>
-                        candidateIndex === index ? { ...candidate, endsOn: event.target.value } : candidate,
+                        candidateIndex === index ? { ...candidate, endsOn } : candidate,
                       ),
                     }))
                   }
                 />
-              </label>
-              <label>
-                Scorecard reference
-                <input
+                <SettingsTextField
+                  label="Scorecard"
                   required
                   value={round.scorecardRef}
-                  onChange={(event) =>
+                  onChange={(scorecardRef) =>
                     setDraft((current) => ({
-                      enabled: current?.enabled ?? true, version: current?.version ?? 0,
+                      enabled: current?.enabled ?? true,
+                      version: current?.version ?? 0,
                       rounds: (current?.rounds ?? rounds).map((candidate, candidateIndex) =>
-                        candidateIndex === index ? { ...candidate, scorecardRef: event.target.value } : candidate,
+                        candidateIndex === index ? { ...candidate, scorecardRef } : candidate,
                       ),
                     }))
                   }
                 />
-              </label>
+              </div>
               <fieldset className="evaluation-scorecard-editor">
-                <legend>Scorecard criteria</legend>
-                <p className="muted">
-                  {round.scorecard?.calculationDescription ??
-                    "Weighted numeric and scored dropdown criteria are normalized into the aggregate."}
-                </p>
+                <legend>Criteria</legend>
                 {(round.scorecard?.criteria ?? []).map((criterion, criterionIndex) => (
                   <div className="evaluation-scorecard-criterion" key={criterion.id}>
-                    <label>
-                      Criterion label
-                      <input
+                    <div className="evaluation-criterion-primary">
+                      <SettingsTextField
+                        label="Label"
                         required
                         value={criterion.label}
-                        onChange={(event) =>
-                          updateCriterion(index, criterionIndex, { label: event.target.value })
+                        onChange={(label) =>
+                          updateCriterion(index, criterionIndex, { label })
                         }
                       />
-                    </label>
-                    <label>
-                      Type
-                      <select
+                      <SettingsTextField
+                        label="Guidance"
+                        value={criterion.guidance}
+                        onChange={(guidance) =>
+                          updateCriterion(index, criterionIndex, { guidance })
+                        }
+                      />
+                    </div>
+                    <div className="evaluation-criterion-metadata">
+                      <SettingsSelectField
+                        label="Type"
                         value={criterion.type}
-                        onChange={(event) => {
-                          const nextType = event.target.value as EvaluationScorecardCriterion["type"];
+                        onChange={(nextTypeRaw) => {
+                          const nextType = nextTypeRaw as EvaluationScorecardCriterion["type"];
                           const options =
                             nextType === "dropdown" && criterion.options.length === 0
                               ? defaultDropdownOptions(criterion.id)
@@ -404,87 +445,60 @@ function EvaluationPlanCard({ eventId }: { eventId: string }) {
                             options,
                           });
                         }}
-                      >
-                        <option value="numeric">Numeric rating</option>
-                        <option value="dropdown">Dropdown choice</option>
-                        <option value="text">Free text</option>
-                      </select>
-                    </label>
-                    <label>
-                      Guidance
-                      <input
-                        value={criterion.guidance}
-                        onChange={(event) =>
-                          updateCriterion(index, criterionIndex, { guidance: event.target.value })
-                        }
+                        options={[
+                          { value: "numeric", label: "Numeric" },
+                          { value: "dropdown", label: "Dropdown" },
+                          { value: "text", label: "Text" },
+                        ]}
                       />
-                    </label>
-                    <label className="settings-check">
-                      <input
-                        type="checkbox"
-                        checked={criterion.required}
-                        onChange={(event) =>
-                          updateCriterion(index, criterionIndex, { required: event.target.checked })
-                        }
-                      />
-                      <span>Required</span>
-                    </label>
-                    {criterion.type !== "text" ? (
-                      <>
-                        <label>
-                          Weight
-                          <input
-                            min="0"
-                            step="0.1"
+                      {criterion.type !== "text" ? (
+                        <>
+                          <SettingsTextField
+                            label="Weight"
                             type="number"
-                            value={criterion.weight ?? 0}
-                            onChange={(event) =>
+                            value={String(criterion.weight ?? 0)}
+                            onChange={(value) =>
                               updateCriterion(index, criterionIndex, {
-                                weight: Number(event.target.value),
+                                weight: Number(value),
                               })
                             }
                           />
-                        </label>
-                        <label>
-                          Max score
-                          <input
-                            min="1"
-                            step="1"
+                          <SettingsTextField
+                            label="Max score"
                             type="number"
-                            value={criterion.maxScore ?? 5}
-                            onChange={(event) =>
+                            value={String(criterion.maxScore ?? 5)}
+                            onChange={(value) =>
                               updateCriterion(index, criterionIndex, {
-                                maxScore: Number(event.target.value),
+                                maxScore: Number(value),
                               })
                             }
                           />
-                        </label>
-                      </>
-                    ) : null}
+                        </>
+                      ) : null}
+                    </div>
                     {criterion.type === "dropdown" ? (
                       <div className="evaluation-scorecard-options">
                         {criterion.options.map((option, optionIndex) => (
-                          <div key={option.id}>
-                            <input
-                              aria-label={`Option ${optionIndex + 1} label`}
+                          <div key={option.id} className="event-resource-row">
+                            <SettingsTextField
+                              label={`Option ${optionIndex + 1} label`}
                               value={option.label}
-                              onChange={(event) =>
+                              onChange={(label) =>
                                 updateCriterion(index, criterionIndex, {
                                   options: criterion.options.map((candidate, candidateIndex) =>
                                     candidateIndex === optionIndex
-                                      ? { ...candidate, label: event.target.value }
+                                      ? { ...candidate, label }
                                       : candidate,
                                   ),
                                 })
                               }
                             />
-                            <input
-                              aria-label={`Option ${optionIndex + 1} score`}
-                              min="0"
+                            <SettingsTextField
+                              label={`Option ${optionIndex + 1} score`}
                               type="number"
-                              value={option.score ?? ""}
-                              onChange={(event) => {
-                                const nextScore = event.target.value === "" ? null : Number(event.target.value);
+                              value={option.score == null ? "" : String(option.score)}
+                              onChange={(value) => {
+                                const nextScore = value === "" ? null : Number(value);
                                 updateCriterion(index, criterionIndex, {
                                   options: criterion.options.map((candidate, candidateIndex) =>
                                     candidateIndex === optionIndex
@@ -531,24 +545,33 @@ function EvaluationPlanCard({ eventId }: { eventId: string }) {
                         </button>
                       </div>
                     ) : null}
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      type="button"
-                      disabled={(round.scorecard?.criteria.length ?? 0) <= 1}
-                      onClick={() => {
-                        const scorecard = round.scorecard ?? defaultScorecard(round.scorecardRef);
-                        updateRound(index, {
-                          scorecard: {
-                            ...scorecard,
-                            criteria: scorecard.criteria.filter(
-                              (_, candidateIndex) => candidateIndex !== criterionIndex,
-                            ),
-                          },
-                        });
-                      }}
-                    >
-                      Remove criterion
-                    </button>
+                    <div className="evaluation-criterion-footer">
+                      <SettingsCheckbox
+                        label="Required"
+                        checked={criterion.required}
+                        onChange={(required) =>
+                          updateCriterion(index, criterionIndex, { required })
+                        }
+                      />
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        type="button"
+                        disabled={(round.scorecard?.criteria.length ?? 0) <= 1}
+                        onClick={() => {
+                          const scorecard = round.scorecard ?? defaultScorecard(round.scorecardRef);
+                          updateRound(index, {
+                            scorecard: {
+                              ...scorecard,
+                              criteria: scorecard.criteria.filter(
+                                (_, candidateIndex) => candidateIndex !== criterionIndex,
+                              ),
+                            },
+                          });
+                        }}
+                      >
+                        Remove criterion
+                      </button>
+                    </div>
                   </div>
                 ))}
                 <div className="evaluation-plan-actions">
@@ -563,59 +586,59 @@ function EvaluationPlanCard({ eventId }: { eventId: string }) {
                   </button>
                 </div>
               </fieldset>
-              <label>
-                State
-                <select
-                  value={round.state}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      enabled: current?.enabled ?? true, version: current?.version ?? 0,
-                      rounds: (current?.rounds ?? rounds).map((candidate, candidateIndex) =>
-                        candidateIndex === index
-                          ? { ...candidate, state: event.target.value as "draft" | "open" | "closed" }
-                          : candidate,
-                      ),
-                    }))
-                  }
-                >
-                  <option value="draft">Draft</option>
-                  <option value="open">Open</option>
-                  <option value="closed">Closed</option>
-                </select>
-              </label>
-              <label className="settings-check">
-                <input
-                  type="checkbox"
-                  checked={round.anonymization === "blind"}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      enabled: current?.enabled ?? true, version: current?.version ?? 0,
-                      rounds: (current?.rounds ?? rounds).map((candidate, candidateIndex) =>
-                        candidateIndex === index
-                          ? { ...candidate, anonymization: event.target.checked ? "blind" : "none" }
-                          : candidate,
-                      ),
-                    }))
-                  }
-                />
-                <span>Blind reviewer view</span>
-              </label>
-              <fieldset className="evaluation-reviewer-pool">
-                <legend>Reviewer pool</legend>
-                {reviewers.length === 0 ? <span className="muted">Add reviewers above first.</span> : null}
-                {reviewers.map((reviewer: ReviewerAssignment) => (
-                  <label key={reviewer.id}>
-                    <input
-                      type="checkbox"
+              <SettingsSelectField
+                label="State"
+                value={round.state ?? "draft"}
+                onChange={(state) =>
+                  setDraft((current) => ({
+                    enabled: current?.enabled ?? true,
+                    version: current?.version ?? 0,
+                    rounds: (current?.rounds ?? rounds).map((candidate, candidateIndex) =>
+                      candidateIndex === index
+                        ? { ...candidate, state: state as "draft" | "open" | "closed" }
+                        : candidate,
+                    ),
+                  }))
+                }
+                options={[
+                  { value: "draft", label: "Draft" },
+                  { value: "open", label: "Open" },
+                  { value: "closed", label: "Closed" },
+                ]}
+              />
+              <SettingsCheckbox
+                label="Blind reviewer view"
+                checked={round.anonymization === "blind"}
+                onChange={(checked) =>
+                  setDraft((current) => ({
+                    enabled: current?.enabled ?? true,
+                    version: current?.version ?? 0,
+                    rounds: (current?.rounds ?? rounds).map((candidate, candidateIndex) =>
+                      candidateIndex === index
+                        ? { ...candidate, anonymization: checked ? "blind" : "none" }
+                        : candidate,
+                    ),
+                  }))
+                }
+              />
+              <section className="evaluation-reviewer-pool">
+                <h3>Reviewer pool</h3>
+                <div className="evaluation-reviewer-list">
+                  {reviewers.length === 0 ? <span className="muted">Add reviewers first.</span> : null}
+                  {reviewers.map((reviewer: ReviewerAssignment) => (
+                    <SettingsCheckbox
+                      key={reviewer.id}
+                      label={reviewer.name}
                       checked={round.reviewerPool.includes(reviewer.id)}
-                      onChange={(event) =>
+                      onChange={(checked) =>
                         setDraft((current) => ({
-                          enabled: current?.enabled ?? true, version: current?.version ?? 0,
+                          enabled: current?.enabled ?? true,
+                          version: current?.version ?? 0,
                           rounds: (current?.rounds ?? rounds).map((candidate, candidateIndex) =>
                             candidateIndex === index
                               ? {
                                   ...candidate,
-                                  reviewerPool: event.target.checked
+                                  reviewerPool: checked
                                     ? [...candidate.reviewerPool, reviewer.id]
                                     : candidate.reviewerPool.filter((id) => id !== reviewer.id),
                                 }
@@ -624,10 +647,9 @@ function EvaluationPlanCard({ eventId }: { eventId: string }) {
                         }))
                       }
                     />
-                    {reviewer.name}
-                  </label>
-                ))}
-              </fieldset>
+                  ))}
+                </div>
+              </section>
               <div className="evaluation-round-order">
                 <button
                   className="btn btn-secondary btn-sm"
@@ -674,9 +696,9 @@ function EvaluationPlanCard({ eventId }: { eventId: string }) {
               ) : null}
             </fieldset>
           ))}
-          <div className="evaluation-plan-actions">
+          <div className="evaluation-plan-actions evaluation-plan-actions-bottom">
             <button
-              className="btn btn-secondary"
+              className="btn btn-secondary btn-sm"
               type="button"
               onClick={() =>
                 setDraft((current) => ({
@@ -687,7 +709,27 @@ function EvaluationPlanCard({ eventId }: { eventId: string }) {
             >
               Add round
             </button>
-            <button className="btn btn-primary" type="submit" disabled={saveMutation.isPending}>
+            <span className="topbar-tools-spacer" aria-hidden="true" />
+            {draft ? (
+              <span className={`settings-status ${draft.enabled ? "settings-status-ok" : ""}`}>
+                {draft.enabled ? "Enabled" : "Disabled"}
+              </span>
+            ) : null}
+            {draft ? (
+              <button
+                className="btn btn-secondary btn-sm"
+                type="button"
+                disabled={enabledMutation.isPending}
+                onClick={() => enabledMutation.mutate(!draft.enabled)}
+              >
+                {draft.enabled ? "Disable" : "Enable"}
+              </button>
+            ) : null}
+            <button
+              className="btn btn-primary btn-sm"
+              type="submit"
+              disabled={saveMutation.isPending || planQuery.isPending}
+            >
               {saveMutation.isPending ? "Saving…" : draft ? "Save rounds" : "Create evaluation plan"}
             </button>
           </div>
@@ -734,25 +776,19 @@ function CourseCheckPolicyCard({ eventId }: { eventId: string }) {
 
   if (!draft) {
     return (
-      <section className="settings-card" aria-labelledby="cc-policy-heading">
-        <h2 id="cc-policy-heading">Course Check policy</h2>
-        <p className="muted">{policyQuery.isError ? "Unable to load policy." : "Loading…"}</p>
+      <section className="settings-card" aria-label="Course Check">
+        <p className="empty-state padded">
+          {policyQuery.isError ? "Unable to load policy." : "Loading…"}
+        </p>
       </section>
     );
   }
 
   return (
-    <section className="settings-card" aria-labelledby="cc-policy-heading">
-      <div className="settings-card-header">
-        <div>
-          <h2 id="cc-policy-heading">Course Check policy</h2>
-          <p className="muted">
-            Optional stricter approvals. Policy can only add gates — it cannot turn off
-            plan matching, authorization, freshness checks, or hard safety blocks.
-          </p>
-        </div>
-      </div>
+    <section className="settings-card settings-card-compact" aria-label="Course Check">
+      <h2>Course Check safeguards</h2>
       <form
+        id="course-check-policy-form"
         className="settings-form"
         onSubmit={(event) => {
           event.preventDefault();
@@ -760,68 +796,53 @@ function CourseCheckPolicyCard({ eventId }: { eventId: string }) {
           saveMutation.mutate(draft);
         }}
       >
-        <label className="settings-check">
-          <input
-            type="checkbox"
-            checked={draft.requireTwoPersonApproval}
-            onChange={(e) =>
-              setDraft({ ...draft, requireTwoPersonApproval: e.target.checked })
-            }
-          />
-          <span>Require two-person approval before stage execution</span>
-        </label>
-        <label className="settings-check">
-          <input
-            type="checkbox"
-            checked={draft.requireDistinctApprover}
-            onChange={(e) =>
-              setDraft({ ...draft, requireDistinctApprover: e.target.checked })
-            }
-          />
-          <span>Approver must differ from the plan requester</span>
-        </label>
-        <label className="settings-check">
-          <input
-            type="checkbox"
-            checked={draft.requireReasonOnApprove}
-            onChange={(e) =>
-              setDraft({ ...draft, requireReasonOnApprove: e.target.checked })
-            }
-          />
-          <span>Require a reason on every stage approval</span>
-        </label>
-        <label className="settings-label" htmlFor="cc-max-agent-mode">
-          Maximum agent operating mode
-        </label>
-        <select
-          id="cc-max-agent-mode"
-          className="settings-input"
-          value={draft.maxAgentMode}
-          onChange={(e) =>
-            setDraft({
-              ...draft,
-              maxAgentMode: e.target.value as AgentOperatingMode,
-            })
+        <SettingsCheckbox
+          label="Two-person approval"
+          checked={draft.requireTwoPersonApproval}
+          onChange={(requireTwoPersonApproval) =>
+            setDraft({ ...draft, requireTwoPersonApproval })
           }
-        >
-          <option value="propose_only">Propose only</option>
-          <option value="delegated_execution">Delegated execution</option>
-          <option value="autonomous_policy">Autonomous policy</option>
-        </select>
-        <div className="settings-actions">
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={saveMutation.isPending}
-          >
-            {saveMutation.isPending ? "Saving…" : "Save policy"}
-          </button>
-        </div>
+        />
+        <SettingsCheckbox
+          label="Approver must differ from requester"
+          checked={draft.requireDistinctApprover}
+          onChange={(requireDistinctApprover) =>
+            setDraft({ ...draft, requireDistinctApprover })
+          }
+        />
+        <SettingsCheckbox
+          label="Reason required on approve"
+          checked={draft.requireReasonOnApprove}
+          onChange={(requireReasonOnApprove) =>
+            setDraft({ ...draft, requireReasonOnApprove })
+          }
+        />
+        <SettingsSelectField
+          label="Max agent mode"
+          value={draft.maxAgentMode}
+          onChange={(maxAgentMode) =>
+            setDraft({ ...draft, maxAgentMode: maxAgentMode as AgentOperatingMode })
+          }
+          options={[
+            { value: "propose_only", label: "Propose only" },
+            { value: "delegated_execution", label: "Delegated execution" },
+            { value: "autonomous_policy", label: "Autonomous policy" },
+          ]}
+        />
         {message ? (
           <p className={`form-message ${tone === "error" ? "error" : "success"}`} role="status">
             {message}
           </p>
         ) : null}
+        <div className="settings-card-actions settings-card-actions-end">
+          <button
+            type="submit"
+            className="btn btn-primary btn-sm"
+            disabled={saveMutation.isPending}
+          >
+            {saveMutation.isPending ? "Saving…" : "Save"}
+          </button>
+        </div>
       </form>
     </section>
   );
@@ -944,103 +965,56 @@ function AutomationAccessCard({ eventId }: { eventId: string }) {
     : `claude mcp add --transport http chartstead ${mcpUrl} --header "Authorization: Bearer cs_live_…"`;
 
   return (
-    <section className="settings-card automation-access" aria-labelledby="automation-access-heading">
-      <div className="settings-card-header">
-        <div>
-          <h2 id="automation-access-heading">Automation access</h2>
-          <p className="muted">
-            Give integrations and AI agents scoped access to this conference. Same key works for the
-            HTTP API and MCP. Secrets are shown once.
-          </p>
-        </div>
-      </div>
-
-      <div className="automation-tabs" role="tablist" aria-label="Access method">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "api"}
-          className={`automation-tab ${tab === "api" ? "active" : ""}`}
-          onClick={() => setTab("api")}
-        >
+    <section className="settings-card automation-access" aria-label="Automation">
+      <h2>Connect your agent</h2>
+      <div className="seg automation-method-seg" role="group" aria-label="Access method">
+        <button type="button" aria-pressed={tab === "api"} onClick={() => setTab("api")}>
           API
         </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "mcp"}
-          className={`automation-tab ${tab === "mcp" ? "active" : ""}`}
-          onClick={() => setTab("mcp")}
-        >
+        <button type="button" aria-pressed={tab === "mcp"} onClick={() => setTab("mcp")}>
           MCP
         </button>
       </div>
 
       {tab === "api" ? (
         <div role="tabpanel" className="automation-panel">
-          <p className="muted">
-            Use the HTTP API for scripts, n8n, Make, or custom agents. Send{" "}
-            <code>Authorization: Bearer &lt;token&gt;</code> to{" "}
-            <code>{origin || "https://your-host"}/api/v1/…</code>.
-          </p>
-
           <form className="settings-form settings-form-wide" onSubmit={onCreate}>
-            <p className="settings-form-legend">Create API key</p>
-
-            <label className="settings-label" htmlFor="agent-key-name">
-              Name
-            </label>
-            <input
-              id="agent-key-name"
-              className="settings-input"
+            <SettingsTextField
+              label="Name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={setName}
               placeholder="Program ops agent"
               autoComplete="off"
             />
-
-            <label className="settings-label" htmlFor="agent-key-mode">
-              Operating mode
-            </label>
-            <select
-              id="agent-key-mode"
-              className="settings-input"
+            <SettingsSelectField
+              label="Mode"
               value={mode}
-              onChange={(e) => setMode(e.target.value as AgentOperatingMode)}
-            >
-              <option value="propose_only">Propose only — create and revise plans</option>
-              <option value="delegated_execution">
-                Delegated execution — may apply granted stages
-              </option>
-              <option value="autonomous_policy">
-                Autonomous policy — explicit unsupervised execution
-              </option>
-            </select>
-
+              onChange={(next) => setMode(next as AgentOperatingMode)}
+              options={[
+                { value: "propose_only", label: "Propose only" },
+                { value: "delegated_execution", label: "Delegated execution" },
+                { value: "autonomous_policy", label: "Autonomous policy" },
+              ]}
+            />
             <fieldset className="settings-scope-fieldset">
-              <legend className="settings-label">Course Check stages</legend>
-              <label className="settings-check">
-                <input
-                  type="checkbox"
-                  checked={grantAll}
-                  onChange={(e) => {
-                    setGrantAll(e.target.checked);
-                    if (e.target.checked) setScopes([...COURSE_CHECK_SCOPES]);
-                  }}
-                />
-                <span>All stages (stored as expanded individual scopes)</span>
-              </label>
+              <legend className="settings-field-label">Stages</legend>
+              <SettingsCheckbox
+                label="All stages"
+                checked={grantAll}
+                onChange={(next) => {
+                  setGrantAll(next);
+                  if (next) setScopes([...COURSE_CHECK_SCOPES]);
+                }}
+              />
               <div className="settings-scope-grid">
                 {COURSE_CHECK_SCOPES.map((scope) => (
-                  <label key={scope} className="settings-check">
-                    <input
-                      type="checkbox"
-                      checked={grantAll || scopes.includes(scope)}
-                      disabled={grantAll}
-                      onChange={() => toggleScope(scope)}
-                    />
-                    <span>{SCOPE_LABELS[scope]}</span>
-                  </label>
+                  <SettingsCheckbox
+                    key={scope}
+                    label={SCOPE_LABELS[scope]}
+                    checked={grantAll || scopes.includes(scope)}
+                    disabled={grantAll}
+                    onChange={() => toggleScope(scope)}
+                  />
                 ))}
               </div>
             </fieldset>
@@ -1084,14 +1058,9 @@ function AutomationAccessCard({ eventId }: { eventId: string }) {
         </div>
       ) : (
         <div role="tabpanel" className="automation-panel">
-          <p className="muted">
-            Connect Claude Code, Cursor, Codex, or any MCP client with the same agent API key. No
-            OAuth wizard — paste the server URL and Authorization header.
-          </p>
-
           <div className="mcp-field">
-            <label className="settings-label" htmlFor="mcp-url">
-              MCP server URL
+            <label className="settings-field-label" htmlFor="mcp-url">
+              MCP URL
             </label>
             <div className="mcp-copy-row">
               <code id="mcp-url" className="settings-token-value">
@@ -1108,63 +1077,42 @@ function AutomationAccessCard({ eventId }: { eventId: string }) {
           </div>
 
           <form className="settings-form settings-form-wide" onSubmit={onCreate}>
-            <p className="settings-form-legend">Create an MCP token</p>
-            <p className="muted">
-              This creates the same scoped agent key used by the API tab. Defaults stay propose-only
-              until you grant stages.
-            </p>
-            <label className="settings-label" htmlFor="mcp-key-name">
-              Name
-            </label>
-            <input
-              id="mcp-key-name"
-              className="settings-input"
+            <SettingsTextField
+              label="Name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={setName}
               placeholder="Claude Code"
               autoComplete="off"
             />
-            <label className="settings-label" htmlFor="mcp-key-mode">
-              Operating mode
-            </label>
-            <select
-              id="mcp-key-mode"
-              className="settings-input"
+            <SettingsSelectField
+              label="Mode"
               value={mode}
-              onChange={(e) => setMode(e.target.value as AgentOperatingMode)}
-            >
-              <option value="propose_only">Propose only — create and revise plans</option>
-              <option value="delegated_execution">
-                Delegated execution — may apply granted stages
-              </option>
-              <option value="autonomous_policy">
-                Autonomous policy — explicit unsupervised execution
-              </option>
-            </select>
+              onChange={(next) => setMode(next as AgentOperatingMode)}
+              options={[
+                { value: "propose_only", label: "Propose only" },
+                { value: "delegated_execution", label: "Delegated execution" },
+                { value: "autonomous_policy", label: "Autonomous policy" },
+              ]}
+            />
             <fieldset className="settings-scope-fieldset">
-              <legend className="settings-label">Course Check stages</legend>
-              <label className="settings-check">
-                <input
-                  type="checkbox"
-                  checked={grantAll}
-                  onChange={(e) => {
-                    setGrantAll(e.target.checked);
-                    if (e.target.checked) setScopes([...COURSE_CHECK_SCOPES]);
-                  }}
-                />
-                <span>All stages</span>
-              </label>
+              <legend className="settings-field-label">Stages</legend>
+              <SettingsCheckbox
+                label="All stages"
+                checked={grantAll}
+                onChange={(next) => {
+                  setGrantAll(next);
+                  if (next) setScopes([...COURSE_CHECK_SCOPES]);
+                }}
+              />
               <div className="settings-scope-grid">
                 {COURSE_CHECK_SCOPES.map((scope) => (
-                  <label key={scope} className="settings-check">
-                    <input
-                      type="checkbox"
-                      checked={grantAll || scopes.includes(scope)}
-                      disabled={grantAll}
-                      onChange={() => toggleScope(scope)}
-                    />
-                    <span>{SCOPE_LABELS[scope]}</span>
-                  </label>
+                  <SettingsCheckbox
+                    key={scope}
+                    label={SCOPE_LABELS[scope]}
+                    checked={grantAll || scopes.includes(scope)}
+                    disabled={grantAll}
+                    onChange={() => toggleScope(scope)}
+                  />
                 ))}
               </div>
             </fieldset>
@@ -1192,8 +1140,7 @@ function AutomationAccessCard({ eventId }: { eventId: string }) {
           ) : null}
 
           <div className="mcp-config-block">
-            <strong>Cursor / generic MCP config</strong>
-            <p className="muted">Add to <code>.cursor/mcp.json</code> or your client’s MCP settings.</p>
+            <strong>MCP config</strong>
             <pre className="mcp-config-pre">{mcpConfig}</pre>
             <div className="settings-actions">
               <button
@@ -1211,9 +1158,6 @@ function AutomationAccessCard({ eventId }: { eventId: string }) {
             <pre className="mcp-config-pre">{claudeCommand}</pre>
           </div>
 
-          <p className="muted">
-            Treat the token like a password. Revoke it below when access should end.
-          </p>
         </div>
       )}
 
@@ -1296,17 +1240,37 @@ export function SettingsWorkspace({
   event,
   eventId: legacyEventId,
   onEventUpdated = () => {},
+  onChromeChange,
 }: {
   event?: EventRecord;
   eventId?: string;
   onEventUpdated?: (event: EventRecord) => void;
+  onChromeChange?: (chrome: SettingsChrome | null) => void;
 }) {
   const eventId = event?.id ?? legacyEventId ?? "";
+  const sections = event ? EVENT_SECTIONS : EVENTLESS_SECTIONS;
+  const [section, setSection] = useState<SettingsSectionId>(sections[0]!.id);
   const queryClient = useQueryClient();
   const [baseId, setBaseId] = useState("");
   const [accessToken, setAccessToken] = useState("");
   const [formMessage, setFormMessage] = useState<string | null>(null);
   const [formTone, setFormTone] = useState<"success" | "error">("success");
+
+  useEffect(() => {
+    if (!sections.some((candidate) => candidate.id === section)) {
+      setSection(sections[0]!.id);
+    }
+  }, [section, sections]);
+
+  useEffect(() => {
+    if (!onChromeChange) return;
+    onChromeChange({
+      section,
+      sections,
+      onSectionChange: setSection,
+    });
+    return () => onChromeChange(null);
+  }, [onChromeChange, section, sections]);
 
   const syncQuery = useQuery({
     queryKey: ["airtable-sync", eventId],
@@ -1387,16 +1351,6 @@ export function SettingsWorkspace({
     });
   }
 
-  function onDemoSandbox() {
-    setFormMessage(null);
-    setBaseId(DEMO_BASE_ID);
-    setAccessToken(DEMO_TOKEN);
-    connectMutation.mutate({
-      baseId: DEMO_BASE_ID,
-      accessToken: DEMO_TOKEN,
-    });
-  }
-
   const busy =
     connectMutation.isPending ||
     pullMutation.isPending ||
@@ -1406,178 +1360,149 @@ export function SettingsWorkspace({
     Boolean(baseId.trim()) &&
     (Boolean(accessToken.trim()) || Boolean(sync?.hasAccessToken));
 
+  const airtableSection = (
+    <section className="settings-card settings-card-compact" aria-label="Airtable">
+      <h2>Airtable sync</h2>
+      {sync ? (
+        <p className={healthTone(sync.health)}>{healthLabel(sync.health)}</p>
+      ) : null}
+
+      {syncQuery.isPending ? (
+        <p className="empty-state padded">Loading sync status…</p>
+      ) : syncQuery.error instanceof ApiError ? (
+        <p className="form-message error" role="alert">
+          {syncQuery.error.message}
+        </p>
+      ) : (
+        <>
+          <form className="settings-form" onSubmit={onConnect}>
+            <SettingsTextField
+              label="Base ID"
+              id="airtable-base-id"
+              name="baseId"
+              value={baseId}
+              onChange={setBaseId}
+              placeholder="appXXXXXXXXXXXXXX"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <SettingsTextField
+              label={sync?.hasAccessToken ? "Token (blank keeps current)" : "Token"}
+              id="airtable-access-token"
+              name="accessToken"
+              type="password"
+              value={accessToken}
+              onChange={setAccessToken}
+              placeholder={sync?.hasAccessToken ? "••••••••" : "patXXXXXXXX…."}
+              autoComplete="off"
+              spellCheck={false}
+            />
+
+            <div className="settings-actions">
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={busy || !canSubmit}
+              >
+                {connectMutation.isPending ? "Connecting…" : "Connect and pull"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={busy || !sync?.configured}
+                onClick={() => {
+                  setFormMessage(null);
+                  pullMutation.mutate();
+                }}
+              >
+                {pullMutation.isPending ? "Pulling…" : "Retry pull"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                disabled={busy || !sync?.configured}
+                onClick={() => {
+                  setFormMessage(null);
+                  disconnectMutation.mutate();
+                }}
+              >
+                Disconnect
+              </button>
+            </div>
+          </form>
+
+          {sync ? (
+            <dl className="settings-meta">
+              <div>
+                <dt>Last pull</dt>
+                <dd>{formatTimestamp(sync.lastPullAt)}</dd>
+              </div>
+              <div>
+                <dt>Last success</dt>
+                <dd>{formatTimestamp(sync.lastSuccessAt)}</dd>
+              </div>
+              <div>
+                <dt>Base</dt>
+                <dd>{sync.baseId ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>Token</dt>
+                <dd>{sync.hasAccessToken ? "Saved for this event" : "Not saved"}</dd>
+              </div>
+              {sync.lastError ? (
+                <div className="settings-meta-wide">
+                  <dt>Last error</dt>
+                  <dd>{sync.lastError}</dd>
+                </div>
+              ) : null}
+            </dl>
+          ) : null}
+
+          {sync?.guidance ? (
+            <p className="settings-guidance" role="status">
+              {sync.guidance}
+            </p>
+          ) : null}
+
+          {formMessage ? (
+            <p className={`form-message ${formTone}`} role="status">
+              {formMessage}
+            </p>
+          ) : null}
+        </>
+      )}
+    </section>
+  );
+
   return (
     <div className="workspace settings-workspace" aria-label="Settings sections">
-      <div className="settings-stack">
-        {event ? (
+      {!onChromeChange ? (
+        <div className="settings-local-tabs">
+          <SettingsCommandBar
+            chrome={{
+              section,
+              sections,
+              onSectionChange: setSection,
+            }}
+          />
+        </div>
+      ) : null}
+      <div className="settings-stack settings-stack-single">
+        {section === "event" && event ? (
           <EventConfigurationCard event={event} onUpdated={onEventUpdated} />
         ) : null}
-        {event ? (
-          <section className="settings-card" aria-labelledby="reviewers-heading">
-            <div className="settings-card-header">
-              <div>
-                <h2 id="reviewers-heading">Reviewers</h2>
-                <p className="muted">
-                  Grant or remove track access for signed-in reviewers. Invitations and
-                  track assignments stay event-scoped.
-                </p>
-              </div>
-            </div>
+        {section === "reviewers" && event ? (
+          <section className="settings-card" aria-label="Reviewers">
+            <h2>Reviewer access</h2>
             <ReviewerRouting event={event} />
           </section>
         ) : null}
-        {event ? <EvaluationPlanCard eventId={event.id} /> : null}
-        <CourseCheckPolicyCard eventId={eventId} />
-        <AutomationAccessCard eventId={eventId} />
-
-        <section className="settings-card" aria-labelledby="airtable-sync-heading">
-          <div className="settings-card-header">
-            <div>
-              <h2 id="airtable-sync-heading">Airtable sync</h2>
-              <p className="muted">
-                Optional. Pull mapped fields from a ChartStead Program base. Core ChartStead
-                work stays available when Airtable is offline.
-              </p>
-            </div>
-            {sync ? (
-              <span className={healthTone(sync.health)}>{healthLabel(sync.health)}</span>
-            ) : null}
-          </div>
-
-          {syncQuery.isPending ? (
-            <p className="empty-state padded">Loading sync status…</p>
-          ) : syncQuery.error instanceof ApiError ? (
-            <p className="form-message error" role="alert">
-              {syncQuery.error.message}
-            </p>
-          ) : (
-            <>
-              <div className="settings-demo-callout">
-                <strong>No Airtable account?</strong>
-                <p>
-                  Use the built-in sandbox. It fakes a connected base and pulls a visible title
-                  change onto a few submissions so you can verify the flow end-to-end.
-                </p>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={busy}
-                  onClick={onDemoSandbox}
-                >
-                  {connectMutation.isPending
-                    ? "Connecting demo…"
-                    : "Connect demo Airtable sandbox"}
-                </button>
-              </div>
-
-              <form className="settings-form" onSubmit={onConnect}>
-                <p className="settings-form-legend">Or connect a real Airtable base</p>
-                <label className="settings-label" htmlFor="airtable-base-id">
-                  Base ID
-                </label>
-                <input
-                  id="airtable-base-id"
-                  className="settings-input"
-                  name="baseId"
-                  value={baseId}
-                  onChange={(e) => setBaseId(e.target.value)}
-                  placeholder="appXXXXXXXXXXXXXX"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-
-                <label className="settings-label" htmlFor="airtable-access-token">
-                  Personal access token
-                  {sync?.hasAccessToken ? " (leave blank to keep current)" : ""}
-                </label>
-                <input
-                  id="airtable-access-token"
-                  className="settings-input"
-                  name="accessToken"
-                  type="password"
-                  value={accessToken}
-                  onChange={(e) => setAccessToken(e.target.value)}
-                  placeholder={
-                    sync?.hasAccessToken ? "•••••••• (saved)" : "patXXXXXXXX…."
-                  }
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-
-                <div className="settings-actions">
-                  <button
-                    type="submit"
-                    className="btn btn-secondary"
-                    disabled={busy || !canSubmit}
-                  >
-                    {connectMutation.isPending ? "Connecting…" : "Connect and pull"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    disabled={busy || !sync?.configured}
-                    onClick={() => {
-                      setFormMessage(null);
-                      pullMutation.mutate();
-                    }}
-                  >
-                    {pullMutation.isPending ? "Pulling…" : "Retry pull"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    disabled={busy || !sync?.configured}
-                    onClick={() => {
-                      setFormMessage(null);
-                      disconnectMutation.mutate();
-                    }}
-                  >
-                    Disconnect
-                  </button>
-                </div>
-              </form>
-
-              {sync ? (
-                <dl className="settings-meta">
-                  <div>
-                    <dt>Last pull</dt>
-                    <dd>{formatTimestamp(sync.lastPullAt)}</dd>
-                  </div>
-                  <div>
-                    <dt>Last success</dt>
-                    <dd>{formatTimestamp(sync.lastSuccessAt)}</dd>
-                  </div>
-                  <div>
-                    <dt>Base</dt>
-                    <dd>{sync.baseId ?? "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Token</dt>
-                    <dd>{sync.hasAccessToken ? "Saved for this event" : "Not saved"}</dd>
-                  </div>
-                  {sync.lastError ? (
-                    <div className="settings-meta-wide">
-                      <dt>Last error</dt>
-                      <dd>{sync.lastError}</dd>
-                    </div>
-                  ) : null}
-                </dl>
-              ) : null}
-
-              {sync?.guidance ? (
-                <p className="settings-guidance" role="status">
-                  {sync.guidance}
-                </p>
-              ) : null}
-
-              {formMessage ? (
-                <p className={`form-message ${formTone}`} role="status">
-                  {formMessage}
-                </p>
-              ) : null}
-            </>
-          )}
-        </section>
+        {section === "evaluation" && event ? (
+          <EvaluationPlanCard eventId={event.id} />
+        ) : null}
+        {section === "course-check" ? <CourseCheckPolicyCard eventId={eventId} /> : null}
+        {section === "automation" ? <AutomationAccessCard eventId={eventId} /> : null}
+        {section === "airtable" ? airtableSection : null}
       </div>
     </div>
   );

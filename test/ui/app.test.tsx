@@ -376,8 +376,13 @@ describe("organizer application", () => {
       "page",
     );
     expect(screen.queryByRole("heading", { name: "Settings", level: 2 })).not.toBeInTheDocument();
-    expect(await screen.findByRole("heading", { name: "Reviewers", level: 2 })).toBeVisible();
-    expect(await screen.findByRole("heading", { name: "Airtable sync", level: 2 })).toBeVisible();
+    expect(screen.getByRole("group", { name: "Settings section" })).toBeVisible();
+    expect(await screen.findByLabelText("Name")).toBeVisible();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Reviewers" }));
+    expect(await screen.findByLabelText("Reviewer email")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Airtable" }));
+    expect(await screen.findByLabelText("Base ID")).toBeVisible();
   });
   it("creates and configures a truthful empty event workspace", async () => {
     const requests: Array<{ url: string; method: string; body: unknown }> = [];
@@ -536,12 +541,12 @@ describe("organizer application", () => {
     expect(await screen.findByText("No sessions yet.")).toBeVisible();
 
     await user.click(screen.getByRole("link", { name: "Settings" }));
-    expect(await screen.findByRole("heading", { name: "Event configuration" })).toBeVisible();
-    await user.type(screen.getByRole("textbox", { name: "New track name" }), "Main stage");
+    expect(await screen.findByLabelText("Name")).toBeVisible();
+    await user.type(screen.getByRole("textbox", { name: "New track" }), "Main stage");
     await user.click(screen.getByRole("button", { name: "Add track" }));
-    await user.type(screen.getByRole("textbox", { name: "New room name" }), "Ballroom");
+    await user.type(screen.getByRole("textbox", { name: "New room" }), "Ballroom");
     await user.click(screen.getByRole("button", { name: "Add room" }));
-    await user.click(screen.getByRole("button", { name: "Save event configuration" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("Event configuration saved.")).toBeVisible();
     const save = requests.find(
@@ -1418,7 +1423,8 @@ describe("organizer application", () => {
 
     renderAt("/e/pacific-open-data-summit-2026/submissions");
     await user.click(await screen.findByRole("link", { name: "Settings" }));
-    expect(await screen.findByRole("heading", { name: "Reviewers" })).toBeVisible();
+    await user.click(await screen.findByRole("button", { name: "Reviewers" }));
+    expect(await screen.findByLabelText("Reviewer email")).toBeVisible();
     await user.type(screen.getByLabelText("Reviewer email"), "rae@example.com");
     await user.click(screen.getByRole("checkbox", { name: "Platform" }));
     await user.click(screen.getByRole("button", { name: "Send reviewer invitation" }));
@@ -1517,6 +1523,7 @@ describe("organizer application", () => {
 
     renderAt("/e/pacific-open-data-summit-2026/submissions");
     await user.click(await screen.findByRole("link", { name: "Settings" }));
+    await user.click(await screen.findByRole("button", { name: "Reviewers" }));
     expect(await screen.findByText("Delivery failed — retry available")).toBeVisible();
     const invitationRow = screen.getByText("future@example.com").closest("li");
     expect(invitationRow).toBeTruthy();
