@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import type {
   PublicEmbedFieldVisibility,
@@ -111,6 +112,36 @@ function speakerSessionMeta(session: PublicProgramSession): string {
 
 function countNoun(count: number, singular: string, plural = `${singular}s`): string {
   return count === 1 ? singular : plural;
+}
+
+function AgendaIcon({ name }: { name: "bookmark" | "calendar" | "keynote" | "panel" | "workshop" | "meal" | "presentation" | "lightning" | "reception" | "pin" | "person" | "search" }) {
+  const paths: Record<typeof name, ReactNode> = {
+    bookmark: <path d="M7 4.75h10a1 1 0 0 1 1 1V21l-6-3.8L6 21V5.75a1 1 0 0 1 1-1Z" />,
+    calendar: <><rect x="5" y="7" width="14" height="13" rx="1" /><path d="M8 4v5m8-5v5M5 11h14" /></>,
+    keynote: <path d="m12 3 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9L12 3Z" />,
+    panel: <><circle cx="8" cy="9" r="3" /><circle cx="16" cy="9" r="3" /><path d="M2.5 20c.4-4 2.2-6 5.5-6s5.1 2 5.5 6m-3 0c.4-4 2.2-6 5.5-6s5.1 2 5.5 6" /></>,
+    workshop: <><path d="m5 4 15 15M15 4l-3 3 5 5 3-3M4 20l5-5" /><circle cx="6" cy="6" r="2" /></>,
+    meal: <><path d="M6 3v8m3-8v8M6 7h3m-1.5 4v10M16 3v18m0-18c3 2 3 7 0 9" /></>,
+    presentation: <><path d="M4 5h16v11H4zM8 20l4-4 4 4" /><path d="m8 12 2-2 2 1 3-3 2 2" /></>,
+    lightning: <path d="m14 2-8 12h6l-2 8 8-12h-6l2-8Z" />,
+    reception: <><path d="M5 4h5l-1 7c-.2 1.5-1 2.5-2.5 3v5m-3 1h6M14 4h5l-1 7c-.2 1.5-1 2.5-2.5 3v5m-3 1h6" /></>,
+    pin: <><path d="M12 21s6-5.5 6-11a6 6 0 1 0-12 0c0 5.5 6 11 6 11Z" /><circle cx="12" cy="10" r="2" /></>,
+    person: <><circle cx="12" cy="7" r="3" /><path d="M6 21v-2a6 6 0 0 1 12 0v2" /></>,
+    search: <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></>,
+  };
+  return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
+}
+
+function agendaKind(format: string): { label: string; icon: Parameters<typeof AgendaIcon>[0]["name"]; tone: string } {
+  const value = format.toLowerCase();
+  if (value.includes("keynote")) return { label: "Keynote", icon: "keynote", tone: "blue" };
+  if (value.includes("panel")) return { label: "Panel", icon: "panel", tone: "purple" };
+  if (value.includes("workshop")) return { label: "Workshop", icon: "workshop", tone: "green" };
+  if (value.includes("lunch") || value.includes("meal")) return { label: "Lunch", icon: "meal", tone: "amber" };
+  if (value.includes("lightning")) return { label: "Lightning talks", icon: "lightning", tone: "green" };
+  if (value.includes("reception")) return { label: "Reception", icon: "reception", tone: "slate" };
+  if (value.includes("registration")) return { label: "Registration", icon: "calendar", tone: "slate" };
+  return { label: "Presentation", icon: "presentation", tone: "blue" };
 }
 
 function widgetLabel(widget: PublicEmbedWidget | "program"): string {
@@ -238,6 +269,21 @@ export function PublicProgramRenderer({
     ["--program-accent" as string]: data.event.themeAccent,
   };
   const currentWidget = widget ?? "program";
+
+  if (currentWidget === "agenda") {
+    return (
+      <AgendaEmbedView
+        data={data}
+        sessions={sessions}
+        fields={fields}
+        filters={filters}
+        onFiltersChange={(next) => {
+          if (onFiltersChange) onFiltersChange(next);
+          else setInternalFilters(next);
+        }}
+      />
+    );
+  }
 
   return (
     <div
@@ -461,6 +507,74 @@ export function PublicProgramRenderer({
       )}
     </div>
   );
+}
+
+function AgendaEmbedView({
+  data,
+  sessions,
+  fields,
+  filters,
+  onFiltersChange,
+}: {
+  data: PublicProgramResponse;
+  sessions: PublicProgramSession[];
+  fields: PublicEmbedFieldVisibility;
+  filters: PublicProgramFilters;
+  onFiltersChange: (filters: PublicProgramFilters) => void;
+}) {
+  const [saved, setSaved] = useState<Set<string>>(() => new Set(["agenda-keynote"]));
+  const days = Array.from(new Set(data.sessions.map((session) => session.day).filter(Boolean))) as string[];
+  const visibleSessions = filters.day ? sessions : sessions.filter((session) => session.day === days[0]);
+  const speakers = data.speakers;
+  const formats = Array.from(new Set(data.sessions.map((session) => session.format))).sort();
+  const clearFilters = () => onFiltersChange({});
+
+  return (
+    <div className="agenda-embed program-renderer widget-agenda" data-testid="public-program-renderer">
+      <div className="agenda-utility">
+        <button type="button" className="agenda-itinerary-action"><AgendaIcon name="bookmark" />Save to itinerary</button>
+      </div>
+      <header className="agenda-heading">
+        <div>
+          <h1>{data.event.name}</h1>
+          <p>{data.event.startsOn === data.event.endsOn ? dayLabel(data.event.startsOn) : `${new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", timeZone: "UTC" }).format(new Date(`${data.event.startsOn}T00:00:00Z`))}–${new Date(`${data.event.endsOn}T00:00:00Z`).getUTCDate()}, ${new Date(`${data.event.endsOn}T00:00:00Z`).getUTCFullYear()}`}</p>
+        </div>
+        <label className="agenda-search"><span className="sr-only">Search agenda</span><AgendaIcon name="search" /><input type="search" value={filters.query ?? ""} placeholder="Search agenda" onChange={(event) => onFiltersChange({ ...filters, query: event.target.value || undefined })} /></label>
+      </header>
+      <section className="agenda-controls" aria-label="Agenda filters">
+        <div className="agenda-day-tabs" role="group" aria-label="Event day">
+          {days.map((day, index) => <button key={day} type="button" className={filters.day === day || (!filters.day && day === days[0]) ? "is-active" : ""} onClick={() => onFiltersChange({ ...filters, day })}>{data.event.id === "agenda-fixture" ? `${index === 0 ? "Tue" : "Wed"}, Oct ${7 + index}` : dayLabel(day)}</button>)}
+        </div>
+        <AgendaSelect label="Track" value={filters.trackId ?? ""} onChange={(value) => onFiltersChange({ ...filters, trackId: value || undefined })} options={data.event.tracks.map((track) => [track.id, track.name])} all="All" />
+        <AgendaSelect label="Room" value={filters.roomId ?? ""} onChange={(value) => onFiltersChange({ ...filters, roomId: value || undefined })} options={data.event.rooms.map((room) => [room.id, room.name])} all="All" />
+        <AgendaSelect label="Session type" value={filters.format ?? ""} onChange={(value) => onFiltersChange({ ...filters, format: value || undefined })} options={formats.map((format) => [format, format])} all="All" />
+        <AgendaSelect label="Speaker" value={filters.speakerId ?? ""} onChange={(value) => onFiltersChange({ ...filters, speakerId: value || undefined })} options={speakers.map((speaker) => [speaker.id, speaker.name])} all="All" />
+        <button type="button" className="agenda-clear" onClick={clearFilters}>Clear filters</button>
+      </section>
+      <section className="agenda-list" aria-label="Agenda sessions">
+        {visibleSessions.length === 0 ? <p className="agenda-empty">No sessions match these filters.</p> : visibleSessions.map((session) => {
+          const kind = agendaKind(session.format);
+          const isSaved = saved.has(session.id);
+          return <article key={session.id} className={`agenda-row tone-${kind.tone}${session.format.toLowerCase().includes("lunch") ? " is-meal" : ""}`}>
+            <div className="agenda-time">{fields.dateTime ? <><strong>{formatClock(session.startsAt)}</strong><span>{session.startsAt && session.endsAt ? `${Math.round((new Date(session.endsAt).getTime() - new Date(session.startsAt).getTime()) / 60000)} min` : "Time TBD"}</span></> : null}</div>
+            <div className="agenda-kind"><span><AgendaIcon name={kind.icon} /></span></div>
+            <div className="agenda-session-copy">
+              <small>{kind.label}</small>
+              <h2>{fields.title ? session.title : "Session details"}</h2>
+              {fields.speakers && session.speakers.length ? <p><AgendaIcon name="person" />{session.speakers.map((speaker) => speaker.name).join("  •  ")}</p> : fields.room ? <p><AgendaIcon name="pin" />{roomLabel(session)}</p> : null}
+            </div>
+            {fields.track && session.trackName ? <span className="agenda-track">{session.trackName}</span> : <span />}
+            {fields.room && session.speakers.length ? <p className="agenda-room"><AgendaIcon name="pin" />{roomLabel(session)}</p> : <span />}
+            <button type="button" className="agenda-save" aria-label={`${isSaved ? "Remove" : "Save"} ${session.title} ${isSaved ? "from" : "to"} itinerary`} aria-pressed={isSaved} onClick={() => setSaved((current) => { const next = new Set(current); if (next.has(session.id)) next.delete(session.id); else next.add(session.id); return next; })}><AgendaIcon name="bookmark" /></button>
+          </article>;
+        })}
+      </section>
+    </div>
+  );
+}
+
+function AgendaSelect({ label, value, options, all, onChange }: { label: string; value: string; options: string[][]; all: string; onChange: (value: string) => void }) {
+  return <label className="agenda-select"><span>{label}</span><select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}><option value="">{all}</option>{options.map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}</select></label>;
 }
 
 function FullProgramLayout({

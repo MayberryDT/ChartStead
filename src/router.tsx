@@ -34,6 +34,7 @@ import { SubmitterEditPage } from "./SubmitterEditPage";
 import { SubmitterDashboardPage } from "./SubmitterDashboardPage";
 import { ReviewerInvitationPage } from "./ReviewerInvitationPage";
 import { DemoPersonasPage } from "./DemoPersonasPage";
+import { AgendaEmbedFixture } from "./AgendaEmbedFixture";
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
@@ -49,6 +50,12 @@ const demoPersonasRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/demo",
   component: DemoPersonasPage,
+});
+
+const agendaEmbedFixtureRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/fixtures/agenda-embed",
+  component: AgendaEmbedFixture,
 });
 
 const cfpRoute = createRoute({
@@ -269,6 +276,7 @@ function validateProposalQueueSearch(search: Record<string, unknown>): {
 const routeTree = rootRoute.addChildren([
   indexRoute,
   demoPersonasRoute,
+  agendaEmbedFixtureRoute,
   cfpRoute,
   proposalDetailRoute,
   submitterEditRoute,

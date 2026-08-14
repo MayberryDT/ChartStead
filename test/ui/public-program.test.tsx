@@ -136,6 +136,24 @@ afterEach(() => {
 });
 
 describe("PublicProgramRenderer", () => {
+  it("renders the dedicated agenda controls and preserves itinerary/filter behavior", async () => {
+    const user = userEvent.setup();
+    render(<PublicProgramRenderer data={programResponse()} mode="embed" widget="agenda" />);
+
+    expect(screen.queryByText("ChartStead Agenda")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save to itinerary" })).toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Search agenda" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Event day" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Save Opening Keynote to itinerary/ })).toHaveAttribute("aria-pressed", "false");
+
+    await user.selectOptions(screen.getByLabelText("Track"), "platform");
+    expect(screen.getByText("Opening Keynote")).toBeInTheDocument();
+    expect(screen.queryByText("Community Circle")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByLabelText("Track")).toHaveValue("");
+    expect(screen.getByText("Opening Keynote")).toBeInTheDocument();
+  });
+
   it("filters schedule and speaker lineup together", async () => {
     const user = userEvent.setup();
     render(<PublicProgramRenderer data={programResponse()} />);

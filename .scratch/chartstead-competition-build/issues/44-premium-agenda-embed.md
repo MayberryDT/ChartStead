@@ -1,6 +1,6 @@
 # 44 — Match the premium Agenda embed source of truth
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 ## Parent
 
@@ -28,4 +28,9 @@ None — Competition 09 and Rubric 23 already provide the working public embed f
 
 ## Comments
 
+- 2026-08-14 — Claimed by worker branch `ticket-44-premium-agenda` in `/home/halla/ChartStead/.worktrees/ticket-44-premium-agenda`.
 - 2026-08-14 — Created from Tyler’s locked public embed source-of-truth decision. This ticket owns only the Agenda renderer and its visual parity loop.
+
+- 2026-08-14 — Implemented the dedicated Agenda renderer and deterministic fixture at `/fixtures/agenda-embed`; preserved filters, field visibility, day selection, itinerary save controls, and the locked absence of the top-left “ChartStead Agenda” control.
+- 2026-08-14 — Visual parity loop (3 captures at 1536×1024): iteration 1 found malformed date range, missing second day tab, rows ~6px too tall, and footer below frame; iteration 2 resolved those and found filter columns/search/list right edge misaligned; iteration 3 resolved alignment and matched structure, scale, spacing, typography hierarchy, colors, borders, controls, and nine-row density. Remaining glyph differences are intentional approved local SVG icons, not generated/reference artifacts.
+- 2026-08-14 — Final capture: `docs/qa/competition-44/agenda-final-1536x1024.png`. Capture command: `npx playwright screenshot --viewport-size=1536,1024 http://127.0.0.1:5444/fixtures/agenda-embed .scratch/qa/ticket-44/agenda-final.png`. Demo: `http://100.105.117.93:5444/fixtures/agenda-embed`. Verification: `npx tsc --noEmit`, focused UI 11/11, production build, `/api/events` JSON 200, listener `0.0.0.0:5444`. Ticket intentionally remains in-progress for coordinator review.
