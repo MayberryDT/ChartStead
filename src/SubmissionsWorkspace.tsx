@@ -51,6 +51,7 @@ import {
 } from "./api";
 import { AppSelect } from "./AppSelect";
 import { createClientId } from "./id";
+import { ReviewSetupDialog } from "./ReviewSetupDialog";
 import { SettingsCheckbox, SettingsTextField } from "./SettingsFields";
 
 export type ProposalSort =
@@ -88,6 +89,7 @@ export type BatchChrome = {
 export type ReviewChrome = {
   open: boolean;
   onOpen: () => void;
+  onSetup: () => void;
 };
 
 function initials(name: string) {
@@ -303,14 +305,23 @@ export function SubmissionsCommandBar({
         </div>
       ) : null}
       {review ? (
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          aria-pressed={review.open}
-          onClick={review.onOpen}
-        >
-          Review
-        </button>
+        <>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={review.onSetup}
+          >
+            Setup review
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            aria-pressed={review.open}
+            onClick={review.onOpen}
+          >
+            Review ledger
+          </button>
+        </>
       ) : null}
       {batch ? (
         <>
@@ -512,6 +523,7 @@ export function SubmissionsWorkspace({
   );
   const [batchMessage, setBatchMessage] = useState<string | null>(null);
   const [resultsOpen, setResultsOpen] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
   const [colWidths, setColWidths] = useState<Record<QueueCol, number>>(loadQueueColWidths);
   const colWidthsRef = useRef(colWidths);
   const tableRef = useRef<HTMLTableElement>(null);
@@ -656,6 +668,7 @@ export function SubmissionsWorkspace({
     onReviewChromeChange({
       open: resultsOpen,
       onOpen: () => setResultsOpen(true),
+      onSetup: () => setSetupOpen(true),
     });
   }, [currentRole, onReviewChromeChange, resultsOpen]);
 
@@ -1077,6 +1090,8 @@ export function SubmissionsWorkspace({
               fallbackTotal={event.submissionCount}
               isLoading={resultsQuery.isPending && !resultsQuery.data}
               error={resultsQuery.error instanceof Error ? resultsQuery.error.message : null}
+              selectedProposalId={selectedProposalId}
+              onSelectProposal={openProposal}
             />
           ) : selectedProposalId && detailQuery.isError && !selected ? (
             <div className="inspector-body">
@@ -1103,6 +1118,11 @@ export function SubmissionsWorkspace({
           )}
         </aside>
       </div>
+      <ReviewSetupDialog
+        eventId={event.id}
+        open={setupOpen}
+        onClose={() => setSetupOpen(false)}
+      />
     </div>
   );
 }
@@ -1147,6 +1167,8 @@ function ReviewResultsPanel({
   queueRows,
   fallbackTotal,
   error,
+  selectedProposalId,
+  onSelectProposal,
 }: {
   eventId: string;
   results: ReviewResultsResponse | null;
@@ -1154,7 +1176,10 @@ function ReviewResultsPanel({
   fallbackTotal: number;
   isLoading: boolean;
   error: string | null;
+  selectedProposalId?: string | null;
+  onSelectProposal?: (proposalId: string) => void;
 }) {
+  const [ledgerSort, setLedgerSort] = useState<"score" | "title" | "status">("score");
   const rows =
     results?.submissions ??
     queueRows.map((proposal) => ({
@@ -1179,6 +1204,23 @@ function ReviewResultsPanel({
       : scored.reduce((sum, row) => sum + (row.aggregateScore ?? 0), 0) / scored.length;
   const incomplete = results ? rows.length - completed : Math.max(fallbackTotal, rows.length);
   const avgLabel = average === null ? "—" : average.toFixed(1);
+  const sortedRows = [...rows].sort((left, right) => {
+    if (ledgerSort === "title") {
+      return left.title.localeCompare(right.title, undefined, { sensitivity: "base" });
+    }
+    if (ledgerSort === "status") {
+      const byCompletion = left.completionStatus.localeCompare(right.completionStatus);
+      if (byCompletion !== 0) return byCompletion;
+      return statusLabel(left.recommendation).localeCompare(statusLabel(right.recommendation));
+    }
+    const leftScore = left.aggregateScore;
+    const rightScore = right.aggregateScore;
+    if (leftScore == null && rightScore == null) return left.title.localeCompare(right.title);
+    if (leftScore == null) return 1;
+    if (rightScore == null) return -1;
+    if (rightScore !== leftScore) return rightScore - leftScore;
+    return left.title.localeCompare(right.title);
+  });
 
   return (
     <div className="inspector-content review-results">
@@ -1210,28 +1252,58 @@ function ReviewResultsPanel({
           </div>
         </section>
         <section className="panel review-results-ledger">
-          <h3>Submissions</h3>
-          {rows.length === 0 ? (
+          <div className="review-results-ledger-header">
+            <h3>Submissions</h3>
+            <div className="seg review-results-sort" role="group" aria-label="Ledger sort">
+              {(
+                [
+                  ["score", "Score"],
+                  ["title", "Title"],
+                  ["status", "Status"],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={ledgerSort === value}
+                  onClick={() => setLedgerSort(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {sortedRows.length === 0 ? (
             <p>No submissions in this queue.</p>
           ) : (
             <ul className="review-results-list">
-              {rows.map((row) => (
-                <li key={row.proposalId}>
-                  <div className="review-results-row-main">
-                    <span className="talk">{row.title}</span>
-                    <span className="review-results-score">
-                      {row.aggregateScore === null ? "—" : row.aggregateScore.toFixed(1)}
-                    </span>
-                  </div>
-                  <span className="talk-sub">
-                    {row.speakers.map((speaker) => speaker.name).join(", ") || "No speakers"}
-                    {" · "}
-                    {row.completionStatus === "complete" ? "Complete" : "Incomplete"}
-                    {" · "}
-                    {statusLabel(row.recommendation)}
-                  </span>
-                </li>
-              ))}
+              {sortedRows.map((row) => {
+                const selected = selectedProposalId === row.proposalId;
+                return (
+                  <li key={row.proposalId}>
+                    <button
+                      type="button"
+                      className={`review-results-row${selected ? " is-selected" : ""}`}
+                      aria-current={selected ? "true" : undefined}
+                      onClick={() => onSelectProposal?.(row.proposalId)}
+                    >
+                      <div className="review-results-row-main">
+                        <span className="talk">{row.title}</span>
+                        <span className="review-results-score">
+                          {row.aggregateScore === null ? "—" : row.aggregateScore.toFixed(1)}
+                        </span>
+                      </div>
+                      <span className="talk-sub">
+                        {row.speakers.map((speaker) => speaker.name).join(", ") || "No speakers"}
+                        {" · "}
+                        {row.completionStatus === "complete" ? "Complete" : "Incomplete"}
+                        {" · "}
+                        {statusLabel(row.recommendation)}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>

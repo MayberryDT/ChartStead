@@ -1555,6 +1555,15 @@ function aggregateCriterionScores(criteria: ReviewCriterionResult[]): number | n
   return Number(((earned / possible) * 100).toFixed(2));
 }
 
+/** Stable demo scores that vary by proposal id, not string length. */
+function demoShowcaseAggregateScore(proposalId: string, index: number): number {
+  let hash = 0;
+  for (let i = 0; i < proposalId.length; i += 1) {
+    hash = (hash * 33 + proposalId.charCodeAt(i) + index * 17) >>> 0;
+  }
+  return Number((2.1 + (hash % 29) / 10).toFixed(1));
+}
+
 function mapReviewEvidence(row: ReviewEvidenceRow): ReviewEvidence {
   let criteria: ReviewCriterionResult[] = [];
   try {
@@ -3155,16 +3164,51 @@ export class EventStore extends DurableObject<AppBindings> {
     }
   }
 
+  /** Repair flat demo scores from showcase v4 (id-length collision). */
+  repairDemoReviewEvidenceScores(): void {
+    const rows = this.ctx.storage.sql
+      .exec<{ proposal_id: string }>(
+        `SELECT proposal_id
+         FROM review_evidence
+         WHERE round_id = 'demo-round-1' AND reviewer_id = 'demo-track-reviewer'
+         ORDER BY proposal_id ASC`,
+      )
+      .toArray();
+    rows.forEach((row, index) => {
+      this.ctx.storage.sql.exec(
+        `UPDATE review_evidence
+         SET aggregate_score = ?
+         WHERE proposal_id = ? AND round_id = 'demo-round-1' AND reviewer_id = 'demo-track-reviewer'`,
+        demoShowcaseAggregateScore(row.proposal_id, index),
+        row.proposal_id,
+      );
+    });
+  }
+
   /** Demo-only enrichment. Idempotent and additive so evaluator changes survive refreshes. */
   seedDemoShowcaseIfNeeded(): void {
     const event = this.getEvent();
     if (!event) return;
     const marker = this.ctx.storage.sql
       .exec<{ name: string }>(
-        "SELECT name FROM seed_markers WHERE name = 'demo-showcase-v4'",
+        "SELECT name FROM seed_markers WHERE name = 'demo-showcase-v5'",
       )
       .toArray()[0];
     if (marker) return;
+
+    const previous = this.ctx.storage.sql
+      .exec<{ name: string }>(
+        "SELECT name FROM seed_markers WHERE name = 'demo-showcase-v4'",
+      )
+      .toArray()[0];
+    if (previous) {
+      this.repairDemoReviewEvidenceScores();
+      this.ctx.storage.sql.exec(
+        `INSERT INTO seed_markers (name, applied_at) VALUES ('demo-showcase-v5', ?)`,
+        new Date().toISOString(),
+      );
+      return;
+    }
 
     const eventIndex = [
       "pacific-open-data-summit-2026",
@@ -3362,7 +3406,7 @@ export class EventStore extends DurableObject<AppBindings> {
         );
       });
 
-      for (const proposal of proposals.slice(0, Math.min(32, proposals.length))) {
+      for (const [index, proposal] of proposals.slice(0, Math.min(32, proposals.length)).entries()) {
         this.ctx.storage.sql.exec(
           `INSERT INTO review_evidence
             (proposal_id, round_id, reviewer_id, reviewer_name, recommendation,
@@ -3371,7 +3415,7 @@ export class EventStore extends DurableObject<AppBindings> {
            ON CONFLICT(proposal_id, round_id, reviewer_id) DO NOTHING`,
           proposal.id,
           proposal.id.endsWith("1") ? "maybe" : proposal.id.endsWith("2") ? "deny" : "approve",
-          3.4 + (proposal.id.length % 14) / 10,
+          demoShowcaseAggregateScore(proposal.id, index),
           now,
           now,
         );
@@ -3396,7 +3440,7 @@ export class EventStore extends DurableObject<AppBindings> {
         event.id,
       );
       this.ctx.storage.sql.exec(
-          `INSERT INTO seed_markers (name, applied_at) VALUES ('demo-showcase-v4', ?)`,
+          `INSERT INTO seed_markers (name, applied_at) VALUES ('demo-showcase-v5', ?)`,
         now,
       );
     });
