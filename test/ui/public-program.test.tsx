@@ -527,6 +527,9 @@ describe("Public program routes", () => {
         format: typeof search.format === "string" ? search.format : undefined,
         speakerId: typeof search.speakerId === "string" ? search.speakerId : undefined,
         session: typeof search.session === "string" ? search.session : undefined,
+        speaker: typeof search.speaker === "string" ? search.speaker : undefined,
+        itinerary: typeof search.itinerary === "string" ? search.itinerary : undefined,
+        widget: typeof search.widget === "string" ? search.widget : undefined,
       }),
     });
     const embedRoute = createRoute({
@@ -542,17 +545,21 @@ describe("Public program routes", () => {
         format: typeof search.format === "string" ? search.format : undefined,
         speakerId: typeof search.speakerId === "string" ? search.speakerId : undefined,
         session: typeof search.session === "string" ? search.session : undefined,
+        speaker: typeof search.speaker === "string" ? search.speaker : undefined,
+        itinerary: typeof search.itinerary === "string" ? search.itinerary : undefined,
+        widget: typeof search.widget === "string" ? search.widget : undefined,
       }),
     });
     const router = createRouter({
       routeTree: rootRoute.addChildren([programRoute, embedRoute]),
       history: createMemoryHistory({ initialEntries: [path] }),
     });
-    return render(
+    const view = render(
       <QueryClientProvider client={queryClient}>
         <RouterProvider router={router} />
       </QueryClientProvider>,
     );
+    return { ...view, router };
   }
 
   it("renders full page and embed from the same public payload", async () => {
@@ -585,6 +592,22 @@ describe("Public program routes", () => {
     expect(screen.getByRole("status")).toHaveTextContent("1 speaker");
     expect(screen.getByTestId("public-program-renderer")).toHaveClass("mode-embed");
     expect(screen.queryByRole("link", { name: /Embed view/i })).not.toBeInTheDocument();
+  });
+
+  it("restores and updates speaker and itinerary state through TanStack Router search", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(programResponse()), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })),
+    );
+
+    const { router } = renderAt(`/e/${eventId}/program/embed?widget=speaker-gallery&speaker=sp-1&itinerary=ses-1`);
+    expect(await screen.findByRole("complementary", { name: "Selected speaker: Ada Lovelace" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /Grace Hopper/i }));
+    expect(router.state.location.search).toMatchObject({ speaker: "sp-2", itinerary: "ses-1" });
   });
 
   it("keeps schedule, detail, and speakers in one responsive layout tree", () => {

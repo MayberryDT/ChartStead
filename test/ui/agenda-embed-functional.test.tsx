@@ -25,14 +25,14 @@ describe("functional public agenda", () => {
     expect(within(grid).getByText("Public Infrastructure for Everyone")).toBeInTheDocument();
   });
 
-  it("persists itinerary saves and exposes keyboard-focusable controls", async () => {
+  it("restores controlled itinerary saves and exposes keyboard-focusable controls", async () => {
     const user = userEvent.setup();
     const first = render(<PublicProgramRenderer data={agendaEmbedFixtureData} mode="embed" widget="agenda" />);
     const save = screen.getByRole("button", { name: /Save Public Infrastructure for Everyone to itinerary/ });
     await user.click(save);
     expect(save).toHaveAttribute("aria-pressed", "true");
     first.unmount();
-    render(<PublicProgramRenderer data={agendaEmbedFixtureData} mode="embed" widget="agenda" />);
+    render(<PublicProgramRenderer data={agendaEmbedFixtureData} mode="embed" widget="agenda" itinerarySessionIds={["agenda-keynote"]} />);
     const remove = screen.getByRole("button", { name: /Remove Public Infrastructure for Everyone from itinerary/ });
     expect(remove).toHaveAttribute("aria-pressed", "true");
     remove.focus();
