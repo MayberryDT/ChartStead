@@ -220,7 +220,6 @@ function validateProgramSearch(search: Record<string, unknown>) {
     role: typeof search.role === "string" ? search.role : undefined,
     speaker: typeof search.speaker === "string" ? search.speaker : undefined,
     session: typeof search.session === "string" ? search.session : undefined,
-    speaker: typeof search.speaker === "string" ? search.speaker : undefined,
     itinerary: typeof search.itinerary === "string" ? search.itinerary : undefined,
     widget: typeof search.widget === "string" ? search.widget : undefined,
   };
