@@ -159,13 +159,14 @@ describe("PublicProgramRenderer", () => {
     render(<PublicProgramRenderer data={programResponse()} widget="itinerary" mode="embed" />);
 
     expect(screen.getByRole("grid", { name: "Schedule itinerary" })).toBeInTheDocument();
+    expect(screen.getByText("October 7–8, 2026")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Harbor Hall" })).toBeInTheDocument();
     const save = screen.getByRole("button", { name: "Save Opening Keynote" });
     await user.click(save);
     expect(save).toHaveAttribute("aria-pressed", "true");
 
     await user.selectOptions(screen.getByLabelText("Track"), "community");
-    expect(screen.queryByText("Opening Keynote")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("grid", { name: "Schedule itinerary" })).queryByText("Opening Keynote")).not.toBeInTheDocument();
     await user.selectOptions(screen.getByLabelText("Track"), "platform");
     expect(screen.getAllByRole("button", { name: "Remove Opening Keynote from itinerary" })
       .some((button) => button.getAttribute("aria-pressed") === "true")).toBe(true);

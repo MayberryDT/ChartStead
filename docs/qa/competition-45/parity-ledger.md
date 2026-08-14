@@ -18,10 +18,15 @@ Capture command:
 - Mismatches: the final two schedule rows fell below the 1024px capture and card copy was slightly oversized for the target density.
 - Corrections: set deterministic 70px time rows, border-box cards, and compact card typography while preserving 44px interactive controls.
 
-## Iteration 3 — final
+## Iteration 3
+
+- Review found two meaningful mismatches: only one saved session left the upper rail materially under-filled versus the three-card reference, and the event range rendered as the malformed `October 7, 2026–8, 2026`.
+- Corrections: added an initial saved-session set without weakening the existing selected-session callback/filter persistence semantics, populated three deterministic saved cards, and replaced string concatenation with calendar-correct same-month/cross-month range formatting.
+
+## Iteration 4 — final
 
 - Final evidence: `itinerary-final-1536x1024.png`.
-- Vision comparison: no meaningful remaining mismatch in overall Indexed Folio structure, rail/grid alignment, scale, spacing, typography hierarchy, token colors, borders, control placement, selected bookmark state, or program density. Incidental fixture copy and the exact generated-mark raster are non-authoritative under the embed SOT contract; the implementation uses the ChartStead wordmark treatment and public-safe deterministic copy.
+- Vision comparison: the rail now matches the reference's three-card upper density and the heading reads `October 7–8, 2026`. No meaningful remaining mismatch in overall Indexed Folio structure, rail/grid alignment, scale, spacing, typography hierarchy, token colors, borders, control placement, selected bookmark state, or program density. Incidental fixture copy and the exact generated-mark raster are non-authoritative under the embed SOT contract; the implementation uses the ChartStead wordmark treatment and public-safe deterministic copy.
 - State coverage inspected: saved/unsaved, breaks, schedule gaps, overlaps, pending/TBD, empty filter result, disabled itinerary action, focus-visible controls, and narrow reflow.
 
-Iterations: **3**.
+Iterations: **4**.
