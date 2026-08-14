@@ -1,6 +1,6 @@
 # 45 — Match the premium Schedule Itinerary embed source of truth
 
-**Status:** in-progress
+**Status:** in-review
 
 ## Parent
 
@@ -27,6 +27,7 @@ None — Competition 09 and Rubric 23 already provide the working public embed f
 
 ## Comments
 
+- 2026-08-14 — Coordinator verification passed after rejecting and correcting rail density/date formatting: 18/18 cumulative focused UI tests, full typecheck, and production build pass. Demo: `http://100.105.117.93:5445/fixtures/itinerary-embed`. Human QA: compare the 3-saved-session rail and time-by-room grid at 1536×1024, exercise save/remove/day/search/track/room/type/clear controls, and check gaps/TBD/narrow/focus behavior.
 - 2026-08-14 — Claimed by worker branch `ticket-45-premium-itinerary` in `/home/halla/ChartStead/.worktrees/ticket-45-premium-itinerary`.
 - 2026-08-14 — Created from Tyler’s locked public embed source-of-truth decision. This ticket owns only the Schedule Itinerary renderer and its visual parity loop.
 - 2026-08-14 — Implemented the dedicated Indexed Folio time-by-room renderer and deterministic fixture at `/fixtures/itinerary-embed`. Four 1536×1024 screenshot/Vision iterations are recorded in `docs/qa/competition-45/parity-ledger.md`; final evidence is `docs/qa/competition-45/itinerary-final-1536x1024.png`. Capture: `npx playwright screenshot --viewport-size=1536,1024 --wait-for-timeout=500 http://127.0.0.1:5445/fixtures/itinerary-embed docs/qa/competition-45/itinerary-final-1536x1024.png`. Ticket intentionally remains in-progress for coordinator review.
