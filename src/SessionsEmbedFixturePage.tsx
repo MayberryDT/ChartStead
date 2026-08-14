@@ -29,5 +29,5 @@ export const sessionsEmbedFixture: PublicProgramResponse = {
 };
 
 export function SessionsEmbedFixturePage() {
-  return <main className="program-shell mode-embed"><PublicProgramRenderer data={sessionsEmbedFixture} mode="embed" widget="sessions" /><footer className="program-footer"><p>Powered by&nbsp; <strong>ChartStead</strong></p></footer></main>;
+  return <main className="program-shell mode-embed sessions-embed-fixture"><PublicProgramRenderer data={sessionsEmbedFixture} mode="embed" widget="sessions" /><footer className="program-footer"><p>Powered by&nbsp; <strong>ChartStead</strong></p></footer></main>;
 }
