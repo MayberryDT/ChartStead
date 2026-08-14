@@ -1,6 +1,6 @@
 # 46 — Match the premium Speaker Gallery embed source of truth
 
-**Status:** in-progress
+**Status:** in-review
 
 ## Parent
 
@@ -27,6 +27,7 @@ None — Competition 09 and Rubric 23 already provide the working public embed f
 
 ## Comments
 
+- 2026-08-14 — Coordinator verification passed after rejecting and correcting footer clipping: 12/12 cumulative focused UI tests and production build/TypeScript pass. Demo: `http://100.105.117.93:5446/e/pacific-open-data-summit-2026/program/embed?widget=speaker-gallery&fixture=signal-rail`. Human QA: compare the split gallery/dossier at 1536×1024, verify all third-row metadata clears the footer, exercise search/track/role/profile/session controls, and check narrow/focus behavior.
 - 2026-08-14 — Claimed by worker branch `ticket-46-premium-speaker-gallery` in `/home/halla/ChartStead/.worktrees/ticket-46-premium-speaker-gallery`.
 - 2026-08-14 — Created from Tyler’s locked public embed source-of-truth decision. This ticket owns only the Speaker Gallery renderer and its visual parity loop.
 - 2026-08-14 — Deterministic comparison route: `http://100.105.117.93:5446/e/pacific-open-data-summit-2026/program/embed?widget=speaker-gallery&fixture=signal-rail`. Capture: `npx playwright screenshot --viewport-size=1536,1024 --wait-for-timeout=900 '<route>' .scratch/qa/ticket-46/final.png`.
