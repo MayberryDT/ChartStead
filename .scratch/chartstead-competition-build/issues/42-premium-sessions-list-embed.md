@@ -1,6 +1,6 @@
 # 42 — Match the premium Sessions List embed source of truth
 
-**Status:** in-progress
+**Status:** in-review
 
 ## Parent
 
@@ -27,6 +27,7 @@ None — Competition 09 and Rubric 23 already provide the working public embed f
 
 ## Comments
 
+- 2026-08-14 — Coordinator verification passed after rejecting and correcting a footer collision: 12/12 cumulative focused UI tests and production build/TypeScript pass. Demo: `http://100.105.117.93:5442/demo/embeds/sessions-list`. Human QA: compare all eight complete rows and unobstructed footer at 1536×1024, exercise search/track/type/clear/session actions, and check narrow/focus behavior.
 - 2026-08-14 — Independent review correction (I5): rejected the fixed footer because it overlaid/clipped row nine. Removed fixed positioning, scoped the deterministic acceptance fixture to eight complete visible modules while preserving the explicit `10 sessions` total and all ten rendered fixture records, tightened measured row/filter geometry, and restored the footer to normal flow. Verified at 1536×1024: 10 records rendered, 8 visible reference rows, all eight complete, footer unobstructed, no row/footer collision, and no horizontal overflow.
 - 2026-08-14 — Parity QA completed in 4 correction iterations at 1536×1024. Fixture: `http://100.105.117.93:5442/demo/embeds/sessions-list`; capture: `npx playwright screenshot --viewport-size="1536,1024" --wait-for-timeout=400 http://127.0.0.1:5442/demo/embeds/sessions-list .scratch/visual-qa/ticket-42/final-1536x1024.png`.
 - 2026-08-14 — Mismatch ledger: I1 — filter facets split/wrapped, excessive vertical whitespace, only 7.5 rows visible, UTC fixture times wrong, track palette unstable, weekday date copy differed; fixed facet grid, dates/times, deterministic track colors, and density. I2 — row modules remained 10–11px too tall and footer fell below viewport; fixed border-box sizing and compact internal anatomy while preserving 44px actions. I3 — rows matched density but canonical footer proved to be a persistent bottom rail and column starts remained 25–30px right; fixed footer positioning and measured six-column geometry. I4 — footer background allowed the next row to show through; fixed opaque rail and recaptured final evidence.

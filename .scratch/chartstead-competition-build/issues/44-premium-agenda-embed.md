@@ -1,6 +1,6 @@
 # 44 — Match the premium Agenda embed source of truth
 
-**Status:** in-progress
+**Status:** in-review
 
 ## Parent
 
@@ -28,6 +28,7 @@ None — Competition 09 and Rubric 23 already provide the working public embed f
 
 ## Comments
 
+- 2026-08-14 — Coordinator verification passed after integration: 11/11 focused UI tests, TypeScript, and production build. Demo: `http://100.105.117.93:5444/fixtures/agenda-embed`. Human QA: compare the 1536×1024 Agenda composition, confirm the top-left Agenda control is absent, exercise search/date/filter/bookmark controls, and check narrow/focus behavior.
 - 2026-08-14 — Claimed by worker branch `ticket-44-premium-agenda` in `/home/halla/ChartStead/.worktrees/ticket-44-premium-agenda`.
 - 2026-08-14 — Created from Tyler’s locked public embed source-of-truth decision. This ticket owns only the Agenda renderer and its visual parity loop.
 
