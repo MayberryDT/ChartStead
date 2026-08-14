@@ -10132,3 +10132,52 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
   padding: 0;
   flex: 0 0 auto;
 }
+
+/* Public embed interaction wave: shared, minimal controls and attribution. */
+.program-shell.mode-embed > .program-footer,
+.program-shell:has(.signal-rail-gallery) > .program-footer,
+.program-shell.mode-embed:has(.widget-sessions) > .program-footer {
+  position: static;
+  width: 100%;
+  min-height: 44px;
+  height: auto;
+  margin: 0;
+  padding: 14px 20px;
+  justify-content: center;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: #536071;
+  font-size: 12px;
+  text-align: center;
+}
+
+.program-shell.mode-embed > .program-footer p:not(:first-child) { display: none; }
+.widget-sessions .program-filters > .app-select,
+.speaker-directory-filters > .app-select { align-self: stretch; min-width: 0; }
+.widget-sessions .program-filters .app-select-trigger,
+.speaker-directory-filters .app-select-trigger { width: 100%; min-height: 44px; background: #fff; }
+.widget-sessions .program-filters > .app-select { padding: 12px 14px; border: 1px solid #d9e0e9; border-radius: 5px; }
+.atlas-session-row { grid-template-columns: 210px 470px 300px 272px 126px 50px 48px; }
+.atlas-save { align-self: center; width: 42px; height: 42px; display: grid; place-items: center; padding: 9px; border: 1px solid #c9d5e3; border-radius: 4px; background: #fff; color: #0758b6; }
+.atlas-save svg { width: 20px; height: 20px; }
+.atlas-save[aria-pressed="true"] { background: #eaf3fd; border-color: #0758b6; }
+
+@media (max-width: 1050px) {
+  .atlas-session-row { grid-template-columns: 180px 1fr 180px 50px; }
+  .atlas-save { grid-column: 4; grid-row: 1; }
+}
+
+@media (max-width: 700px) {
+  .atlas-session-row { height: auto; grid-template-columns: 1fr auto; }
+  .atlas-track, .atlas-summary, .atlas-kind-speakers, .atlas-logistics { grid-column: 1 / -1; }
+  .atlas-view { grid-column: 1; }
+  .atlas-save { grid-column: 2; grid-row: auto; margin-right: 16px; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .program-renderer button,
+  .program-renderer input,
+  .program-renderer .app-select-trigger { transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease; }
+  .program-renderer button:active { transform: translateY(1px); }
+}

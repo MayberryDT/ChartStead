@@ -1,6 +1,6 @@
 # 42 — Match the premium Sessions List embed source of truth
 
-**Status:** in-review
+**Status:** done
 
 ## Parent
 
@@ -12,14 +12,14 @@ Rebuild the attendee-facing Sessions List embed as a top-of-the-line, premium im
 
 ## Acceptance criteria
 
-- [ ] The Sessions List embed treats the selected source-of-truth image as its visual acceptance contract: layout, hierarchy, density, spacing, typography, colors, borders, controls, session modules, and footer attribution match at the 1536×1024 reference viewport.
-- [ ] Deterministic demo fixtures populate the comparison route with the same kinds and volume of visible content as the reference: event identity, dates, search, track/room/type filters, session titles, times, speakers, tracks, rooms, durations, and itinerary actions. Fake content must be realistic, public-safe, stable between runs, and must not alter production data semantics.
-- [ ] Any required illustrative imagery or avatars are committed demo-safe assets with deterministic URLs and useful alt text; do not use unstable external hotlinks. Use the approved ChartStead mark rather than generated logo artifacts.
-- [ ] The implementation remains responsive and keyboard accessible, retains 44px targets and visible focus, and has intentional loading, empty, filtered-empty, error, disabled, and narrow states derived from the locked direction.
-- [ ] Create or reuse a Tailscale-reachable fixture route that renders only this embed with deterministic data at a fixed 1536×1024 capture viewport; record the route and capture command in the ticket comments.
-- [ ] Run a documented build → screenshot → Vision comparison → correction loop against `sessions-list.png`. After every comparison, record the visible mismatches, correct them, and compare again. Continue until Vision reports no meaningful mismatch in structure, alignment, scale, spacing, typography, color, borders, imagery, or content density; a subjective “looks good” pass is not sufficient.
-- [ ] Save the final implementation screenshot and the final Vision comparison result as durable QA evidence, including the number of iterations. The ticket cannot move to `in-review` while any identified visual mismatch remains unresolved.
-- [ ] Existing public embed/feed resolution, revision pinning, filters, field visibility, privacy boundaries, and focused tests continue to pass.
+- [x] The Sessions List embed treats the selected source-of-truth image as its visual acceptance contract: layout, hierarchy, density, spacing, typography, colors, borders, controls, session modules, and footer attribution match at the 1536×1024 reference viewport.
+- [x] Deterministic demo fixtures populate the comparison route with the same kinds and volume of visible content as the reference: event identity, dates, search, track/room/type filters, session titles, times, speakers, tracks, rooms, durations, and itinerary actions. Fake content must be realistic, public-safe, stable between runs, and must not alter production data semantics.
+- [x] Any required illustrative imagery or avatars are committed demo-safe assets with deterministic URLs and useful alt text; do not use unstable external hotlinks. Use the approved ChartStead mark rather than generated logo artifacts.
+- [x] The implementation remains responsive and keyboard accessible, retains 44px targets and visible focus, and has intentional loading, empty, filtered-empty, error, disabled, and narrow states derived from the locked direction.
+- [x] Create or reuse a Tailscale-reachable fixture route that renders only this embed with deterministic data at a fixed 1536×1024 capture viewport; record the route and capture command in the ticket comments.
+- [x] Run a documented build → screenshot → Vision comparison → correction loop against `sessions-list.png`. After every comparison, record the visible mismatches, correct them, and compare again. Continue until Vision reports no meaningful mismatch in structure, alignment, scale, spacing, typography, color, borders, imagery, or content density; a subjective “looks good” pass is not sufficient.
+- [x] Save the final implementation screenshot and the final Vision comparison result as durable QA evidence, including the number of iterations. The ticket cannot move to `in-review` while any identified visual mismatch remains unresolved.
+- [x] Existing public embed/feed resolution, revision pinning, filters, field visibility, privacy boundaries, and focused tests continue to pass.
 
 ## Blocked by
 
@@ -27,6 +27,7 @@ None — Competition 09 and Rubric 23 already provide the working public embed f
 
 ## Comments
 
+- 2026-08-14 — Tyler accepted the visual foundation; remaining functional and interaction polish moved to Competition 48 and 53. Closed to `done`.
 - 2026-08-14 — Coordinator verification passed after rejecting and correcting a footer collision: 12/12 cumulative focused UI tests and production build/TypeScript pass. Demo: `http://100.105.117.93:5442/demo/embeds/sessions-list`. Human QA: compare all eight complete rows and unobstructed footer at 1536×1024, exercise search/track/type/clear/session actions, and check narrow/focus behavior.
 - 2026-08-14 — Independent review correction (I5): rejected the fixed footer because it overlaid/clipped row nine. Removed fixed positioning, scoped the deterministic acceptance fixture to eight complete visible modules while preserving the explicit `10 sessions` total and all ten rendered fixture records, tightened measured row/filter geometry, and restored the footer to normal flow. Verified at 1536×1024: 10 records rendered, 8 visible reference rows, all eight complete, footer unobstructed, no row/footer collision, and no horizontal overflow.
 - 2026-08-14 — Parity QA completed in 4 correction iterations at 1536×1024. Fixture: `http://100.105.117.93:5442/demo/embeds/sessions-list`; capture: `npx playwright screenshot --viewport-size="1536,1024" --wait-for-timeout=400 http://127.0.0.1:5442/demo/embeds/sessions-list .scratch/visual-qa/ticket-42/final-1536x1024.png`.

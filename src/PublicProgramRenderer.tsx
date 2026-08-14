@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { Button } from "@base-ui/react/button";
 
 import type {
   PublicEmbedFieldVisibility,
@@ -18,6 +19,7 @@ import {
   groupPublicSessionsByDay,
 } from "../shared/public-program";
 import { publicProgramCalendarUrl } from "./api";
+import { AppSelect } from "./AppSelect";
 
 function formatClock(iso: string | null): string {
   if (!iso) return "TBD";
@@ -201,6 +203,10 @@ export function PublicProgramRenderer({
   selectedSessionId,
   onSelectSession,
   initialItinerarySessionIds = [],
+  itinerarySessionIds: controlledItinerarySessionIds,
+  onItinerarySessionIdsChange,
+  selectedSpeakerId: controlledSelectedSpeakerId,
+  onSelectSpeaker,
 }: {
   data: PublicProgramResponse;
   mode?: "page" | "embed";
@@ -212,6 +218,10 @@ export function PublicProgramRenderer({
   selectedSessionId?: string | null;
   onSelectSession?: (sessionId: string | null) => void;
   initialItinerarySessionIds?: string[];
+  itinerarySessionIds?: string[];
+  onItinerarySessionIdsChange?: (sessionIds: string[]) => void;
+  selectedSpeakerId?: string | null;
+  onSelectSpeaker?: (speakerId: string | null) => void;
 }) {
   const [internalFilters, setInternalFilters] = useState<PublicProgramFilters>({});
   const currentWidget = widget ?? "program";
@@ -226,16 +236,34 @@ export function PublicProgramRenderer({
   const [expandedSessionIds, setExpandedSessionIds] = useState<Set<string>>(
     () => new Set(),
   );
-  const [selectedSpeakerId, setSelectedSpeakerId] = useState<string | null>(null);
-  const [speakerRole, setSpeakerRole] = useState("");
+  const [internalSelectedSpeakerId, setInternalSelectedSpeakerId] = useState<string | null>(null);
+  const [internalItinerarySessionIds, setInternalItinerarySessionIds] = useState<Set<string>>(
+    () => new Set(initialItinerarySessionIds),
+  );
   const [expandedSpeakerBioIds, setExpandedSpeakerBioIds] = useState<Set<string>>(
     () => new Set(),
   );
   const selectedId = selectedSessionId !== undefined ? selectedSessionId : internalSelected;
+  const selectedSpeakerId = controlledSelectedSpeakerId !== undefined
+    ? controlledSelectedSpeakerId
+    : internalSelectedSpeakerId;
+  const itinerarySessionIds = controlledItinerarySessionIds !== undefined
+    ? new Set(controlledItinerarySessionIds)
+    : internalItinerarySessionIds;
 
   const selectSession = (sessionId: string | null) => {
     if (onSelectSession) onSelectSession(sessionId);
     else setInternalSelected(sessionId);
+  };
+
+  const selectSpeaker = (speakerId: string | null) => {
+    if (onSelectSpeaker) onSelectSpeaker(speakerId);
+    else setInternalSelectedSpeakerId(speakerId);
+  };
+
+  const changeItinerary = (next: Set<string>) => {
+    if (onItinerarySessionIdsChange) onItinerarySessionIdsChange(Array.from(next));
+    else setInternalItinerarySessionIds(next);
   };
 
   const toggleDescription = (sessionId: string) => {
@@ -314,12 +342,14 @@ export function PublicProgramRenderer({
   );
   const visibleSpeakers = useMemo(
     () => {
-      const filtered = speakerRole ? speakers.filter((speaker) => speaker.title === speakerRole) : speakers;
+      const filtered = currentWidget === "speakers" && filters.format
+        ? speakers.filter((speaker) => speaker.title === filters.format)
+        : speakers;
       if (currentWidget !== "speakers") return filtered;
       const order = new Map(data.speakers.map((speaker, index) => [speaker.id, index]));
       return [...filtered].sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
     },
-    [currentWidget, data.speakers, speakerRole, speakers],
+    [currentWidget, data.speakers, filters.format, speakers],
   );
 
   if (currentWidget === "agenda") {
@@ -329,6 +359,8 @@ export function PublicProgramRenderer({
         sessions={sessions}
         fields={fields}
         filters={filters}
+        itinerarySessionIds={itinerarySessionIds}
+        onItinerarySessionIdsChange={changeItinerary}
         onFiltersChange={(next) => {
           if (onFiltersChange) onFiltersChange(next);
           else setInternalFilters(next);
@@ -348,7 +380,7 @@ export function PublicProgramRenderer({
         speakers={speakers}
         selectedSpeaker={selectedSpeaker}
         onSetFilters={setFilters}
-        onSelectSpeaker={setSelectedSpeakerId}
+        onSelectSpeaker={selectSpeaker}
         onSelectSession={selectSession}
       />
     );
@@ -364,7 +396,8 @@ export function PublicProgramRenderer({
         days={days}
         formats={formats}
         selectedId={selectedId}
-        initialItinerarySessionIds={initialItinerarySessionIds}
+        itinerarySessionIds={itinerarySessionIds}
+        onItinerarySessionIdsChange={changeItinerary}
         onSelectSession={selectSession}
         mode={mode}
         theme={theme}
@@ -404,9 +437,9 @@ export function PublicProgramRenderer({
             <input type="search" value={filters.query ?? ""} placeholder="Search by name or company" onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value || undefined }))} />
             <span aria-hidden="true" className="speaker-search-submit">⌕</span>
           </label>
-          <label>Track<select value={filters.trackId ?? ""} onChange={(event) => setFilters((current) => ({ ...current, trackId: event.target.value || undefined }))}><option value="">All Tracks</option>{data.event.tracks.map((track) => <option key={track.id} value={track.id}>{track.name}</option>)}</select></label>
-          <label>Role<select value={speakerRole} onChange={(event) => setSpeakerRole(event.target.value)}><option value="">All Roles</option>{speakerRoles.map((role) => <option key={role} value={role}>{role}</option>)}</select></label>
-          <div className="speaker-directory-filter-actions"><span role="status" aria-live="polite">{visibleSpeakers.length} {countNoun(visibleSpeakers.length, "speaker", "speakers")}</span><button type="button" onClick={() => { setSpeakerRole(""); setFilters(() => ({})); }}>↻&nbsp; Clear filters</button></div>
+          <AppSelect label="Track" value={filters.trackId ?? ""} options={[{ value: "", label: "All Tracks" }, ...data.event.tracks.map((track) => ({ value: track.id, label: track.name }))]} onValueChange={(value) => setFilters((current) => ({ ...current, trackId: value || undefined }))} />
+          <AppSelect label="Role" value={filters.format ?? ""} options={[{ value: "", label: "All Roles" }, ...speakerRoles.map((role) => ({ value: role, label: role }))]} onValueChange={(value) => setFilters((current) => ({ ...current, format: value || undefined }))} />
+          <div className="speaker-directory-filter-actions"><span role="status" aria-live="polite">{visibleSpeakers.length} {countNoun(visibleSpeakers.length, "speaker", "speakers")}</span><Button type="button" onClick={() => setFilters(() => ({}))}>↻&nbsp; Clear filters</Button></div>
         </section>
       ) : <section className="program-filters" aria-label="Program filters">
         <label className="program-search-field">
@@ -445,7 +478,12 @@ export function PublicProgramRenderer({
             ))}
           </select>
         </label> : null}
-        <label>
+        {currentWidget === "sessions" ? <AppSelect
+          label="Track"
+          value={filters.trackId ?? ""}
+          options={[{ value: "", label: "All tracks" }, ...data.event.tracks.map((track) => ({ value: track.id, label: track.name }))]}
+          onValueChange={(value) => setFilters((current) => ({ ...current, trackId: value || undefined }))}
+        /> : <label>
           Track
           <select
             id="program-track-filter"
@@ -464,7 +502,7 @@ export function PublicProgramRenderer({
               </option>
             ))}
           </select>
-        </label>
+        </label>}
         {currentWidget !== "sessions" ? <label>
           Location
           <select
@@ -486,8 +524,13 @@ export function PublicProgramRenderer({
             <option value="tbd">Location pending</option>
           </select>
         </label> : null}
-        <label>
-          {currentWidget === "sessions" ? "Session type" : "Format"}
+        {currentWidget === "sessions" ? <AppSelect
+          label="Session type"
+          value={filters.format ?? ""}
+          options={[{ value: "", label: "All session types" }, ...formats.map((format) => ({ value: format, label: format }))]}
+          onValueChange={(value) => setFilters((current) => ({ ...current, format: value || undefined }))}
+        /> : <label>
+          Format
           <select
             id="program-format-filter"
             value={filters.format ?? ""}
@@ -498,14 +541,14 @@ export function PublicProgramRenderer({
               }))
             }
           >
-            <option value="">{currentWidget === "sessions" ? "All session types" : "All formats"}</option>
+            <option value="">All formats</option>
             {formats.map((format) => (
               <option key={format} value={format}>
                 {format}
               </option>
             ))}
           </select>
-        </label>
+        </label>}
         {currentWidget !== "sessions" ? <label>
           Speaker
           <select
@@ -526,7 +569,7 @@ export function PublicProgramRenderer({
             ))}
           </select>
         </label> : null}
-        {currentWidget === "sessions" ? <button type="button" className="sessions-clear" onClick={() => setFilters(() => ({}))}>Clear filters</button> : null}
+        {currentWidget === "sessions" ? <Button type="button" className="sessions-clear" onClick={() => setFilters(() => ({}))}>Clear filters</Button> : null}
       </section>}
 
       {currentWidget !== "speakers" ? <p className={`program-counts${currentWidget === "sessions" ? " sessions-result-count" : ""}`} role="status" aria-live="polite" data-testid="program-result-count">
@@ -559,7 +602,7 @@ export function PublicProgramRenderer({
           expandedSpeakerBioIds={expandedSpeakerBioIds}
           onSelectSession={selectSession}
           onToggleDescription={toggleDescription}
-          onSelectSpeaker={setSelectedSpeakerId}
+          onSelectSpeaker={selectSpeaker}
           onToggleSpeakerBiography={toggleSpeakerBiography}
         />
       ) : currentWidget === "sessions" ? (
@@ -569,6 +612,8 @@ export function PublicProgramRenderer({
           selectedId={selectedId}
           expandedSessionIds={expandedSessionIds}
           fields={fields}
+          itinerarySessionIds={itinerarySessionIds}
+          onItinerarySessionIdsChange={changeItinerary}
           onSelectSession={selectSession}
           onToggleDescription={toggleDescription}
         />
@@ -581,7 +626,7 @@ export function PublicProgramRenderer({
           variant="directory"
           selectedSpeaker={selectedSpeaker}
           expandedSpeakerBioIds={expandedSpeakerBioIds}
-          onSelectSpeaker={setSelectedSpeakerId}
+          onSelectSpeaker={selectSpeaker}
           onSelectSession={selectSession}
           onToggleSpeakerBiography={toggleSpeakerBiography}
         />
@@ -598,7 +643,7 @@ export function PublicProgramRenderer({
           expandedSpeakerBioIds={expandedSpeakerBioIds}
           onSelectSession={selectSession}
           onToggleDescription={toggleDescription}
-          onSelectSpeaker={setSelectedSpeakerId}
+          onSelectSpeaker={selectSpeaker}
           onToggleSpeakerBiography={toggleSpeakerBiography}
         />
       )}
@@ -612,14 +657,18 @@ function AgendaEmbedView({
   fields,
   filters,
   onFiltersChange,
+  itinerarySessionIds,
+  onItinerarySessionIdsChange,
 }: {
   data: PublicProgramResponse;
   sessions: PublicProgramSession[];
   fields: PublicEmbedFieldVisibility;
   filters: PublicProgramFilters;
   onFiltersChange: (filters: PublicProgramFilters) => void;
+  itinerarySessionIds: Set<string>;
+  onItinerarySessionIdsChange: (sessionIds: Set<string>) => void;
 }) {
-  const [saved, setSaved] = useState<Set<string>>(() => new Set(["agenda-keynote"]));
+  const saved = itinerarySessionIds;
   const days = Array.from(new Set(data.sessions.map((session) => session.day).filter(Boolean))) as string[];
   const visibleSessions = filters.day ? sessions : sessions.filter((session) => session.day === days[0]);
   const speakers = data.speakers;
@@ -662,7 +711,7 @@ function AgendaEmbedView({
             </div>
             {fields.track && session.trackName ? <span className="agenda-track">{session.trackName}</span> : <span />}
             {fields.room && session.speakers.length ? <p className="agenda-room"><AgendaIcon name="pin" />{roomLabel(session)}</p> : <span />}
-            <button type="button" className="agenda-save" aria-label={`${isSaved ? "Remove" : "Save"} ${session.title} ${isSaved ? "from" : "to"} itinerary`} aria-pressed={isSaved} onClick={() => setSaved((current) => { const next = new Set(current); if (next.has(session.id)) next.delete(session.id); else next.add(session.id); return next; })}><AgendaIcon name="bookmark" /></button>
+            <button type="button" className="agenda-save" aria-label={`${isSaved ? "Remove" : "Save"} ${session.title} ${isSaved ? "from" : "to"} itinerary`} aria-pressed={isSaved} onClick={() => { const next = new Set(saved); if (next.has(session.id)) next.delete(session.id); else next.add(session.id); onItinerarySessionIdsChange(next); }}><AgendaIcon name="bookmark" /></button>
           </article>;
         })}
       </section>
@@ -681,7 +730,7 @@ function SignalRailGallery({ data, mode, theme, fields, filters, speakers, selec
   onSetFilters: (updater: (current: PublicProgramFilters) => PublicProgramFilters) => void;
   onSelectSpeaker: (id: string | null) => void; onSelectSession: (id: string) => void;
 }) {
-  const active = selectedSpeaker ?? speakers[1] ?? speakers[0] ?? null;
+  const active = selectedSpeaker ?? speakers[0] ?? null;
   const linked = active ? data.sessions.filter((session) => active.sessionIds.includes(session.id)) : [];
   return <div className={`program-renderer signal-rail-gallery mode-${mode} widget-speaker-gallery theme-${theme}`} style={{ ["--program-accent" as string]: data.event.themeAccent }} data-testid="public-program-renderer">
     <main className="signal-gallery-main">
@@ -715,17 +764,16 @@ function BookmarkIcon({ filled = false }: { filled?: boolean }) {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6.5 3.5h11v17l-5.5-3.7-5.5 3.7z" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.7" /></svg>;
 }
 
-function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, selectedId, initialItinerarySessionIds, onSelectSession, mode, theme, accentStyle }: {
+function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, selectedId, itinerarySessionIds, onItinerarySessionIdsChange, onSelectSession, mode, theme, accentStyle }: {
   data: PublicProgramResponse; sessions: PublicProgramSession[]; filters: PublicProgramFilters;
   setFilters: (updater: (current: PublicProgramFilters) => PublicProgramFilters) => void;
   days: string[]; formats: string[]; selectedId: string | null;
-  initialItinerarySessionIds: string[];
+  itinerarySessionIds: Set<string>;
+  onItinerarySessionIdsChange: (sessionIds: Set<string>) => void;
   onSelectSession: (sessionId: string | null) => void; mode: "page" | "embed";
   theme: PublicEmbedTheme; accentStyle: Record<string, string>;
 }) {
-  const [savedIds, setSavedIds] = useState<Set<string>>(
-    () => new Set([...initialItinerarySessionIds, ...(selectedId ? [selectedId] : [])]),
-  );
+  const savedIds = itinerarySessionIds;
   const scheduled = sessions.filter((session) => session.startsAt && session.day);
   const pending = sessions.filter((session) => !session.startsAt || !session.day);
   const roomIds = data.event.rooms.map((room) => room.id);
@@ -734,11 +782,9 @@ function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, 
   const clearFilters = () => setFilters(() => ({}));
   const update = (key: keyof PublicProgramFilters, value: string) => setFilters((current) => ({ ...current, [key]: value || undefined }));
   const toggleSaved = (sessionId: string) => {
-    setSavedIds((current) => {
-      const next = new Set(current);
-      if (next.has(sessionId)) next.delete(sessionId); else next.add(sessionId);
-      return next;
-    });
+    const next = new Set(savedIds);
+    if (next.has(sessionId)) next.delete(sessionId); else next.add(sessionId);
+    onItinerarySessionIdsChange(next);
     onSelectSession(selectedId === sessionId ? null : sessionId);
   };
   const savedSessions = data.sessions.filter((session) => savedIds.has(session.id));
@@ -903,6 +949,8 @@ function SessionListView({
   selectedId,
   expandedSessionIds,
   fields,
+  itinerarySessionIds = new Set<string>(),
+  onItinerarySessionIdsChange,
   onSelectSession,
   onToggleDescription,
 }: {
@@ -911,6 +959,8 @@ function SessionListView({
   selectedId: string | null;
   expandedSessionIds: Set<string>;
   fields: PublicEmbedFieldVisibility;
+  itinerarySessionIds?: Set<string>;
+  onItinerarySessionIdsChange?: (sessionIds: Set<string>) => void;
   onSelectSession: (sessionId: string | null) => void;
   onToggleDescription: (sessionId: string) => void;
 }) {
@@ -923,7 +973,7 @@ function SessionListView({
         <ul className="program-session-list">
           {sessions.map((session) => (
             <li key={session.id}>
-              {atlas ? <AtlasSessionRow session={session} fields={fields} selected={selectedId === session.id} onSelect={() => onSelectSession(selectedId === session.id ? null : session.id)} /> : <SessionCard
+              {atlas ? <AtlasSessionRow session={session} fields={fields} selected={selectedId === session.id} saved={itinerarySessionIds.has(session.id)} onToggleSaved={() => { const next = new Set(itinerarySessionIds); if (next.has(session.id)) next.delete(session.id); else next.add(session.id); onItinerarySessionIdsChange?.(next); }} onSelect={() => onSelectSession(selectedId === session.id ? null : session.id)} /> : <SessionCard
                 session={session}
                 selected={selectedId === session.id}
                 expanded={expandedSessionIds.has(session.id)}
@@ -939,10 +989,12 @@ function SessionListView({
   );
 }
 
-function AtlasSessionRow({ session, fields, selected, onSelect }: {
+function AtlasSessionRow({ session, fields, selected, saved, onToggleSaved, onSelect }: {
   session: PublicProgramSession;
   fields: PublicEmbedFieldVisibility;
   selected: boolean;
+  saved: boolean;
+  onToggleSaved: () => void;
   onSelect: () => void;
 }) {
   const speakers = session.speakers;
@@ -969,6 +1021,7 @@ function AtlasSessionRow({ session, fields, selected, onSelect }: {
         {fields.room ? <span><b aria-hidden="true">⌖</b>{roomLabel(session)}</span> : null}
       </div>
       <button type="button" className="atlas-view" aria-pressed={selected} onClick={onSelect}>View session</button>
+      <Button type="button" className="atlas-save" aria-label={`${saved ? "Remove" : "Save"} ${session.title} ${saved ? "from" : "to"} itinerary`} aria-pressed={saved} onClick={onToggleSaved}><BookmarkIcon filled={saved} /></Button>
       <button type="button" className="atlas-chevron" aria-label={`View ${session.title}`} onClick={onSelect}>›</button>
       <span className="sessions-visually-hidden">{sessionDuration(session)}</span>
     </article>

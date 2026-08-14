@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useRouterState } from "@tanstack/react-router";
+import { Button } from "@base-ui/react/button";
 
 import type { PublicEmbedWidget, PublicProgramFilters } from "../shared/events";
 import { isPublicEmbedWidget } from "../shared/public-program";
@@ -26,6 +27,8 @@ function programSearch(
   filters: PublicProgramFilters,
   selectedSessionId: string | null,
   widget?: ProgramSurface,
+  selectedSpeakerId?: string | null,
+  itinerarySessionIds: string[] = [],
 ) {
   return {
     revision: revisionId,
@@ -37,6 +40,8 @@ function programSearch(
     format: filters.format,
     speakerId: filters.speakerId,
     session: selectedSessionId ?? undefined,
+    speaker: selectedSpeakerId ?? undefined,
+    itinerary: itinerarySessionIds.length ? itinerarySessionIds.join(",") : undefined,
   };
 }
 
@@ -62,12 +67,26 @@ export function PublicProgramPage({
   const filters = parseProgramFilters(search);
   const selectedSessionId =
     typeof search.session === "string" ? search.session : null;
+  const selectedSpeakerId =
+    typeof search.speaker === "string" ? search.speaker : null;
+  const itinerarySessionIds = typeof search.itinerary === "string"
+    ? Array.from(new Set(search.itinerary.split(",").map((id) => id.trim()).filter(Boolean)))
+    : [];
 
   const updateProgramSearch = (
     nextFilters: PublicProgramFilters,
     nextSessionId: string | null,
+    nextSpeakerId = selectedSpeakerId,
+    nextItinerarySessionIds = itinerarySessionIds,
   ) => {
-    const nextSearch = programSearch(revisionId, nextFilters, nextSessionId, surface);
+    const nextSearch = programSearch(
+      revisionId,
+      nextFilters,
+      nextSessionId,
+      surface,
+      nextSpeakerId,
+      nextItinerarySessionIds,
+    );
     if (mode === "embed") {
       void navigate({
         to: "/e/$eventId/program/embed",
@@ -106,6 +125,7 @@ export function PublicProgramPage({
               ? program.error.message
               : "Unable to load the public program."}
           </p>
+          <Button type="button" onClick={() => void program.refetch()}>Try again</Button>
           {mode === "page" ? <Link to="/">Return to ChartStead</Link> : null}
         </section>
       </main>
@@ -127,6 +147,10 @@ export function PublicProgramPage({
         onFiltersChange={(nextFilters) => updateProgramSearch(nextFilters, null)}
         selectedSessionId={selectedSessionId}
         onSelectSession={(sessionId) => updateProgramSearch(filters, sessionId)}
+        selectedSpeakerId={selectedSpeakerId}
+        onSelectSpeaker={(speakerId) => updateProgramSearch(filters, selectedSessionId, speakerId)}
+        itinerarySessionIds={itinerarySessionIds}
+        onItinerarySessionIdsChange={(sessionIds) => updateProgramSearch(filters, selectedSessionId, selectedSpeakerId, sessionIds)}
       />
       <footer className="program-footer">
         <p>Powered by ChartStead</p>
@@ -135,7 +159,7 @@ export function PublicProgramPage({
             <Link
               to="/e/$eventId/program/embed"
               params={{ eventId }}
-              search={programSearch(revisionId, filters, selectedSessionId, surface)}
+              search={programSearch(revisionId, filters, selectedSessionId, surface, selectedSpeakerId, itinerarySessionIds)}
             >
               Embed view
             </Link>
@@ -197,6 +221,7 @@ export function PublicManagedEmbedPage() {
               ? embed.error.message
               : "Unable to load the public embed."}
           </p>
+          <Button type="button" onClick={() => void embed.refetch()}>Try again</Button>
         </section>
       </main>
     );

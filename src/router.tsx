@@ -218,6 +218,8 @@ function validateProgramSearch(search: Record<string, unknown>) {
     format: typeof search.format === "string" ? search.format : undefined,
     speakerId: typeof search.speakerId === "string" ? search.speakerId : undefined,
     session: typeof search.session === "string" ? search.session : undefined,
+    speaker: typeof search.speaker === "string" ? search.speaker : undefined,
+    itinerary: typeof search.itinerary === "string" ? search.itinerary : undefined,
     widget: typeof search.widget === "string" ? search.widget : undefined,
   };
 }

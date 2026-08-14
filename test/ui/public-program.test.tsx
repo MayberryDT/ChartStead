@@ -136,6 +136,75 @@ afterEach(() => {
 });
 
 describe("PublicProgramRenderer", () => {
+  it("keeps itinerary state controlled across sessions, agenda, and itinerary widgets", async () => {
+    const user = userEvent.setup();
+    const onItinerarySessionIdsChange = vi.fn();
+    const { rerender } = render(
+      <PublicProgramRenderer
+        data={programResponse()}
+        mode="embed"
+        widget="sessions"
+        itinerarySessionIds={[]}
+        onItinerarySessionIdsChange={onItinerarySessionIdsChange}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Save Opening Keynote to itinerary" }));
+    expect(onItinerarySessionIdsChange).toHaveBeenLastCalledWith(["ses-1"]);
+
+    rerender(
+      <PublicProgramRenderer
+        data={programResponse()}
+        mode="embed"
+        widget="agenda"
+        itinerarySessionIds={["ses-1"]}
+        onItinerarySessionIdsChange={onItinerarySessionIdsChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Remove Opening Keynote from itinerary" }));
+    expect(onItinerarySessionIdsChange).toHaveBeenLastCalledWith([]);
+
+    rerender(
+      <PublicProgramRenderer
+        data={programResponse()}
+        mode="embed"
+        widget="itinerary"
+        itinerarySessionIds={[]}
+        onItinerarySessionIdsChange={onItinerarySessionIdsChange}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Save Opening Keynote" }));
+    expect(onItinerarySessionIdsChange).toHaveBeenLastCalledWith(["ses-1"]);
+  });
+
+  it("keeps speaker-gallery selection controlled and reconciles an invalid selection", async () => {
+    const user = userEvent.setup();
+    const onSelectSpeaker = vi.fn();
+    const { rerender } = render(
+      <PublicProgramRenderer
+        data={programResponse()}
+        mode="embed"
+        widget="speaker-gallery"
+        selectedSpeakerId="sp-1"
+        onSelectSpeaker={onSelectSpeaker}
+      />,
+    );
+
+    expect(screen.getByRole("complementary", { name: "Selected speaker: Ada Lovelace" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /Grace Hopper/i }));
+    expect(onSelectSpeaker).toHaveBeenCalledWith("sp-2");
+
+    rerender(
+      <PublicProgramRenderer
+        data={programResponse()}
+        mode="embed"
+        widget="speaker-gallery"
+        selectedSpeakerId="missing"
+        onSelectSpeaker={onSelectSpeaker}
+      />,
+    );
+    expect(screen.getByRole("complementary", { name: "Selected speaker: Ada Lovelace" })).toBeVisible();
+  });
   it("renders the dedicated agenda controls and preserves itinerary/filter behavior", async () => {
     const user = userEvent.setup();
     render(<PublicProgramRenderer data={programResponse()} mode="embed" widget="agenda" />);

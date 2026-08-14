@@ -16,7 +16,8 @@ describe("premium speakers list fixture", () => {
     expect(screen.getByAltText("Portrait of Aiden Tui")).toHaveAttribute("src", "/demo/speakers/speaker-1.webp");
     expect(speakersListFixture.speakers.every((speaker) => !("email" in speaker))).toBe(true);
 
-    await user.selectOptions(screen.getByLabelText("Track"), "community");
+    await user.click(screen.getByRole("combobox", { name: "Track" }));
+    await user.click(screen.getByRole("option", { name: "Community" }));
     expect(screen.getByRole("status")).toHaveTextContent("4 speakers");
     await user.click(screen.getByRole("button", { name: /Clear filters/i }));
     expect(screen.getByRole("status")).toHaveTextContent("15 speakers");
