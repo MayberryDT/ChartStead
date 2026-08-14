@@ -1,6 +1,6 @@
 # 42 — Match the premium Sessions List embed source of truth
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 ## Parent
 
@@ -27,4 +27,8 @@ None — Competition 09 and Rubric 23 already provide the working public embed f
 
 ## Comments
 
+- 2026-08-14 — Parity QA completed in 4 correction iterations at 1536×1024. Fixture: `http://100.105.117.93:5442/demo/embeds/sessions-list`; capture: `npx playwright screenshot --viewport-size="1536,1024" --wait-for-timeout=400 http://127.0.0.1:5442/demo/embeds/sessions-list .scratch/visual-qa/ticket-42/final-1536x1024.png`.
+- 2026-08-14 — Mismatch ledger: I1 — filter facets split/wrapped, excessive vertical whitespace, only 7.5 rows visible, UTC fixture times wrong, track palette unstable, weekday date copy differed; fixed facet grid, dates/times, deterministic track colors, and density. I2 — row modules remained 10–11px too tall and footer fell below viewport; fixed border-box sizing and compact internal anatomy while preserving 44px actions. I3 — rows matched density but canonical footer proved to be a persistent bottom rail and column starts remained 25–30px right; fixed footer positioning and measured six-column geometry. I4 — footer background allowed the next row to show through; fixed opaque rail and recaptured final evidence.
+- 2026-08-14 — Final Vision inspection: no meaningful mismatch remains in structure, alignment, scale, spacing, typography hierarchy, palette, borders, controls, or visible content density. Demo-safe initials replace photographic headshots because no approved portrait assets exist; this preserves deterministic/public-safe semantics without hotlinks. Evidence: `.scratch/visual-qa/ticket-42/final-1536x1024.png`.
+- 2026-08-14 — Claimed by worker branch `ticket-42-premium-sessions` in `/home/halla/ChartStead/.worktrees/ticket-42-premium-sessions`.
 - 2026-08-14 — Created from Tyler’s locked public embed source-of-truth decision. This ticket owns only the Sessions List renderer and its visual parity loop.

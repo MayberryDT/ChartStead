@@ -36,6 +36,7 @@ import { ReviewerInvitationPage } from "./ReviewerInvitationPage";
 import { DemoPersonasPage } from "./DemoPersonasPage";
 import { AgendaEmbedFixture } from "./AgendaEmbedFixture";
 import { SpeakersListFixturePage } from "./SpeakersListFixturePage";
+import { SessionsEmbedFixturePage } from "./SessionsEmbedFixturePage";
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
@@ -63,6 +64,12 @@ const speakersListFixtureRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/fixtures/embeds/speakers-list",
   component: SpeakersListFixturePage,
+});
+
+const sessionsEmbedFixtureRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/demo/embeds/sessions-list",
+  component: SessionsEmbedFixturePage,
 });
 
 const cfpRoute = createRoute({
@@ -285,6 +292,7 @@ const routeTree = rootRoute.addChildren([
   demoPersonasRoute,
   agendaEmbedFixtureRoute,
   speakersListFixtureRoute,
+  sessionsEmbedFixtureRoute,
   cfpRoute,
   proposalDetailRoute,
   submitterEditRoute,

@@ -46,6 +46,12 @@ function trackClass(trackId: string): string {
     "community",
     "agents",
     "models",
+    "governance",
+    "data",
+    "capacity",
+    "economy",
+    "environment",
+    "privacy",
   ];
   if (known.includes(trackId)) return `track-${trackId}`;
   const index = (trackId.charCodeAt(0) % 4) + 1;
@@ -144,6 +150,19 @@ function agendaKind(format: string): { label: string; icon: Parameters<typeof Ag
   return { label: "Presentation", icon: "presentation", tone: "blue" };
 }
 
+function sessionDuration(session: PublicProgramSession): string {
+  if (!session.startsAt || !session.endsAt) return "Duration TBD";
+  const minutes = Math.max(
+    0,
+    Math.round((new Date(session.endsAt).getTime() - new Date(session.startsAt).getTime()) / 60000),
+  );
+  return `${minutes} min`;
+}
+
+function sessionSpeakerInitials(name: string): string {
+  return name.split(/\s+/).slice(0, 2).map((part) => part[0] ?? "").join("").toUpperCase();
+}
+
 function widgetLabel(widget: PublicEmbedWidget | "program"): string {
   switch (widget) {
     case "sessions":
@@ -159,6 +178,13 @@ function widgetLabel(widget: PublicEmbedWidget | "program"): string {
     default:
       return "Public program";
   }
+}
+
+function eventDateRange(startsOn: string, endsOn: string): string {
+  const start = new Date(`${startsOn}T00:00:00.000Z`);
+  const end = new Date(`${endsOn}T00:00:00.000Z`);
+  const month = new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(start);
+  return `${month} ${start.getUTCDate()}–${end.getUTCDate()}, ${end.getUTCFullYear()}`;
 }
 
 export function PublicProgramRenderer({
@@ -306,12 +332,12 @@ export function PublicProgramRenderer({
       data-testid="public-program-renderer"
     >
       <header className="program-header">
-        <p className="eyebrow">{widgetLabel(currentWidget)}</p>
+        {currentWidget !== "sessions" ? <p className="eyebrow">{widgetLabel(currentWidget)}</p> : null}
         <div className="program-title-line">
           <h1 id="program-title">{data.event.name}</h1>
           {currentWidget === "speakers" ? <span>Speakers list</span> : null}
         </div>
-        <p>{currentWidget === "speakers" ? "Find and explore speakers by name, company, track, or role." : <>
+        <p>{currentWidget === "speakers" ? "Find and explore speakers by name, company, track, or role." : currentWidget === "sessions" ? <>{eventDateRange(data.event.startsOn, data.event.endsOn)}  •  A searchable catalog of conference sessions</> : <>
           {data.event.startsOn === data.event.endsOn
             ? dayLabel(data.event.startsOn)
             : `${dayLabel(data.event.startsOn)} – ${dayLabel(data.event.endsOn)}`}
@@ -319,6 +345,7 @@ export function PublicProgramRenderer({
           Published revision {data.revision.version}
           {data.revision.isCurrent ? " (current)" : " (archived)"}
         </>}</p>
+        {currentWidget === "sessions" ? <span className="sessions-total">{data.sessions.length} sessions</span> : null}
       </header>
 
       {currentWidget === "speakers" ? (
@@ -335,12 +362,13 @@ export function PublicProgramRenderer({
         </section>
       ) : <section className="program-filters" aria-label="Program filters">
         <label className="program-search-field">
-          Search sessions or speakers
+          <span className="sessions-search-icon" aria-hidden="true">⌕</span>
+          <span className="sessions-visually-hidden">Search sessions or speakers</span>
           <input
             id="program-search"
             type="search"
             value={filters.query ?? ""}
-            placeholder="Search by title or speaker"
+            placeholder={currentWidget === "sessions" ? "Search sessions by title, keyword, or speaker..." : "Search by title or speaker"}
             onChange={(event) =>
               setFilters((current) => ({
                 ...current,
@@ -349,7 +377,7 @@ export function PublicProgramRenderer({
             }
           />
         </label>
-        <label>
+        {currentWidget !== "sessions" ? <label>
           Day
           <select
             id="program-day-filter"
@@ -368,7 +396,7 @@ export function PublicProgramRenderer({
               </option>
             ))}
           </select>
-        </label>
+        </label> : null}
         <label>
           Track
           <select
@@ -389,7 +417,7 @@ export function PublicProgramRenderer({
             ))}
           </select>
         </label>
-        <label>
+        {currentWidget !== "sessions" ? <label>
           Location
           <select
             id="program-location-filter"
@@ -409,9 +437,9 @@ export function PublicProgramRenderer({
             ))}
             <option value="tbd">Location pending</option>
           </select>
-        </label>
+        </label> : null}
         <label>
-          Format
+          {currentWidget === "sessions" ? "Session type" : "Format"}
           <select
             id="program-format-filter"
             value={filters.format ?? ""}
@@ -422,7 +450,7 @@ export function PublicProgramRenderer({
               }))
             }
           >
-            <option value="">All formats</option>
+            <option value="">{currentWidget === "sessions" ? "All session types" : "All formats"}</option>
             {formats.map((format) => (
               <option key={format} value={format}>
                 {format}
@@ -430,7 +458,7 @@ export function PublicProgramRenderer({
             ))}
           </select>
         </label>
-        <label>
+        {currentWidget !== "sessions" ? <label>
           Speaker
           <select
             id="program-speaker-filter"
@@ -449,10 +477,11 @@ export function PublicProgramRenderer({
               </option>
             ))}
           </select>
-        </label>
+        </label> : null}
+        {currentWidget === "sessions" ? <button type="button" className="sessions-clear" onClick={() => setFilters(() => ({}))}>Clear filters</button> : null}
       </section>}
 
-      {currentWidget !== "speakers" ? <p className="program-counts" role="status" aria-live="polite" data-testid="program-result-count">
+      {currentWidget !== "speakers" ? <p className={`program-counts${currentWidget === "sessions" ? " sessions-result-count" : ""}`} role="status" aria-live="polite" data-testid="program-result-count">
         {sessions.length === data.sessions.length ? (
           <>
             <strong>{sessions.length}</strong>{" "}
@@ -487,6 +516,7 @@ export function PublicProgramRenderer({
         />
       ) : currentWidget === "sessions" ? (
         <SessionListView
+          atlas
           sessions={sessions}
           selectedId={selectedId}
           expandedSessionIds={expandedSessionIds}
@@ -717,6 +747,7 @@ function FullProgramLayout({
 }
 
 function SessionListView({
+  atlas = false,
   sessions,
   selectedId,
   expandedSessionIds,
@@ -724,6 +755,7 @@ function SessionListView({
   onSelectSession,
   onToggleDescription,
 }: {
+  atlas?: boolean;
   sessions: PublicProgramSession[];
   selectedId: string | null;
   expandedSessionIds: Set<string>;
@@ -733,26 +765,62 @@ function SessionListView({
 }) {
   return (
     <section className="program-schedule" aria-labelledby="program-schedule-title">
-      <h2 id="program-schedule-title">Schedule</h2>
+      <h2 id="program-schedule-title" className={atlas ? "sessions-visually-hidden" : undefined}>Schedule</h2>
       {sessions.length === 0 ? (
         <p className="program-empty">No sessions match these filters.</p>
       ) : (
         <ul className="program-session-list">
           {sessions.map((session) => (
             <li key={session.id}>
-              <SessionCard
+              {atlas ? <AtlasSessionRow session={session} fields={fields} selected={selectedId === session.id} onSelect={() => onSelectSession(selectedId === session.id ? null : session.id)} /> : <SessionCard
                 session={session}
                 selected={selectedId === session.id}
                 expanded={expandedSessionIds.has(session.id)}
                 fields={fields}
                 onSelect={() => onSelectSession(selectedId === session.id ? null : session.id)}
                 onToggleDescription={() => onToggleDescription(session.id)}
-              />
+              />}
             </li>
           ))}
         </ul>
       )}
     </section>
+  );
+}
+
+function AtlasSessionRow({ session, fields, selected, onSelect }: {
+  session: PublicProgramSession;
+  fields: PublicEmbedFieldVisibility;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const speakers = session.speakers;
+  const format = session.format || "Session";
+  return (
+    <article className={`atlas-session-row ${trackClass(session.trackId)}${selected ? " is-selected" : ""}`} data-testid={`public-session-card-${session.id}`}>
+      <div className="atlas-track">
+        <span className="atlas-track-icon" aria-hidden="true">{session.trackName.includes("Data") ? "▤" : session.trackName.includes("Capacity") ? "♙" : session.trackName.includes("Environment") ? "◇" : session.trackName.includes("Privacy") ? "⬡" : "▥"}</span>
+        {fields.track ? <strong>{session.trackName}</strong> : null}
+      </div>
+      <div className="atlas-summary">
+        <h3><button type="button" aria-pressed={selected} onClick={onSelect}>{fields.title ? session.title : "Session details"}</button></h3>
+        {fields.description ? <p>{truncateDescription(session.description, 105)}</p> : null}
+      </div>
+      <div className="atlas-kind-speakers">
+        {fields.format ? <div className="atlas-kind"><span aria-hidden="true">{format.toLowerCase().includes("workshop") ? "⌕" : format.toLowerCase().includes("panel") ? "♟" : "▣"}</span><strong>{format}</strong></div> : null}
+        {fields.speakers ? <div className="atlas-speakers">
+          <span className="atlas-avatar-stack" aria-hidden="true">{speakers.slice(0, 3).map((speaker, index) => <i key={speaker.id} style={{ zIndex: 3 - index }}>{sessionSpeakerInitials(speaker.name)}</i>)}</span>
+          <span>{speakers.length === 1 ? speakers[0]?.name : `${speakers.length} speakers`}</span>
+        </div> : null}
+      </div>
+      <div className="atlas-logistics">
+        {fields.dateTime ? <span><b aria-hidden="true">□</b>{session.day ? `${dayLabel(session.day).replace(/^\w+,?\s*/, "")}, ${timeLabel(session)}` : "Time TBD"}</span> : null}
+        {fields.room ? <span><b aria-hidden="true">⌖</b>{roomLabel(session)}</span> : null}
+      </div>
+      <button type="button" className="atlas-view" aria-pressed={selected} onClick={onSelect}>View session</button>
+      <button type="button" className="atlas-chevron" aria-label={`View ${session.title}`} onClick={onSelect}>›</button>
+      <span className="sessions-visually-hidden">{sessionDuration(session)}</span>
+    </article>
   );
 }
 

@@ -2985,6 +2985,7 @@ table.grid td.col-submitted {
   position: absolute;
   top: 0;
   bottom: 0;
+  background: #fff;
   right: -4px;
   width: 10px;
   cursor: col-resize;
@@ -8902,6 +8903,128 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
   .program-renderer.widget-speakers .program-speaker-directory { grid-template-columns: 1fr; }
   .program-renderer.widget-speakers .program-speaker-directory > li { border-right: 0; border-bottom: 1px solid #d7dee7 !important; }
   .program-title-line { display: grid; gap: 4px; }
+}
+
+/* Direction 05 — Atlas Modules: premium sessions-list embed. */
+.program-shell.mode-embed:has(.widget-sessions) {
+  min-height: 100vh;
+  padding: 0;
+  background: #fff;
+  color: #07183d;
+}
+
+.program-shell.mode-embed:has(.widget-sessions) .program-footer {
+  position: fixed;
+  z-index: 10;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  min-height: 53px;
+  margin: 0;
+  padding: 16px 28px;
+  border-top: 1px solid #d7dee7;
+  color: #53688f;
+  font-size: 16px;
+}
+
+.program-shell.mode-embed:has(.widget-sessions) .program-footer p { margin: 0; }
+.program-shell.mode-embed:has(.widget-sessions) .program-footer p:first-child::first-line { color: #53688f; }
+
+.program-renderer.widget-sessions {
+  width: 100%;
+  min-height: calc(100vh - 53px);
+  display: block;
+  padding: 17px 28px 15px;
+  border: 0;
+  border-radius: 0;
+  background: #fff;
+  color: #07183d;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+.widget-sessions .program-header { position: relative; margin-bottom: 16px; }
+.widget-sessions .program-header h1 { margin: 0 0 8px; font-size: 30px; line-height: 1.15; letter-spacing: -.025em; }
+.widget-sessions .program-header p { color: #7889aa; font-size: 15px; }
+.widget-sessions .sessions-total { position: absolute; top: 11px; right: 0; font-size: 14px; color: #203457; }
+.sessions-visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+
+.widget-sessions .program-filters {
+  display: grid;
+  grid-template-columns: minmax(420px, 1.08fr) minmax(220px, .5fr) minmax(220px, .5fr) 140px;
+  gap: 16px;
+  margin-bottom: 19px;
+}
+.widget-sessions .program-filters label { position: relative; display: grid; gap: 8px; min-width: 0; padding: 12px 14px; border: 1px solid #d9e0e9; border-radius: 5px; color: #354d75; font-size: 12px; font-weight: 400; }
+.widget-sessions .program-search-field { grid-row: 1; height: 86px; box-sizing: border-box; align-content: center; padding-left: 50px !important; }
+.widget-sessions .program-search-field input { width: 100%; min-height: 44px; border: 0; outline: 0; font-size: 14px; color: #07183d; }
+.widget-sessions .program-search-field input::placeholder { color: #7183a5; opacity: 1; }
+.sessions-search-icon { position: absolute; left: 17px; top: 31px; font-size: 30px; line-height: 1; transform: rotate(-20deg); color: #07183d; }
+.widget-sessions .program-filters select { min-height: 39px; padding: 0 12px; border-color: #cfd8e6; border-radius: 4px; font-size: 14px; }
+.sessions-clear { align-self: stretch; min-width: 136px; min-height: 44px; border: 0; background: transparent; color: #0054b8; font-weight: 600; cursor: pointer; }
+.sessions-clear:hover, .sessions-clear:focus-visible { text-decoration: underline; outline: 2px solid #2f5d98; outline-offset: -4px; }
+.sessions-result-count { display: none; }
+.widget-sessions .program-schedule { display: block; }
+.widget-sessions .program-session-list { gap: 5px; }
+
+.atlas-session-row {
+  height: 91px;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 210px 470px 300px 272px 176px 52px;
+  align-items: stretch;
+  border: 1px solid #d7dee7;
+  border-left: 7px solid #2f76c4;
+  border-radius: 5px;
+  overflow: hidden;
+  background: #fff;
+}
+.atlas-session-row.track-program-ops, .atlas-session-row.track-community, .atlas-session-row.track-2, .atlas-session-row.track-4 { border-left-color: #19a873; }
+.atlas-session-row.track-design-systems, .atlas-session-row.track-agents, .atlas-session-row.track-3 { border-left-color: #6753b7; }
+.atlas-session-row.track-governance, .atlas-session-row.track-data { border-left-color: #2f76c4; }
+.atlas-session-row.track-capacity { border-left-color: #19a873; }
+.atlas-session-row.track-economy, .atlas-session-row.track-privacy { border-left-color: #6753b7; }
+.atlas-session-row.track-environment { border-left-color: #c27a00; }
+.atlas-session-row.is-selected { outline: 2px solid #2f5d98; outline-offset: 1px; }
+.atlas-track { display: flex; align-items: center; gap: 16px; padding: 14px 20px; background: linear-gradient(90deg, #f8fbff, #f2f7fd); color: #0758b6; }
+.atlas-session-row.track-program-ops .atlas-track, .atlas-session-row.track-community .atlas-track, .atlas-session-row.track-2 .atlas-track, .atlas-session-row.track-4 .atlas-track { color: #00875d; background: linear-gradient(90deg, #f5fdf9, #eefaf5); }
+.atlas-session-row.track-design-systems .atlas-track, .atlas-session-row.track-agents .atlas-track, .atlas-session-row.track-3 .atlas-track { color: #5844a7; background: linear-gradient(90deg, #fbfaff, #f5f2fc); }
+.atlas-session-row.track-capacity .atlas-track { color: #00875d; background: linear-gradient(90deg, #f5fdf9, #eefaf5); }
+.atlas-session-row.track-economy .atlas-track, .atlas-session-row.track-privacy .atlas-track { color: #5844a7; background: linear-gradient(90deg, #fbfaff, #f5f2fc); }
+.atlas-session-row.track-environment .atlas-track { color: #a86100; background: linear-gradient(90deg, #fffaf0, #fcf5e7); }
+.atlas-track-icon { width: 32px; text-align: center; font-size: 30px; font-weight: 400; }
+.atlas-track strong { max-width: 130px; font-size: 15px; line-height: 1.35; }
+.atlas-summary { align-self: center; padding: 7px 20px; }
+.atlas-summary h3 { margin: 0 0 5px; font-size: 19px; line-height: 1.15; letter-spacing: -.015em; }
+.atlas-summary h3 button { padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 700; text-align: left; cursor: pointer; }
+.atlas-summary h3 button:focus-visible { outline: 3px solid #2f5d98; outline-offset: 3px; }
+.atlas-summary p { margin: 0; color: #3d567f; font-size: 13px; line-height: 1.55; }
+.atlas-kind-speakers { align-self: center; display: grid; gap: 5px; padding: 4px 12px; }
+.atlas-kind { display: flex; gap: 14px; align-items: center; color: #07183d; font-size: 15px; }
+.atlas-kind > span { font-size: 22px; }
+.atlas-speakers { display: flex; align-items: center; gap: 12px; color: #29436d; font-size: 13px; }
+.atlas-avatar-stack { display: flex; min-width: 40px; }
+.atlas-avatar-stack i { width: 36px; height: 36px; box-sizing: border-box; display: grid; place-items: center; margin-right: -7px; border: 2px solid #fff; border-radius: 50%; background: #cad9df; color: #17304f; font-size: 10px; font-style: normal; font-weight: 700; }
+.atlas-avatar-stack i:nth-child(2) { background: #e0c7b5; }.atlas-avatar-stack i:nth-child(3) { background: #b8c2ae; }
+.atlas-logistics { align-self: center; display: grid; gap: 8px; padding: 5px 12px; color: #354f79; font-size: 13px; }
+.atlas-logistics span { display: flex; align-items: center; gap: 14px; white-space: nowrap; }.atlas-logistics b { width: 18px; color: #49668f; font-size: 22px; font-weight: 400; }
+.atlas-view { align-self: center; min-height: 46px; margin: 0 5px; border: 1px solid #0062bf; border-radius: 3px; background: #fff; color: #0054ad; font-size: 16px; font-weight: 600; cursor: pointer; }
+.atlas-view:hover, .atlas-view:focus-visible { background: #eaf2fb; outline: 2px solid #2f5d98; outline-offset: 2px; }
+.atlas-chevron { align-self: stretch; border: 0; background: transparent; color: #0062bf; font-size: 31px; cursor: pointer; }
+
+@media (max-width: 1050px) {
+  .widget-sessions .program-filters { grid-template-columns: 1fr 1fr; }
+  .widget-sessions .program-search-field { grid-column: 1 / -1; }
+  .widget-sessions .program-filters label:nth-of-type(2), .widget-sessions .program-filters label:nth-of-type(3) { margin: 0; }
+  .sessions-clear { grid-column: 1 / -1; }
+  .atlas-session-row { grid-template-columns: 180px 1fr 230px; }
+  .atlas-logistics { grid-column: 2; }.atlas-view { grid-column: 3; }.atlas-chevron { display: none; }
+}
+@media (max-width: 700px) {
+  .program-renderer.widget-sessions { padding: 16px; }.widget-sessions .sessions-total { position: static; display: block; margin-top: 8px; }
+  .widget-sessions .program-filters { grid-template-columns: 1fr; }.widget-sessions .program-search-field, .sessions-clear { grid-column: auto; }
+  .atlas-session-row { grid-template-columns: 1fr; }.atlas-track, .atlas-summary, .atlas-kind-speakers, .atlas-logistics { grid-column: 1; }
+  .atlas-track { min-height: 60px; }.atlas-view { grid-column: 1; margin: 8px 16px 16px; min-height: 44px; }
 }
 
 .program-renderer.widget-sessions .program-schedule,
