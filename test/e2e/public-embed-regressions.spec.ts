@@ -123,7 +123,8 @@ test.describe("public embed regression geometry", () => {
     await expect(sessionInspector).toHaveCSS("opacity", "1");
 
     await page.goto("/fixtures/embeds/speakers-list");
-    const speakerCard = page.locator(".program-speaker-list-entry").first();
+    const speakerCard = page.locator(".program-speaker-list-entry").nth(3);
+    const speakerItem = speakerCard.locator("xpath=ancestor::li");
     const before = await speakerCard.boundingBox();
     await speakerCard.hover();
     await expect(speakerCard).toHaveAttribute("data-motion-surface", "speaker-card");
@@ -133,6 +134,8 @@ test.describe("public embed regression geometry", () => {
     expect(after).not.toBeNull();
     expect(after!.y).toBeLessThan(before!.y - 1);
     await expect(page.locator(".program-speaker-directory")).toHaveCSS("overflow", "visible");
+    await expect(speakerItem).toHaveCSS("overflow", "visible");
+    await expect(speakerItem).toHaveCSS("z-index", "2");
     await expect(speakerCard.locator(".program-speaker-hover-avatar")).not.toHaveCSS("transform", "none");
 
     await page.goto("/e/pacific-open-data-summit-2026/program/embed?widget=speaker-gallery&fixture=signal-rail");

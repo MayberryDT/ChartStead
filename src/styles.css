@@ -10846,14 +10846,14 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
   outline: 0;
   background: #fff;
 }
-.program-renderer.widget-speakers .program-speaker-directory > li {
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory > li {
   position: relative;
-  overflow: visible;
 }
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory > li:nth-child(n) { overflow: visible; }
 .program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory {
   overflow: visible;
 }
-.program-renderer.widget-speakers .program-speaker-directory > li:hover {
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory > li:hover {
   z-index: 2;
 }
 .program-speaker-hover-avatar {
