@@ -213,6 +213,31 @@ describe("PublicProgramRenderer", () => {
     );
     expect(screen.getByRole("complementary", { name: "Selected speaker: Ada Lovelace" })).toBeVisible();
   });
+
+  it("keeps the speakers list distinct from the gallery with a persistent side inspector", async () => {
+    const user = userEvent.setup();
+    render(<PublicProgramRenderer data={programResponse()} mode="embed" widget="speakers" />);
+
+    const layout = screen.getByTestId("speaker-list-layout");
+    expect(layout).toContainElement(screen.getByRole("complementary", { name: "Speaker profile: Ada Lovelace" }));
+    expect(layout.querySelector(".program-speaker-directory")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Grace Hopper/i }));
+    expect(screen.getByRole("complementary", { name: "Speaker profile: Grace Hopper" })).toBeVisible();
+  });
+
+  it("opens session details from sessions and itinerary without conflating save controls", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<PublicProgramRenderer data={programResponse()} mode="embed" widget="sessions" />);
+
+    await user.click(screen.getByRole("button", { name: "View Opening Keynote details" }));
+    expect(screen.getByRole("complementary", { name: "Session details: Opening Keynote" })).toBeVisible();
+    expect(screen.queryByText("□")).not.toBeInTheDocument();
+
+    rerender(<PublicProgramRenderer data={programResponse()} mode="embed" widget="itinerary" />);
+    expect(screen.queryByText("ChartStead", { selector: ".itinerary-brand *" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "View Opening Keynote details" }));
+    expect(screen.getByRole("complementary", { name: "Session details: Opening Keynote" })).toBeVisible();
+  });
   it("renders the dedicated agenda controls and preserves itinerary/filter behavior", async () => {
     const user = userEvent.setup();
     render(<PublicProgramRenderer data={programResponse()} mode="embed" widget="agenda" />);
@@ -556,6 +581,7 @@ describe("Public program routes", () => {
         speaker: typeof search.speaker === "string" ? search.speaker : undefined,
         itinerary: typeof search.itinerary === "string" ? search.itinerary : undefined,
         widget: typeof search.widget === "string" ? search.widget : undefined,
+        fixture: typeof search.fixture === "string" ? search.fixture : undefined,
       }),
     });
     const embedRoute = createRoute({
@@ -574,6 +600,7 @@ describe("Public program routes", () => {
         speaker: typeof search.speaker === "string" ? search.speaker : undefined,
         itinerary: typeof search.itinerary === "string" ? search.itinerary : undefined,
         widget: typeof search.widget === "string" ? search.widget : undefined,
+        fixture: typeof search.fixture === "string" ? search.fixture : undefined,
       }),
     });
     const router = createRouter({
@@ -630,10 +657,10 @@ describe("Public program routes", () => {
       })),
     );
 
-    const { router } = renderAt(`/e/${eventId}/program/embed?widget=speaker-gallery&speaker=sp-1&itinerary=ses-1`);
-    expect(await screen.findByRole("complementary", { name: "Selected speaker: Ada Lovelace" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: /Grace Hopper/i }));
-    expect(router.state.location.search).toMatchObject({ speaker: "sp-2", itinerary: "ses-1" });
+    const { router } = renderAt(`/e/${eventId}/program/embed?widget=speaker-gallery&fixture=signal-rail&speaker=sp-1&itinerary=ses-1`);
+    expect(await screen.findByRole("complementary", { name: "Selected speaker: Maya Chen" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /Priya Nair/i }));
+    expect(router.state.location.search).toMatchObject({ speaker: "priya", itinerary: "ses-1", fixture: "signal-rail" });
   });
 
   it("keeps schedule, detail, and speakers in one responsive layout tree", () => {

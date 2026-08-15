@@ -30,6 +30,7 @@ function programSearch(
   widget?: ProgramSurface,
   selectedSpeakerId?: string | null,
   itinerarySessionIds: string[] = [],
+  fixture?: string,
 ) {
   return {
     revision: revisionId,
@@ -44,6 +45,7 @@ function programSearch(
     session: selectedSessionId ?? undefined,
     speaker: selectedSpeakerId ?? undefined,
     itinerary: itinerarySessionIds.length ? itinerarySessionIds.join(",") : undefined,
+    fixture,
   };
 }
 
@@ -65,6 +67,7 @@ export function PublicProgramPage({
   const searchWidget = isPublicEmbedWidget(search.widget) ? search.widget : undefined;
   const surface = widget ?? searchWidget ?? "program";
   const useSignalRailFixture = surface === "speaker-gallery" && search.fixture === "signal-rail";
+  const fixture = typeof search.fixture === "string" ? search.fixture : undefined;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const filters = parseProgramFilters(search);
@@ -104,6 +107,7 @@ export function PublicProgramPage({
       surface,
       nextSpeakerId,
       nextItinerarySessionIds,
+      fixture,
     );
     if (mode === "embed") {
       void navigate({
@@ -201,7 +205,7 @@ export function PublicProgramPage({
             <Link
               to="/e/$eventId/program/embed"
               params={{ eventId }}
-              search={programSearch(revisionId, filters, selectedSessionId, surface, selectedSpeakerId, itinerary.data)}
+              search={programSearch(revisionId, filters, selectedSessionId, surface, selectedSpeakerId, itinerary.data, fixture)}
             >
               Embed view
             </Link>

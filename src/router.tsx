@@ -222,6 +222,7 @@ function validateProgramSearch(search: Record<string, unknown>) {
     session: typeof search.session === "string" ? search.session : undefined,
     itinerary: typeof search.itinerary === "string" ? search.itinerary : undefined,
     widget: typeof search.widget === "string" ? search.widget : undefined,
+    fixture: typeof search.fixture === "string" ? search.fixture : undefined,
   };
 }
 

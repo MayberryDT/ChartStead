@@ -10209,3 +10209,129 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
 .agenda-select .app-select-trigger,
 .itinerary-controls .app-select-trigger { width: 100%; min-height: 44px; background: #fff; }
 .signal-gallery-filters .app-select-trigger { width: 100%; min-height: 47px; background: #fff; }
+
+/* Embed regression pass: persistent inspectors, resilient rows, and one-layer controls. */
+.widget-sessions .sessions-search-icon {
+  top: 50%;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  font-size: 0;
+  transform: translateY(-50%);
+}
+.widget-sessions .sessions-search-icon svg,
+.itinerary-search svg { width: 20px; height: 20px; }
+
+.atlas-session-layout { min-width: 0; }
+.public-session-inspector {
+  --panel-open-dur: 300ms;
+  --panel-close-dur: 220ms;
+  --panel-translate-y: 8px;
+  --panel-blur: 2px;
+  --panel-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  right: 0;
+  width: min(430px, 100vw);
+  height: calc(100dvh - 44px);
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 20px;
+  padding: 28px;
+  border-left: 1px solid #d7dee7;
+  background: #fff;
+  box-shadow: -18px 0 48px rgb(8 29 58 / 12%);
+  color: #081d3a;
+}
+.public-session-inspector header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.public-session-inspector header p { margin: 0; color: #526071; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.public-session-inspector header button { width: 40px; height: 40px; border: 0; background: transparent; color: #081d3a; font-size: 28px; }
+.public-session-inspector h2 { margin: 0; font-size: 28px; line-height: 1.12; letter-spacing: -.025em; }
+.public-session-inspector > p { margin: 0; color: #344b68; font-size: 15px; line-height: 1.65; }
+.public-session-inspector dl { display: grid; gap: 0; margin: 0; border-top: 1px solid #d7dee7; }
+.public-session-inspector dl div { display: grid; grid-template-columns: 72px 1fr; gap: 12px; padding: 12px 0; border-bottom: 1px solid #e5eaf0; }
+.public-session-inspector dt { color: #526071; font-size: 12px; }
+.public-session-inspector dd { margin: 0; font-size: 13px; font-weight: 600; }
+.public-session-inspector section h3 { margin: 0 0 6px; font-size: 13px; }
+.public-session-inspector section p { margin: 0; color: #344b68; }
+
+.program-renderer.widget-speakers .program-speakers.is-directory {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  gap: 24px;
+  align-items: start;
+}
+.program-renderer.widget-speakers .program-speakers.is-directory > .program-speakers-header { display: none; }
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-surfaces { min-width: 0; }
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory > li:nth-child(3n) { border-right: 1px solid #d7dee7; }
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory > li:nth-child(2n) { border-right: 0; }
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory > li:nth-last-child(-n + 3) { border-bottom: 1px solid #d7dee7; }
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory > li:nth-last-child(-n + 2) { border-bottom: 0; }
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-detail {
+  --panel-open-dur: 300ms;
+  --panel-close-dur: 220ms;
+  --panel-translate-y: 8px;
+  --panel-blur: 2px;
+  --panel-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: sticky;
+  top: 20px;
+  max-height: calc(100vh - 84px);
+  overflow-y: auto;
+  margin: 0;
+  padding: 22px;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.agenda-controls > .app-select { min-width: 0; }
+.agenda-controls > .app-select .app-select-trigger { width: 100%; min-height: 56px; background: #fff; }
+.agenda-row { position: relative; isolation: isolate; height: auto; align-items: stretch; overflow: clip; }
+.agenda-row > * { align-self: center; }
+
+.itinerary-controls > .app-select { padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.itinerary-search > span:first-child { display: grid; place-items: center; }
+.itinerary-card-open {
+  position: static !important;
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: inherit !important;
+  text-align: left;
+}
+.itinerary-card .itinerary-card-save { position: absolute; z-index: 2; top: 5px; right: 4px; }
+.itinerary-card-open > span { font-size: 10px; color: #274360; }
+.itinerary-card-open > small { display: flex; align-items: center; gap: 5px; margin-top: 3px; color: #344b68; font-size: 9px; }
+.itinerary-saved h3 .itinerary-saved-open {
+  position: static;
+  width: auto;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.itinerary-saved article .itinerary-saved-remove { position: absolute; top: 12px; right: 10px; }
+
+@media (max-width: 1100px) {
+  .program-renderer.widget-speakers .program-speakers.is-directory { grid-template-columns: minmax(0, 1fr) 360px; }
+  .program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory { grid-template-columns: 1fr; }
+  .program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory > li { border-right: 0 !important; border-bottom: 1px solid #d7dee7 !important; }
+}
+@media (max-width: 760px) {
+  .program-renderer.widget-speakers .program-speakers.is-directory { grid-template-columns: 1fr; }
+  .program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-detail { position: static; max-height: none; }
+  .public-session-inspector { width: 100vw; padding: 22px 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .public-session-inspector,
+  .program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-detail { transition: none !important; }
+}

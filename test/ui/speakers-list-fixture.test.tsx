@@ -13,7 +13,7 @@ describe("premium speakers list fixture", () => {
 
     expect(screen.getByRole("heading", { name: "Pacific Open Data Summit 2026" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Aiden Tui|Carmen Rodrigues|Maya Chen|Jordon Prasad|Jordan Lee|Leilani Williams|Linh Tran|Malakai Iosefa|Maria Svensson|Priya Nair|Ravi Singh|Sione Vaka|Takuya Nakamura|Tiana Moana|Will Jackson/ })).toHaveLength(15);
-    expect(screen.getByAltText("Portrait of Aiden Tui")).toHaveAttribute("src", "/demo/speakers/speaker-1.webp");
+    expect(screen.getAllByAltText("Portrait of Aiden Tui").every((image) => image.getAttribute("src") === "/demo/speakers/speaker-1.webp")).toBe(true);
     expect(speakersListFixture.speakers.every((speaker) => !("email" in speaker))).toBe(true);
 
     await user.click(screen.getByRole("combobox", { name: "Track" }));

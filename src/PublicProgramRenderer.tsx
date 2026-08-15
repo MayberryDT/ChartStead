@@ -452,7 +452,7 @@ export function PublicProgramRenderer({
         </section>
       ) : <section className="program-filters" aria-label="Program filters">
         <label className="program-search-field">
-          <span className="sessions-search-icon" aria-hidden="true">⌕</span>
+          <span className="sessions-search-icon" aria-hidden="true"><SearchIcon /></span>
           <span className="sessions-visually-hidden">Search sessions or speakers</span>
           <input
             id="program-search"
@@ -519,17 +519,20 @@ export function PublicProgramRenderer({
           onToggleSpeakerBiography={toggleSpeakerBiography}
         />
       ) : currentWidget === "sessions" ? (
-        <SessionListView
-          atlas
-          sessions={sessions}
-          selectedId={selectedId}
-          expandedSessionIds={expandedSessionIds}
-          fields={fields}
-          itinerarySessionIds={itinerarySessionIds}
-          onItinerarySessionIdsChange={changeItinerary}
-          onSelectSession={selectSession}
-          onToggleDescription={toggleDescription}
-        />
+        <div className="atlas-session-layout">
+          <SessionListView
+            atlas
+            sessions={sessions}
+            selectedId={selectedId}
+            expandedSessionIds={expandedSessionIds}
+            fields={fields}
+            itinerarySessionIds={itinerarySessionIds}
+            onItinerarySessionIdsChange={changeItinerary}
+            onSelectSession={selectSession}
+            onToggleDescription={toggleDescription}
+          />
+          {selected ? <SessionInspector session={selected} data={data} fields={fields} onClose={() => selectSession(null)} /> : null}
+        </div>
       ) : currentWidget === "speakers" ? (
         <SpeakerListView
           heading="Speakers List"
@@ -537,7 +540,7 @@ export function PublicProgramRenderer({
           sessions={sessions}
           fields={fields}
           variant="directory"
-          selectedSpeaker={selectedSpeaker}
+          selectedSpeaker={selectedSpeaker ?? visibleSpeakers[0] ?? null}
           expandedSpeakerBioIds={expandedSpeakerBioIds}
           onSelectSpeaker={selectSpeaker}
           onSelectSession={selectSession}
@@ -633,7 +636,7 @@ function AgendaEmbedView({
 }
 
 function AgendaSelect({ label, value, options, all, onChange }: { label: string; value: string; options: string[][]; all: string; onChange: (value: string) => void }) {
-  return <div className="agenda-select"><AppSelect label={label} value={value} options={[{ value: "", label: all }, ...options.map(([optionValue, optionLabel]) => ({ value: optionValue ?? "", label: optionLabel ?? optionValue ?? "" }))]} onValueChange={onChange} /></div>;
+  return <AppSelect label={label} value={value} options={[{ value: "", label: all }, ...options.map(([optionValue, optionLabel]) => ({ value: optionValue ?? "", label: optionLabel ?? optionValue ?? "" }))]} onValueChange={onChange} />;
 }
 
 function SignalRailGallery({ data, mode, theme, fields, filters, speakers, selectedSpeaker, onSetFilters, onSelectSpeaker, onSelectSession }: {
@@ -664,18 +667,41 @@ function SignalRailGallery({ data, mode, theme, fields, filters, speakers, selec
       </section>
       {active ? <aside className="signal-speaker-panel t-panel-slide" data-open="true" aria-label={`Selected speaker: ${active.name}`} aria-live="polite" key={active.id}>
         <p className="signal-selected-label">Selected speaker</p>
-        <Button className="signal-panel-close" type="button" aria-label="Reset selected speaker" onClick={() => onSelectSpeaker(null)}>×</Button>
         <div className="signal-speaker-intro">{fields.headshots ? <SpeakerAvatar speaker={active} large /> : null}<div><h2>{active.name}</h2><p>{active.title || "Professional details pending"}</p><p>{active.company || ""}</p><strong>{data.event.tracks.find((track) => linked.some((session) => session.trackId === track.id))?.name ?? "Data Leadership"}</strong><span>⌖ Wellington, New Zealand</span></div></div>
         <section><h3>About {active.name.split(" ")[0]}</h3><p>{fields.biography && active.biography ? active.biography : "Biography pending."}</p></section>
         <section><h3>Expertise</h3><ul className="signal-expertise"><li>◇ Data Governance</li><li>♙ Privacy &amp; Ethics</li><li>△ Public Policy</li><li>▥ Data Strategy</li></ul></section>
         <section><h3>Linked Sessions ({linked.length})</h3><ul className="signal-linked-sessions">{linked.map((session) => <li key={session.id}><button type="button" onClick={() => onSelectSession(session.id)}><strong>{session.title}</strong><span>{session.format}　•　{session.day ? dayLabel(session.day) : "Date TBD"}　•　{formatClock(session.startsAt)}</span><b>›</b></button></li>)}</ul></section>
-        <a className="signal-profile-button" href={`#speaker-${active.id}`}>View Full Profile</a>
       </aside> : null}
   </main></div>;
 }
 
 function BookmarkIcon({ filled = false }: { filled?: boolean }) {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6.5 3.5h11v17l-5.5-3.7-5.5 3.7z" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.7" /></svg>;
+}
+
+function SearchIcon() {
+  return <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.25" fill="none" stroke="currentColor" strokeWidth="1.8" /><path d="m15.2 15.2 4.3 4.3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>;
+}
+
+function SessionInspector({ session, data, fields, onClose }: {
+  session: PublicProgramSession;
+  data: PublicProgramResponse;
+  fields: PublicEmbedFieldVisibility;
+  onClose: () => void;
+}) {
+  return <aside className="public-session-inspector t-panel-slide" data-open="true" role="complementary" aria-label={`Session details: ${session.title}`}>
+    <header><p>Session details</p><Button type="button" aria-label="Close session details" onClick={onClose}>×</Button></header>
+    <h2>{fields.title ? session.title : "Session details"}</h2>
+    <dl>
+      {fields.dateTime ? <div><dt>Time</dt><dd>{session.day ? `${dayLabel(session.day)} · ${timeLabel(session)}` : "Time TBD"}</dd></div> : null}
+      {fields.room ? <div><dt>Room</dt><dd>{roomLabel(session)}</dd></div> : null}
+      {fields.track ? <div><dt>Track</dt><dd>{session.trackName || "Track pending"}</dd></div> : null}
+      {fields.format ? <div><dt>Type</dt><dd>{session.format || "Format pending"}</dd></div> : null}
+    </dl>
+    {fields.description && session.description ? <p>{session.description}</p> : null}
+    {fields.speakers && session.speakers.length ? <section><h3>Speakers</h3><p>{session.speakers.map((speaker) => speaker.name).join(", ")}</p></section> : null}
+    <AddToCalendarMenu eventId={data.event.id} session={session} revisionId={data.revision.isCurrent ? undefined : data.revision.id} />
+  </aside>;
 }
 
 function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, selectedId, itinerarySessionIds, onItinerarySessionIdsChange, itineraryPending, itineraryError, onSelectSession, mode, theme, accentStyle }: {
@@ -704,6 +730,7 @@ function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, 
     onSelectSession(selectedId === sessionId ? null : sessionId);
   };
   const savedSessions = data.sessions.filter((session) => savedIds.has(session.id));
+  const selected = data.sessions.find((session) => session.id === selectedId) ?? null;
   const start = new Date(`${data.event.startsOn}T00:00:00Z`);
   const end = new Date(`${data.event.endsOn}T00:00:00Z`);
   const dateRange = start.getUTCFullYear() === end.getUTCFullYear() && start.getUTCMonth() === end.getUTCMonth()
@@ -711,13 +738,12 @@ function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, 
     : `${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(start)} – ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(end)}`;
   return <div className={`program-renderer indexed-itinerary mode-${mode} widget-itinerary theme-${theme}`} style={accentStyle} data-testid="public-program-renderer">
     <aside className="itinerary-rail" aria-label="My itinerary">
-      <div className="itinerary-brand"><span className="itinerary-mark" aria-hidden="true">▦</span><strong>ChartStead</strong></div>
       <section className="itinerary-saved">
         <header><h2>My itinerary</h2><span>{savedSessions.length} saved</span></header>
         {savedSessions.length ? savedSessions.map((session) => <article key={session.id}>
           <span>{session.day ? dayLabel(session.day).toUpperCase() : "TIME TBD"} {formatClock(session.startsAt)}</span>
-          <Button type="button" disabled={itineraryPending} onClick={() => toggleSaved(session.id)} aria-label={`Remove ${session.title} from itinerary`}><BookmarkIcon filled /></Button>
-          <h3>{session.title}</h3><p>{session.speakers.map((speaker) => speaker.name).join(", ") || session.format}</p>
+          <Button className="itinerary-saved-remove" type="button" disabled={itineraryPending} onClick={() => toggleSaved(session.id)} aria-label={`Remove ${session.title} from itinerary`}><BookmarkIcon filled /></Button>
+          <h3><button className="itinerary-saved-open" type="button" onClick={() => onSelectSession(session.id)}>{session.title}</button></h3><p>{session.speakers.map((speaker) => speaker.name).join(", ") || session.format}</p>
           <small>{session.trackName} · {session.startsAt && session.endsAt ? `${(new Date(session.endsAt).getTime() - new Date(session.startsAt).getTime()) / 60000} min` : "TBD"}</small>
         </article>) : <p className="itinerary-none">Save sessions to build your personal schedule.</p>}
       </section>
@@ -728,7 +754,7 @@ function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, 
       <header className="itinerary-heading"><h1>{data.event.name}</h1><p>{dateRange}</p></header>
       <section className="itinerary-controls" aria-label="Program filters">
         <div className="itinerary-days" role="tablist" aria-label="Event day">{days.filter((day) => day !== "tbd").map((day) => <Button role="tab" aria-selected={activeDay === day} key={day} className={activeDay === day ? "is-active" : ""} onClick={() => update("day", day)}>{dayLabel(day)}</Button>)}</div>
-        <label className="itinerary-search"><span aria-hidden="true">⌕</span><span className="sr-only">Search sessions or speakers</span><input type="search" value={filters.query ?? ""} placeholder="Search sessions, speakers, topics..." onChange={(event) => update("query", event.target.value)} /></label>
+        <label className="itinerary-search"><span aria-hidden="true"><SearchIcon /></span><span className="sr-only">Search sessions or speakers</span><input type="search" value={filters.query ?? ""} placeholder="Search sessions, speakers, topics..." onChange={(event) => update("query", event.target.value)} /></label>
         <AppSelect label="Track" value={filters.trackId ?? ""} options={[{ value: "", label: "Track" }, ...data.event.tracks.map((track) => ({ value: track.id, label: track.name }))]} onValueChange={(value) => update("trackId", value)} hideLabel />
         <AppSelect label="Location" value={filters.roomId ?? ""} options={[{ value: "", label: "Room" }, ...data.event.rooms.map((room) => ({ value: room.id, label: room.name })), { value: "tbd", label: "Location pending" }]} onValueChange={(value) => update("roomId", value)} hideLabel />
         <AppSelect label="Format" value={filters.format ?? ""} options={[{ value: "", label: "Session type" }, ...formats.map((format) => ({ value: format, label: format }))]} onValueChange={(value) => update("format", value)} hideLabel />
@@ -738,14 +764,14 @@ function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, 
         <div className="itinerary-grid" role="grid" aria-label="Schedule itinerary" style={{ ["--room-count" as string]: roomIds.length }}>
           <div className="itinerary-corner" role="columnheader">Time</div>{data.event.rooms.map((room) => <div key={room.id} className="itinerary-room" role="columnheader" aria-label={room.name}>{room.name}<small>{room.readiness === "ready" ? "Ready" : "Pending"}</small></div>)}
           {times.map((time) => <div className="itinerary-time-row" role="row" key={time}><time>{formatClock(`2026-10-07T${time}:00.000Z`)}</time>{roomIds.map((roomId) => { const items = scheduled.filter((session) => session.startsAt!.slice(11, 16) === time && session.roomId === roomId); return <div className="itinerary-cell" role="gridcell" key={roomId}>{items.map((session) => <article key={session.id} className={`itinerary-card ${trackClass(session.trackId)} ${savedIds.has(session.id) ? "is-saved" : ""}`}>
-            <span>{timeLabel(session)}</span><Button type="button" disabled={itineraryPending} aria-label={savedIds.has(session.id) ? `Remove ${session.title} from itinerary` : `Save ${session.title}`} aria-pressed={savedIds.has(session.id)} onClick={() => toggleSaved(session.id)}><BookmarkIcon filled={savedIds.has(session.id)} /></Button>
-            <h2>{session.title}</h2>{session.speakers.length ? <p>{session.speakers.map((speaker) => speaker.name).join(", ")}</p> : null}<small><i />{session.trackName || session.format}</small>
+            <button type="button" className="itinerary-card-open" aria-label={`View ${session.title} details`} onClick={() => onSelectSession(session.id)}><span>{timeLabel(session)}</span><h2>{session.title}</h2>{session.speakers.length ? <p>{session.speakers.map((speaker) => speaker.name).join(", ")}</p> : null}<small><i />{session.trackName || session.format}</small></button><Button type="button" className="itinerary-card-save" disabled={itineraryPending} aria-label={savedIds.has(session.id) ? `Remove ${session.title} from itinerary` : `Save ${session.title}`} aria-pressed={savedIds.has(session.id)} onClick={() => toggleSaved(session.id)}><BookmarkIcon filled={savedIds.has(session.id)} /></Button>
           </article>)}</div>})}</div>)}
         </div>
       </div>}
       {pending.length ? <section className="itinerary-pending" aria-label="Time or location pending"><h2>To be scheduled</h2>{pending.map((session) => <span key={session.id}>{session.title} · {roomLabel(session)}</span>)}</section> : null}
       {itineraryError ? <p className="itinerary-error" role="alert">{itineraryError}</p> : null}
     </main>
+    {selected ? <SessionInspector session={selected} data={data} fields={DEFAULT_PUBLIC_EMBED_FIELDS} onClose={() => onSelectSession(null)} /> : null}
     <footer className="itinerary-footer">Powered by <strong>ChartStead</strong></footer>
   </div>;
 }
@@ -934,12 +960,12 @@ function AtlasSessionRow({ session, fields, selected, saved, onToggleSaved, onSe
         </div> : null}
       </div>
       <div className="atlas-logistics">
-        {fields.dateTime ? <span><b aria-hidden="true">□</b>{session.day ? `${dayLabel(session.day).replace(/^\w+,?\s*/, "")}, ${timeLabel(session)}` : "Time TBD"}</span> : null}
+        {fields.dateTime ? <span>{session.day ? `${dayLabel(session.day).replace(/^\w+,?\s*/, "")}, ${timeLabel(session)}` : "Time TBD"}</span> : null}
         {fields.room ? <span><b aria-hidden="true">⌖</b>{roomLabel(session)}</span> : null}
       </div>
-      <button type="button" className="atlas-view" aria-pressed={selected} onClick={onSelect}>View session</button>
+      <button type="button" className="atlas-view" aria-label={`View ${session.title} details`} aria-pressed={selected} onClick={onSelect}>View session</button>
       <Button type="button" className="atlas-save" aria-label={`${saved ? "Remove" : "Save"} ${session.title} ${saved ? "from" : "to"} itinerary`} aria-pressed={saved} onClick={onToggleSaved}><BookmarkIcon filled={saved} /></Button>
-      <button type="button" className="atlas-chevron" aria-label={`View ${session.title}`} onClick={onSelect}>›</button>
+      <span className="atlas-chevron" aria-hidden="true">›</span>
       <span className="sessions-visually-hidden">{sessionDuration(session)}</span>
     </article>
   );
@@ -1280,7 +1306,7 @@ function SpeakerListView({
   const showDirectory = variant !== "gallery";
   const showGallery = variant !== "directory";
   return (
-    <section className="program-speakers" aria-labelledby="program-speakers-title">
+    <section className={`program-speakers${variant === "directory" ? " is-directory" : ""}`} aria-labelledby="program-speakers-title" data-testid={variant === "directory" ? "speaker-list-layout" : undefined}>
       <div className="program-speakers-header">
         <div>
           <h2 id="program-speakers-title">{heading}</h2>
@@ -1335,7 +1361,7 @@ function SpeakerListView({
           fields={fields}
           biographyExpanded={expandedSpeakerBioIds.has(selectedSpeaker.id)}
           onToggleBiography={() => onToggleSpeakerBiography(selectedSpeaker.id)}
-          onClose={() => onSelectSpeaker(null)}
+          onClose={variant === "directory" ? undefined : () => onSelectSpeaker(null)}
           onSelectSession={onSelectSession}
         />
       ) : null}
@@ -1434,7 +1460,7 @@ function SpeakerDetail({
   fields: PublicEmbedFieldVisibility;
   biographyExpanded: boolean;
   onToggleBiography: () => void;
-  onClose: () => void;
+  onClose?: () => void;
   onSelectSession: (sessionId: string) => void;
 }) {
   const biography = speaker.biography.trim();
@@ -1448,16 +1474,16 @@ function SpeakerDetail({
     ["Website", speaker.socialLinks?.website],
   ].filter((link): link is [string, string] => Boolean(link[1]));
   return (
-    <article className="program-speaker-detail" aria-label={speaker.name}>
+    <article className="program-speaker-detail t-panel-slide" data-open="true" role={onClose ? undefined : "complementary"} aria-label={onClose ? speaker.name : `Speaker profile: ${speaker.name}`}>
       <div className="program-speaker-detail-header">
         {fields.headshots ? <SpeakerAvatar speaker={speaker} large /> : null}
         <div>
           <h3>{speaker.name}</h3>
           <p>{speakerSubtitle(speaker)}</p>
         </div>
-        <button type="button" className="program-speaker-close" onClick={onClose}>
+        {onClose ? <button type="button" className="program-speaker-close" onClick={onClose}>
           Close
-        </button>
+        </button> : null}
       </div>
       <section>
         <h4>Biography</h4>
