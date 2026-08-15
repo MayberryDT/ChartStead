@@ -52,3 +52,26 @@ The attached 1873×923 screenshot exposed a verification gap: the prior collisio
 | Public embed search icons | Sessions, Speakers List, Gallery, Itinerary | No transition fit | Replaced improvised glyphs/CSS drawing with Lucide `Search` | Component tests find `.lucide-search`; browser visual inspection | 97 | Passing |
 
 Pass-2 regression coverage: `test/e2e/public-embed-regressions.spec.ts` plus focused component tests in `test/ui/public-program.test.tsx`.
+
+## Correction pass 3 — schedule clarity and speaker-surface distinction
+
+The personal schedule is retained because rubric criteria EMB-10 and EMB-11 require exact add/remove membership, reload persistence, and combined calendar export. The core build plan only names a minimal public schedule, and the available Sessionboard reference pack does not establish this as a Sessionboard-parity requirement.
+
+| Component | Before | Correction | Verified result |
+|---|---|---|---|
+| Sessions List | Bookmark control repeated on every row | Removed row bookmarks; Session Details owns the labeled add/remove action | 0 `.atlas-save` controls; controlled callback coverage passes |
+| My Schedule | No functional view; Itinerary button only scrolled to its already-visible rail | Added `My schedule (n)` inspector with exact selected membership, removal, session-detail opening, and combined ICS export | Component test proves exact `ses-1` membership and export URL; 390px inspector occupies the full viewport |
+| Schedule Itinerary | Redundant `View my itinerary` action appeared inert | Removed the action; the existing saved-session rail remains the itinerary view | 0 matching buttons; card intersection regression remains 0 |
+| Speakers List | Two-column 96px portrait cards visually converged with Gallery | Converted to alphabetized single-column 52px directory rows with compact identity/session metadata | First row 52px portrait and 106.8px height at 1536px; full-height 480px desktop inspector |
+| Speaker Gallery | Portrait-first grid lacked enough selected-state contrast | Kept the 120px four-column portrait system and added a pale-blue selected tile/inspector band | Gallery portraits measure 120px and remain visually distinct from directory rows |
+| Color hierarchy | Predominantly undifferentiated white surfaces | Added design-token Indigo, Steel Blue, and Schedule Blue to quiet headers, selected rows, focus, and primary schedule actions | Selected directory row computes to `rgb(232, 241, 251)` (`#E8F1FB`); white remains dominant |
+| Narrow speaker inspector | Stacked inspector inherited inner padding and measured only 334px wide | Centered a 100vw inspector within the narrow layout | Playwright verifies x ≤ 1 and width ≥ 389 at 390×844 |
+
+### Pass-3 verification
+
+- Focused component suites: 23/23 across public program, Speakers List fixture, and Agenda functionality.
+- Browser regressions: 4/4, covering itinerary intersections, desktop inspector height, list/gallery density, and narrow inspector width.
+- `npm run typecheck`: pass, including Wrangler bindings freshness.
+- `npm run build`: pass; only the existing large-chunk advisory remains.
+- Visual evidence: `.scratch/qa/embed-schedule-speaker-distinction/` (local QA captures).
+- Repository-wide `npm test`: UI reached 163/167 and stopped on four pre-existing organizer-app assertions in `test/ui/app.test.tsx` (empty-event onboarding copy, speaker-announcement missing-address copy, duplicate `Submissions` headings, and proposals sort URL). This pass changes only public embed renderer/styles/tests; the scoped suites above are green. Because the UI command failed, the aggregate script did not proceed to worker or broad E2E stages.

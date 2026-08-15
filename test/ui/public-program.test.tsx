@@ -156,7 +156,9 @@ describe("PublicProgramRenderer", () => {
         onItinerarySessionIdsChange={onItinerarySessionIdsChange}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "Save Opening Keynote to itinerary" }));
+    expect(screen.queryByRole("button", { name: "Save Opening Keynote to itinerary" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open Opening Keynote session details" }));
+    await user.click(screen.getByRole("button", { name: "Add Opening Keynote to my schedule" }));
     expect(onItinerarySessionIdsChange).toHaveBeenLastCalledWith(["ses-1"]);
 
     rerender(
@@ -220,10 +222,20 @@ describe("PublicProgramRenderer", () => {
     render(<PublicProgramRenderer data={programResponse()} mode="embed" widget="speakers" />);
 
     const layout = screen.getByTestId("speaker-list-layout");
+    expect(layout).toHaveAttribute("data-discovery-mode", "directory");
     expect(layout).toContainElement(screen.getByRole("complementary", { name: "Speaker profile: Ada Lovelace" }));
     expect(layout.querySelector(".program-speaker-directory")).toBeInTheDocument();
+    expect(layout.querySelector(".program-speaker-gallery-card")).not.toBeInTheDocument();
+    expect(within(layout).queryByText(/View profile/)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Grace Hopper/i }));
     expect(screen.getByRole("complementary", { name: "Speaker profile: Grace Hopper" })).toBeVisible();
+
+    cleanup();
+    render(<PublicProgramRenderer data={programResponse()} mode="embed" widget="speaker-gallery" />);
+    const gallery = screen.getByTestId("speaker-gallery-layout");
+    expect(gallery).toHaveAttribute("data-discovery-mode", "gallery");
+    expect(gallery.querySelector(".program-speaker-gallery-card")).toBeInTheDocument();
+    expect(gallery.querySelector(".program-speaker-list-entry")).not.toBeInTheDocument();
   });
 
   it("opens session details from sessions and itinerary without conflating save controls", async () => {
@@ -232,14 +244,47 @@ describe("PublicProgramRenderer", () => {
 
     expect(screen.queryByRole("button", { name: "View session" })).not.toBeInTheDocument();
     expect(screen.queryByText("›")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Save .* itinerary/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Open Opening Keynote session details" }));
     expect(screen.getByRole("complementary", { name: "Session details: Opening Keynote" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add Opening Keynote to my schedule" })).toBeVisible();
     expect(screen.queryByText("□")).not.toBeInTheDocument();
 
     rerender(<PublicProgramRenderer data={programResponse()} mode="embed" widget="itinerary" />);
     expect(screen.queryByText("ChartStead", { selector: ".itinerary-brand *" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /View my itinerary/i })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "View Opening Keynote details" }));
     expect(screen.getByRole("complementary", { name: "Session details: Opening Keynote" })).toBeVisible();
+  });
+
+  it("opens My Schedule with exact membership and a combined calendar export", async () => {
+    const user = userEvent.setup();
+    const onItinerarySessionIdsChange = vi.fn();
+    render(
+      <PublicProgramRenderer
+        data={programResponse()}
+        mode="embed"
+        widget="sessions"
+        itinerarySessionIds={["ses-1"]}
+        onItinerarySessionIdsChange={onItinerarySessionIdsChange}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: "My schedule, 1 saved session" });
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await user.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+
+    const schedule = screen.getByRole("complementary", { name: "My schedule" });
+    expect(within(schedule).getByRole("button", { name: "Open Opening Keynote details" })).toBeVisible();
+    expect(within(schedule).queryByText("Community Circle")).not.toBeInTheDocument();
+    expect(within(schedule).getByRole("link", { name: "Export my schedule" })).toHaveAttribute(
+      "href",
+      expect.stringContaining("/api/events/pacific-open-data-summit-2026/program/calendar.ics?sessionIds=ses-1"),
+    );
+
+    await user.click(within(schedule).getByRole("button", { name: "Remove Opening Keynote from my schedule" }));
+    expect(onItinerarySessionIdsChange).toHaveBeenLastCalledWith([]);
   });
 
   it("uses the shared icon library for public embed search controls", () => {

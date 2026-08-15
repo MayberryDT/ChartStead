@@ -34,4 +34,32 @@ test.describe("public embed regression geometry", () => {
     expect(box!.y).toBeLessThanOrEqual(1);
     expect(box!.height).toBeGreaterThanOrEqual(970);
   });
+
+  test("speaker directory is materially denser than the portrait gallery", async ({ page }) => {
+    await page.setViewportSize({ width: 1536, height: 1024 });
+    await page.goto("/fixtures/embeds/speakers-list");
+    const directoryAvatar = await page.locator(".program-speaker-list-entry .program-speaker-avatar").first().boundingBox();
+    const directoryRow = await page.locator(".program-speaker-list-entry").first().boundingBox();
+
+    await page.goto("/e/pacific-open-data-summit-2026/program/embed?widget=speaker-gallery&fixture=signal-rail");
+    const galleryAvatar = await page.locator(".signal-gallery-grid .program-speaker-avatar").first().boundingBox();
+    const galleryCard = await page.locator(".signal-gallery-grid .program-speaker-gallery-card").first().boundingBox();
+
+    expect(directoryAvatar).not.toBeNull();
+    expect(directoryRow).not.toBeNull();
+    expect(galleryAvatar).not.toBeNull();
+    expect(galleryCard).not.toBeNull();
+    expect(directoryAvatar!.width).toBeLessThanOrEqual(60);
+    expect(galleryAvatar!.width).toBeGreaterThanOrEqual(110);
+    expect(directoryRow!.height).toBeLessThan(galleryCard!.height * 0.65);
+  });
+
+  test("speakers list inspector uses the full narrow viewport like the gallery", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/fixtures/embeds/speakers-list");
+    const inspector = await page.getByRole("complementary", { name: /Speaker profile:/ }).boundingBox();
+    expect(inspector).not.toBeNull();
+    expect(inspector!.x).toBeLessThanOrEqual(1);
+    expect(inspector!.width).toBeGreaterThanOrEqual(389);
+  });
 });

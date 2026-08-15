@@ -19,7 +19,7 @@ import {
   filterPublicSpeakers,
   groupPublicSessionsByDay,
 } from "../shared/public-program";
-import { publicProgramCalendarUrl } from "./api";
+import { publicProgramCalendarExportUrl, publicProgramCalendarUrl } from "./api";
 import { AppSelect } from "./AppSelect";
 
 function formatClock(iso: string | null): string {
@@ -242,6 +242,7 @@ export function PublicProgramRenderer({
     () => new Set(),
   );
   const [internalSelectedSpeakerId, setInternalSelectedSpeakerId] = useState<string | null>(null);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const [internalItinerarySessionIds, setInternalItinerarySessionIds] = useState<Set<string>>(
     () => new Set(initialItinerarySessionIds),
   );
@@ -257,6 +258,7 @@ export function PublicProgramRenderer({
     : internalItinerarySessionIds;
 
   const selectSession = (sessionId: string | null) => {
+    if (sessionId) setScheduleOpen(false);
     if (onSelectSession) onSelectSession(sessionId);
     else setInternalSelected(sessionId);
   };
@@ -437,6 +439,7 @@ export function PublicProgramRenderer({
           {data.revision.isCurrent ? " (current)" : " (archived)"}
         </>}</p>
         {currentWidget === "sessions" ? <span className="sessions-total">{data.sessions.length} sessions</span> : null}
+        {currentWidget === "sessions" ? <Button type="button" className="sessions-my-schedule" aria-label={`My schedule, ${itinerarySessionIds.size} saved ${countNoun(itinerarySessionIds.size, "session", "sessions")}`} aria-expanded={scheduleOpen} onClick={() => { selectSession(null); setScheduleOpen((open) => !open); }}>My schedule <span>{itinerarySessionIds.size}</span></Button> : null}
       </header>
 
       {currentWidget === "speakers" ? (
@@ -526,12 +529,10 @@ export function PublicProgramRenderer({
             selectedId={selectedId}
             expandedSessionIds={expandedSessionIds}
             fields={fields}
-            itinerarySessionIds={itinerarySessionIds}
-            onItinerarySessionIdsChange={changeItinerary}
             onSelectSession={selectSession}
             onToggleDescription={toggleDescription}
           />
-          {selected ? <SessionInspector session={selected} data={data} fields={fields} onClose={() => selectSession(null)} /> : null}
+          {scheduleOpen ? <MyScheduleInspector sessions={data.sessions.filter((session) => itinerarySessionIds.has(session.id))} data={data} itineraryPending={itineraryPending} onClose={() => setScheduleOpen(false)} onRemove={(sessionId) => { const next = new Set(itinerarySessionIds); next.delete(sessionId); changeItinerary(next); }} onSelectSession={(sessionId) => { setScheduleOpen(false); selectSession(sessionId); }} /> : selected ? <SessionInspector session={selected} data={data} fields={fields} saved={itinerarySessionIds.has(selected.id)} itineraryPending={itineraryPending} onToggleSaved={() => { const next = new Set(itinerarySessionIds); if (next.has(selected.id)) next.delete(selected.id); else next.add(selected.id); changeItinerary(next); }} onClose={() => selectSession(null)} /> : null}
         </div>
       ) : currentWidget === "speakers" ? (
         <SpeakerListView
@@ -648,9 +649,9 @@ function SignalRailGallery({ data, mode, theme, fields, filters, speakers, selec
 }) {
   const active = selectedSpeaker ?? speakers[0] ?? null;
   const linked = active ? data.sessions.filter((session) => active.sessionIds.includes(session.id)) : [];
-  return <div className={`program-renderer signal-rail-gallery mode-${mode} widget-speaker-gallery theme-${theme}`} style={{ ["--program-accent" as string]: data.event.themeAccent }} data-testid="public-program-renderer">
+  return <div className={`program-renderer signal-rail-gallery mode-${mode} widget-speaker-gallery theme-${theme}`} style={{ ["--program-accent" as string]: data.event.themeAccent }} data-testid="public-program-renderer" data-discovery-mode="gallery">
     <main className="signal-gallery-main">
-      <section className="signal-gallery-index" aria-labelledby="program-title">
+      <section className="signal-gallery-index" aria-labelledby="program-title" data-testid="speaker-gallery-layout" data-discovery-mode="gallery">
         <header className="signal-gallery-heading">
           <p>{data.event.name}</p>
           <h1 id="program-title">Speaker Gallery</h1>
@@ -679,10 +680,13 @@ function BookmarkIcon({ filled = false }: { filled?: boolean }) {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6.5 3.5h11v17l-5.5-3.7-5.5 3.7z" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.7" /></svg>;
 }
 
-function SessionInspector({ session, data, fields, onClose }: {
+function SessionInspector({ session, data, fields, saved, itineraryPending = false, onToggleSaved, onClose }: {
   session: PublicProgramSession;
   data: PublicProgramResponse;
   fields: PublicEmbedFieldVisibility;
+  saved?: boolean;
+  itineraryPending?: boolean;
+  onToggleSaved?: () => void;
   onClose: () => void;
 }) {
   return <aside className="public-session-inspector t-panel-slide" data-open="true" role="complementary" aria-label={`Session details: ${session.title}`}>
@@ -696,7 +700,27 @@ function SessionInspector({ session, data, fields, onClose }: {
     </dl>
     {fields.description && session.description ? <p>{session.description}</p> : null}
     {fields.speakers && session.speakers.length ? <section><h3>Speakers</h3><p>{session.speakers.map((speaker) => speaker.name).join(", ")}</p></section> : null}
+    {onToggleSaved ? <Button type="button" className="session-schedule-action" disabled={itineraryPending} aria-pressed={saved} aria-label={`${saved ? "Remove" : "Add"} ${session.title} ${saved ? "from" : "to"} my schedule`} onClick={onToggleSaved}>{saved ? "Remove from my schedule" : "Add to my schedule"}</Button> : null}
     <AddToCalendarMenu eventId={data.event.id} session={session} revisionId={data.revision.isCurrent ? undefined : data.revision.id} />
+  </aside>;
+}
+
+function MyScheduleInspector({ sessions, data, itineraryPending, onClose, onRemove, onSelectSession }: {
+  sessions: PublicProgramSession[];
+  data: PublicProgramResponse;
+  itineraryPending: boolean;
+  onClose: () => void;
+  onRemove: (sessionId: string) => void;
+  onSelectSession: (sessionId: string) => void;
+}) {
+  return <aside className="public-session-inspector my-schedule-inspector t-panel-slide" data-open="true" role="complementary" aria-label="My schedule">
+    <header><p>My schedule</p><Button type="button" aria-label="Close my schedule" onClick={onClose}>×</Button></header>
+    <div className="my-schedule-heading"><h2>Your sessions</h2><span>{sessions.length} saved</span></div>
+    {sessions.length ? <ul className="my-schedule-list">{sessions.map((session) => <li key={session.id}>
+      <Button type="button" className="my-schedule-open" aria-label={`Open ${session.title} details`} onClick={() => onSelectSession(session.id)}><strong>{session.title}</strong><span>{dateTimeLabel(session)} · {roomLabel(session)}</span></Button>
+      <Button type="button" className="my-schedule-remove" disabled={itineraryPending} aria-label={`Remove ${session.title} from my schedule`} onClick={() => onRemove(session.id)}>Remove</Button>
+    </li>)}</ul> : <p className="my-schedule-empty">Add sessions from Session Details to build your schedule.</p>}
+    {sessions.length ? <a className="my-schedule-export" href={publicProgramCalendarExportUrl(data.event.id, sessions.map((session) => session.id), data.revision.id)}>Export my schedule</a> : null}
   </aside>;
 }
 
@@ -723,7 +747,6 @@ function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, 
     const next = new Set(savedIds);
     if (next.has(sessionId)) next.delete(sessionId); else next.add(sessionId);
     onItinerarySessionIdsChange(next);
-    onSelectSession(selectedId === sessionId ? null : sessionId);
   };
   const savedSessions = data.sessions.filter((session) => savedIds.has(session.id));
   const selected = data.sessions.find((session) => session.id === selectedId) ?? null;
@@ -743,7 +766,6 @@ function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, 
           <small>{session.trackName} · {session.startsAt && session.endsAt ? `${(new Date(session.endsAt).getTime() - new Date(session.startsAt).getTime()) / 60000} min` : "TBD"}</small>
         </article>) : <p className="itinerary-none">Save sessions to build your personal schedule.</p>}
       </section>
-      <Button className="itinerary-view" type="button" disabled={!savedSessions.length} onClick={() => document.querySelector(".itinerary-saved")?.scrollIntoView({ behavior: "smooth", block: "start" })}>View my itinerary <span>→</span></Button>
       <section className="itinerary-legend"><h2>Tracks</h2>{data.event.tracks.map((track) => <span key={track.id} className={trackClass(track.id)}><i />{track.name}</span>)}</section>
     </aside>
     <main className="itinerary-main">
@@ -767,7 +789,7 @@ function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, 
       {pending.length ? <section className="itinerary-pending" aria-label="Time or location pending"><h2>To be scheduled</h2>{pending.map((session) => <span key={session.id}>{session.title} · {roomLabel(session)}</span>)}</section> : null}
       {itineraryError ? <p className="itinerary-error" role="alert">{itineraryError}</p> : null}
     </main>
-    {selected ? <SessionInspector session={selected} data={data} fields={DEFAULT_PUBLIC_EMBED_FIELDS} onClose={() => onSelectSession(null)} /> : null}
+    {selected ? <SessionInspector session={selected} data={data} fields={DEFAULT_PUBLIC_EMBED_FIELDS} saved={savedIds.has(selected.id)} itineraryPending={itineraryPending} onToggleSaved={() => toggleSaved(selected.id)} onClose={() => onSelectSession(null)} /> : null}
     <footer className="itinerary-footer">Powered by <strong>ChartStead</strong></footer>
   </div>;
 }
@@ -888,8 +910,6 @@ function SessionListView({
   selectedId,
   expandedSessionIds,
   fields,
-  itinerarySessionIds = new Set<string>(),
-  onItinerarySessionIdsChange,
   onSelectSession,
   onToggleDescription,
 }: {
@@ -898,8 +918,6 @@ function SessionListView({
   selectedId: string | null;
   expandedSessionIds: Set<string>;
   fields: PublicEmbedFieldVisibility;
-  itinerarySessionIds?: Set<string>;
-  onItinerarySessionIdsChange?: (sessionIds: Set<string>) => void;
   onSelectSession: (sessionId: string | null) => void;
   onToggleDescription: (sessionId: string) => void;
 }) {
@@ -912,7 +930,7 @@ function SessionListView({
         <ul className="program-session-list">
           {sessions.map((session) => (
             <li key={session.id}>
-              {atlas ? <AtlasSessionRow session={session} fields={fields} selected={selectedId === session.id} saved={itinerarySessionIds.has(session.id)} onToggleSaved={() => { const next = new Set(itinerarySessionIds); if (next.has(session.id)) next.delete(session.id); else next.add(session.id); onItinerarySessionIdsChange?.(next); }} onSelect={() => onSelectSession(selectedId === session.id ? null : session.id)} /> : <SessionCard
+              {atlas ? <AtlasSessionRow session={session} fields={fields} selected={selectedId === session.id} onSelect={() => onSelectSession(selectedId === session.id ? null : session.id)} /> : <SessionCard
                 session={session}
                 selected={selectedId === session.id}
                 expanded={expandedSessionIds.has(session.id)}
@@ -928,12 +946,10 @@ function SessionListView({
   );
 }
 
-function AtlasSessionRow({ session, fields, selected, saved, onToggleSaved, onSelect }: {
+function AtlasSessionRow({ session, fields, selected, onSelect }: {
   session: PublicProgramSession;
   fields: PublicEmbedFieldVisibility;
   selected: boolean;
-  saved: boolean;
-  onToggleSaved: () => void;
   onSelect: () => void;
 }) {
   const speakers = session.speakers;
@@ -960,7 +976,6 @@ function AtlasSessionRow({ session, fields, selected, saved, onToggleSaved, onSe
         {fields.dateTime ? <span>{session.day ? `${dayLabel(session.day).replace(/^\w+,?\s*/, "")}, ${timeLabel(session)}` : "Time TBD"}</span> : null}
         {fields.room ? <span><b aria-hidden="true">⌖</b>{roomLabel(session)}</span> : null}
       </div>
-      <Button type="button" className="atlas-save" aria-label={`${saved ? "Remove" : "Save"} ${session.title} ${saved ? "from" : "to"} itinerary`} aria-pressed={saved} onClick={onToggleSaved}><BookmarkIcon filled={saved} /></Button>
       <span className="sessions-visually-hidden">{sessionDuration(session)}</span>
     </article>
   );
@@ -1301,7 +1316,7 @@ function SpeakerListView({
   const showDirectory = variant !== "gallery";
   const showGallery = variant !== "directory";
   return (
-    <section className={`program-speakers${variant === "directory" ? " is-directory" : ""}`} aria-labelledby="program-speakers-title" data-testid={variant === "directory" ? "speaker-list-layout" : undefined}>
+    <section className={`program-speakers${variant === "directory" ? " is-directory" : ""}`} aria-labelledby="program-speakers-title" data-testid={variant === "directory" ? "speaker-list-layout" : undefined} data-discovery-mode={variant === "directory" ? "directory" : undefined}>
       <div className="program-speakers-header">
         <div>
           <h2 id="program-speakers-title">{heading}</h2>
@@ -1323,6 +1338,7 @@ function SpeakerListView({
                       sessions={sessions.filter((session) => speaker.sessionIds.includes(session.id))}
                       selected={selectedSpeaker?.id === speaker.id}
                       fields={fields}
+                      compact={variant === "directory"}
                       onSelect={() => onSelectSpeaker(speaker.id)}
                     />
                   </li>
@@ -1369,12 +1385,14 @@ function SpeakerDirectoryButton({
   sessions,
   selected,
   fields,
+  compact = false,
   onSelect,
 }: {
   speaker: PublicProgramSpeaker;
   sessions: PublicProgramSession[];
   selected: boolean;
   fields: PublicEmbedFieldVisibility;
+  compact?: boolean;
   onSelect: () => void;
 }) {
   return (
@@ -1388,12 +1406,12 @@ function SpeakerDirectoryButton({
       <span className="program-speaker-list-copy">
         <span className="program-speaker-list-heading">
         <strong>{speaker.name}</strong>
-          <span>View profile&nbsp; ›</span>
+          {!compact ? <span>View profile&nbsp; ›</span> : null}
         </span>
         <span>{speaker.title || "Professional details pending"}</span>
         <b>{speaker.company || "Organization pending"}</b>
         {sessions.length > 0 ? <span className={`program-speaker-session-links ${trackClass(sessions[0]!.trackId)}`}>
-          {sessions.map((session, index) => <span key={session.id}>{index > 0 ? <i aria-hidden="true">•</i> : null}{session.title}</span>)}
+          {compact ? <span>{sessions[0]!.title}{sessions.length > 1 ? ` +${sessions.length - 1} more` : ""}</span> : sessions.map((session, index) => <span key={session.id}>{index > 0 ? <i aria-hidden="true">•</i> : null}{session.title}</span>)}
         </span> : null}
       </span>
     </button>

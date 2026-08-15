@@ -10166,19 +10166,14 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
 .speaker-directory-filters .app-select-trigger { width: 100%; min-height: 44px; background: #fff; }
 .widget-sessions .program-filters > .app-select { padding: 12px 14px; border: 1px solid #d9e0e9; border-radius: 5px; }
 .atlas-session-row { grid-template-columns: 210px 470px 300px minmax(230px, 1fr) 58px; }
-.atlas-save { align-self: center; width: 42px; height: 42px; display: grid; place-items: center; padding: 9px; border: 1px solid #c9d5e3; border-radius: 4px; background: #fff; color: #0758b6; }
-.atlas-save svg { width: 20px; height: 20px; }
-.atlas-save[aria-pressed="true"] { background: #eaf3fd; border-color: #0758b6; }
 
 @media (max-width: 1050px) {
   .atlas-session-row { grid-template-columns: 180px 1fr 180px 58px; }
-  .atlas-save { grid-column: 4; grid-row: 1; }
 }
 
 @media (max-width: 700px) {
   .atlas-session-row { height: auto; grid-template-columns: 1fr auto; }
   .atlas-track, .atlas-summary, .atlas-kind-speakers, .atlas-logistics { grid-column: 1 / -1; }
-  .atlas-save { grid-column: 2; grid-row: auto; margin-right: 16px; }
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -10329,8 +10324,7 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
   background: transparent;
   cursor: pointer;
 }
-.atlas-session-row > :not(.atlas-row-open):not(.atlas-save) { position: relative; z-index: 2; pointer-events: none; }
-.atlas-session-row .atlas-save { position: relative; z-index: 3; pointer-events: auto; }
+.atlas-session-row > :not(.atlas-row-open) { position: relative; z-index: 2; pointer-events: none; }
 .atlas-row-open:focus-visible { outline: 3px solid #2f5d98; outline-offset: -3px; }
 .atlas-session-row:hover { background: #f8fafc; }
 
@@ -10370,4 +10364,156 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
 @media (prefers-reduced-motion: reduce) {
   .public-session-inspector,
   .program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-detail { transition: none !important; }
+}
+
+/* Public schedule and speaker-discovery distinction. */
+.widget-sessions .program-header { padding-right: 250px; }
+.widget-sessions .sessions-total { top: 13px; right: 142px; }
+.sessions-my-schedule {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border: 1px solid #2f5d98;
+  border-radius: 5px;
+  background: #e8f1fb;
+  color: #081d3a;
+  font-weight: 700;
+}
+.sessions-my-schedule span {
+  min-width: 24px;
+  min-height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #2f5d98;
+  color: #fff;
+  font-size: 12px;
+}
+
+.atlas-session-row { grid-template-columns: 210px 470px 300px minmax(230px, 1fr); }
+.atlas-session-row > :not(.atlas-row-open) { position: relative; z-index: 2; pointer-events: none; }
+
+.public-session-inspector header {
+  margin: -28px -28px 0;
+  padding: 16px 22px;
+  border-bottom: 1px solid #c9d9ea;
+  background: #e8f1fb;
+}
+.session-schedule-action,
+.my-schedule-export {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 18px;
+  border: 1px solid #2f5d98;
+  border-radius: 5px;
+  background: #2f5d98;
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+}
+.session-schedule-action[aria-pressed="true"] { background: #fff; color: #2f5d98; }
+.session-schedule-action:disabled { opacity: .6; cursor: wait; }
+.my-schedule-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.my-schedule-heading h2 { margin: 0; }
+.my-schedule-heading span { color: #2f5d98; font-size: 13px; font-weight: 700; }
+.my-schedule-list { display: grid; gap: 0; margin: 0; padding: 0; border-block: 1px solid #d7dee7; list-style: none; }
+.my-schedule-list li { position: relative; display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 12px 0; }
+.my-schedule-list li + li { border-top: 1px solid #e5eaf0; }
+.my-schedule-open { min-width: 0; display: grid; gap: 5px; padding: 0; border: 0; background: transparent; color: #081d3a; text-align: left; }
+.my-schedule-open strong { font-size: 15px; }
+.my-schedule-open span { overflow: hidden; color: #526071; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.my-schedule-remove { min-height: 40px; padding: 0 10px; border: 0; background: transparent; color: #2f5d98; font-weight: 700; }
+.my-schedule-empty { margin: 0; padding: 22px; background: #f5f9fe; color: #526071; line-height: 1.5; }
+
+.program-renderer.widget-speakers .program-header {
+  margin: -26px -28px 0;
+  padding: 24px 28px 20px;
+  border-bottom: 1px solid #d6e2ef;
+  background: #f5f9fe;
+}
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory {
+  grid-template-columns: 1fr;
+  margin-inline: 0;
+  border-inline: 0;
+  border-radius: 0;
+}
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory > li,
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory > li:nth-child(2n),
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory > li:nth-last-child(-n + 2) {
+  border-right: 0;
+  border-bottom: 1px solid #d7dee7;
+}
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-list-entry {
+  grid-template-columns: 60px minmax(0, 1fr);
+  gap: 16px;
+  min-height: 104px;
+  padding: 12px 16px;
+  align-items: center;
+}
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-list-entry .program-speaker-avatar { width: 52px; height: 52px; }
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-list-copy { gap: 2px; }
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-session-links {
+  display: block;
+  overflow: hidden;
+  margin-top: 4px;
+  padding-left: 12px;
+  border-left: 3px solid #2f5d98;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-session-links::before { display: none; }
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-list-entry:hover { background: #f5f9fe; }
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-list-entry[aria-pressed="true"] {
+  box-shadow: inset 4px 0 #2f5d98;
+  background: #e8f1fb;
+}
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-detail-header {
+  margin: -30px -28px 4px;
+  padding: 24px 28px;
+  border-bottom: 1px solid #c9d9ea;
+  background: #e8f1fb;
+}
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-detail { align-content: start; }
+
+.signal-gallery-heading { padding-left: 16px; border-left: 4px solid #2f5d98; }
+.signal-gallery-grid .program-speaker-gallery-card[aria-pressed="true"] { border-color: #2f5d98; background: #e8f1fb; }
+.signal-selected-label {
+  margin: -31px -31px 18px -23px;
+  padding: 18px 23px;
+  border-bottom: 1px solid #c9d9ea;
+  background: #e8f1fb;
+  color: #081d3a;
+  font-weight: 700;
+}
+
+@media (max-width: 1050px) {
+  .atlas-session-row { grid-template-columns: 180px 1fr 230px; }
+  .program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory { grid-template-columns: 1fr; }
+}
+@media (max-width: 700px) {
+  .widget-sessions .program-header { padding-right: 0; }
+  .widget-sessions .sessions-total { position: static; display: block; margin-top: 8px; }
+  .sessions-my-schedule { position: static; margin-top: 12px; }
+  .atlas-session-row { grid-template-columns: 1fr; }
+  .public-session-inspector header { margin: -22px -18px 0; }
+  .signal-selected-label { margin: -24px -16px 18px; padding-inline: 16px; }
+}
+@media (max-width: 760px) {
+  .program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-detail {
+    position: relative;
+    left: 50%;
+    width: 100vw;
+    max-width: 100vw;
+    margin: 16px 0 0 -50vw;
+    border-inline: 0;
+    border-radius: 0;
+  }
 }
