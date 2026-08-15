@@ -442,11 +442,6 @@ export function PublicProgramRenderer({
         </>}</p>
       </header>
 
-      {currentWidget === "sessions" ? <div className="sessions-meta-toolbar">
-        <span className="sessions-total">{data.sessions.length} sessions</span>
-        <Button type="button" className="sessions-my-schedule" aria-label={`My schedule, ${itinerarySessionIds.size} saved ${countNoun(itinerarySessionIds.size, "session", "sessions")}`} aria-expanded={scheduleOpen} onClick={() => { selectSession(null); setScheduleOpen((open) => !open); }}><Bookmark aria-hidden="true" />My schedule <span>{itinerarySessionIds.size}</span></Button>
-      </div> : null}
-
       {currentWidget === "speakers" ? (
         <section className="speaker-directory-filters" aria-label="Speaker filters">
           <label className="speaker-directory-search">
@@ -491,6 +486,7 @@ export function PublicProgramRenderer({
         /> : <AppSelect label="Format" value={filters.format ?? ""} options={[{ value: "", label: "All formats" }, ...formats.map((format) => ({ value: format, label: format }))]} onValueChange={(value) => setFilters((current) => ({ ...current, format: value || undefined }))} />}
         {currentWidget !== "sessions" ? <AppSelect label="Speaker" value={filters.speakerId ?? ""} options={[{ value: "", label: "All speakers" }, ...data.speakers.map((speaker) => ({ value: speaker.id, label: speaker.name }))]} onValueChange={(value) => setFilters((current) => ({ ...current, speakerId: value || undefined }))} /> : null}
         {currentWidget === "sessions" ? <Button type="button" className="sessions-clear" onClick={() => setFilters(() => ({}))}>Clear filters</Button> : null}
+        {currentWidget === "sessions" ? <Button type="button" className="sessions-my-schedule" aria-label={`My schedule, ${itinerarySessionIds.size} saved ${countNoun(itinerarySessionIds.size, "session", "sessions")}`} aria-expanded={scheduleOpen} onClick={() => { selectSession(null); setScheduleOpen((open) => !open); }}><Bookmark aria-hidden="true" />My schedule <span>{itinerarySessionIds.size}</span></Button> : null}
       </section>}
 
       {currentWidget !== "speakers" ? <p className={`program-counts${currentWidget === "sessions" ? " sessions-result-count" : ""}`} role="status" aria-live="polite" data-testid="program-result-count">
@@ -1370,7 +1366,7 @@ function SpeakerListView({
                       sessions={sessions.filter((session) => speaker.sessionIds.includes(session.id))}
                       selected={selectedSpeaker?.id === speaker.id}
                       fields={fields}
-                      compact={variant === "directory"}
+                      compact={false}
                       onSelect={() => onSelectSpeaker(speaker.id)}
                     />
                   </li>

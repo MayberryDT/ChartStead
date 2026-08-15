@@ -224,7 +224,7 @@ describe("PublicProgramRenderer", () => {
     expect(layout).toContainElement(screen.getByRole("complementary", { name: "Speaker profile: Ada Lovelace" }));
     expect(layout.querySelector(".program-speaker-directory")).toBeInTheDocument();
     expect(layout.querySelector(".program-speaker-gallery-card")).not.toBeInTheDocument();
-    expect(within(layout).queryByText(/View profile/)).not.toBeInTheDocument();
+    expect(within(layout).getAllByText(/View profile/)).toHaveLength(2);
     await user.click(within(layout).getByRole("button", { name: "Close speaker profile" }));
     expect(within(layout).queryByRole("complementary", { name: /Speaker profile:/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Grace Hopper/i }));
@@ -293,6 +293,9 @@ describe("PublicProgramRenderer", () => {
     );
 
     const trigger = screen.getByRole("button", { name: "My schedule, 1 saved session" });
+    expect(document.querySelector(".sessions-meta-toolbar")).not.toBeInTheDocument();
+    expect(document.querySelector(".program-filters")).toContainElement(trigger);
+    expect(screen.queryByText("2 sessions", { selector: ".sessions-total" })).not.toBeInTheDocument();
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     await user.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "true");

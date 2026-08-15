@@ -13,7 +13,7 @@ Keep ChartStead's rubric-required personal schedule with one minimal row-level b
 
 The personal schedule remains a real public feature because rubric criteria EMB-10 and EMB-11 require logged-out attendees to add and remove sessions, see exactly their selections after reload, and export those selections. Persistence remains browser-local, event/revision-scoped, mirrored in TanStack Router search, and owned by the existing TanStack Query mutation boundary.
 
-Sessions List shows one minimal Base UI/Lucide bookmark on every row. Clicking anywhere else on a row opens Session Details. Both controls update the same TanStack Query/Router-backed schedule state. A compact toolbar beneath the event heading keeps the session count and `My schedule (n)` visible even while an inspector is open. The inspector contains exact saved membership and a combined ICS export.
+Sessions List shows one minimal Base UI/Lucide bookmark on every row. Clicking anywhere else on a row opens Session Details. Both controls update the same TanStack Query/Router-backed schedule state. There is no separate session-count strip: the compact `My schedule (n)` action lives directly in the search/filter row and remains visible while an inspector is open. The inspector contains exact saved membership and a combined ICS export.
 
 The desktop Sessions List reserves the inspector width immediately; the inspector never overlays rows, filters, or the count/schedule toolbar. At narrow widths the inspector becomes a full-viewport surface. Session Details reuses existing local speaker portraits and renders speaker identity metadata.
 
@@ -23,10 +23,10 @@ The Schedule Itinerary keeps its visible saved-session rail. Its redundant `View
 
 Both speaker surfaces retain the persistent full-height desktop inspector and stacked narrow behavior. Their discovery panes become deliberately different:
 
-- **Speakers List:** information-first, alphabetized, compact two-column cards with 76px portraits, name, title, organization, and a linked-session summary. It optimizes scanning and comparison without turning into the Gallery.
+- **Speakers List:** the original information-first, alphabetized three-column card grid with 96px portraits, name, title, organization, `View profile`, and linked-session summaries. Portraits use restrained rounded rectangles rather than circular masks.
 - **Speaker Gallery:** portrait-first, multi-column tiles, 120px portraits, minimal identity metadata, and visual browsing. It optimizes discovery.
 
-The List retains compact bordered cards and materially smaller portraits than the Gallery. The Gallery keeps its larger portrait-first tiles. Both use persistent side inspectors at desktop.
+The List retains its original connected card grid and materially smaller portraits than the Gallery. The Gallery keeps its larger portrait-first tiles. Both use persistent side inspectors at desktop. The Gallery inspector uses limited Steel Blue structure and a rounded-rectangle hero portrait; the Gallery tiles themselves remain unchanged.
 
 ### Color and hierarchy
 

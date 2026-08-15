@@ -40,17 +40,23 @@ test.describe("public embed regression geometry", () => {
     await page.goto("/fixtures/embeds/speakers-list");
     const directoryAvatar = await page.locator(".program-speaker-list-entry .program-speaker-avatar").first().boundingBox();
     const directoryRow = await page.locator(".program-speaker-list-entry").first().boundingBox();
+    const directoryColumns = await page.locator(".program-speaker-directory").evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(" ").length);
+    const directoryRadius = await page.locator(".program-speaker-list-entry .program-speaker-avatar").first().evaluate((node) => Number.parseFloat(getComputedStyle(node).borderRadius));
 
     await page.goto("/e/pacific-open-data-summit-2026/program/embed?widget=speaker-gallery&fixture=signal-rail");
     const galleryAvatar = await page.locator(".signal-gallery-grid .program-speaker-avatar").first().boundingBox();
     const galleryCard = await page.locator(".signal-gallery-grid .program-speaker-gallery-card").first().boundingBox();
+    const galleryInspectorRadius = await page.locator(".signal-speaker-intro .program-speaker-avatar").evaluate((node) => Number.parseFloat(getComputedStyle(node).borderRadius));
 
     expect(directoryAvatar).not.toBeNull();
     expect(directoryRow).not.toBeNull();
     expect(galleryAvatar).not.toBeNull();
     expect(galleryCard).not.toBeNull();
-    expect(directoryAvatar!.width).toBeGreaterThanOrEqual(68);
-    expect(directoryAvatar!.width).toBeLessThanOrEqual(84);
+    expect(directoryColumns).toBe(3);
+    expect(directoryAvatar!.width).toBeGreaterThanOrEqual(92);
+    expect(directoryAvatar!.width).toBeLessThanOrEqual(100);
+    expect(directoryRadius).toBeLessThanOrEqual(12);
+    expect(galleryInspectorRadius).toBeLessThanOrEqual(12);
     expect(galleryAvatar!.width).toBeGreaterThanOrEqual(110);
     expect(directoryRow!.height).toBeLessThan(galleryCard!.height * 0.8);
   });
@@ -65,8 +71,8 @@ test.describe("public embed regression geometry", () => {
     expect(inspector).not.toBeNull();
     expect(row).not.toBeNull();
     expect(row!.x + row!.width).toBeLessThanOrEqual(inspector!.x + 1);
-    await expect(page.getByText("10 sessions", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: /My schedule/ })).toBeVisible();
+    await expect(page.locator(".sessions-total")).toHaveCount(0);
+    await expect(page.locator(".program-filters").getByRole("button", { name: /My schedule/ })).toBeVisible();
   });
 
   test("speakers list inspector uses the full narrow viewport like the gallery", async ({ page }) => {
