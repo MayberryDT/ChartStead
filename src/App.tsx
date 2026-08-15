@@ -39,7 +39,10 @@ import {
   CfpBuilderWorkspace,
   type CfpBuilderChrome,
 } from "./CfpBuilderPage";
-import { EmbedManagerWorkspace } from "./EmbedManagerWorkspace";
+import {
+  EmbedManagerWorkspace,
+  type EmbedsChrome,
+} from "./EmbedManagerWorkspace";
 import { OrganizerShell, type NavItem } from "./OrganizerShell";
 import { OverviewWorkspace } from "./OverviewWorkspace";
 import "./styles.css";
@@ -194,6 +197,7 @@ function EventDesk({
   const [formsQueue, setFormsQueue] = useState<FormsQueueState>(defaultFormsQueue);
   const [formsSelection, setFormsSelection] = useState<FormsSelection | null>(null);
   const [speakerChrome, setSpeakerChrome] = useState<ReactNode | null>(null);
+  const [embedsChrome, setEmbedsChrome] = useState<EmbedsChrome | null>(null);
   const createForm = useMutation({
     mutationFn: ({ eventId, name }: { eventId: string; name: string }) =>
       createOrganizerForm(eventId, name),
@@ -327,6 +331,7 @@ function EventDesk({
     if (item !== "Settings") setSettingsChrome(null);
     if (item !== "Speakers") setSpeakerChrome(null);
     if (item !== "Forms") setCfpBuilderChrome(null);
+    if (item !== "Embeds") setEmbedsChrome(null);
     if (item === "Submissions") {
       void navigate({
         to: "/e/$eventId/submissions",
@@ -514,7 +519,8 @@ function EventDesk({
           activeNav === "Speakers" ||
           activeNav === "Forms" ||
           activeNav === "Messages" ||
-          activeNav === "Settings" ? null : (
+          activeNav === "Settings" ||
+          activeNav === "Embeds" ? null : (
             <div className="topbar-identity" title={topbarMeta}>
               <h1>{topbarTitle}</h1>
               <p className="topbar-meta">{topbarMeta}</p>
@@ -548,6 +554,8 @@ function EventDesk({
             speakerChrome
           ) : activeNav === "Settings" ? (
             <SettingsCommandBar chrome={settingsChrome} />
+          ) : activeNav === "Embeds" ? (
+            embedsChrome?.tools
           ) : null
         }
         actions={
@@ -606,6 +614,8 @@ function EventDesk({
             )
           ) : activeNav === "Agenda" ? (
             agendaChrome?.actions
+          ) : activeNav === "Embeds" ? (
+            embedsChrome?.actions
           ) : null
         }
       >
@@ -678,7 +688,7 @@ function EventDesk({
             onChromeChange={setMessagesChrome}
           />
         ) : activeNav === "Embeds" ? (
-          <EmbedManagerWorkspace event={event} />
+          <EmbedManagerWorkspace event={event} onChromeChange={setEmbedsChrome} />
         ) : activeNav === "Settings" ? (
           <SettingsWorkspace
             event={event}
