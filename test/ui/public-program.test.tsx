@@ -215,20 +215,17 @@ describe("PublicProgramRenderer", () => {
     expect(screen.getByRole("complementary", { name: "Selected speaker: Grace Hopper" })).toBe(inspector);
   });
 
-  it("keeps the speakers list distinct from the gallery with a persistent side inspector", async () => {
-    const user = userEvent.setup();
+  it("keeps the speakers list as a card-only directory without profile actions", () => {
     render(<PublicProgramRenderer data={programResponse()} mode="embed" widget="speakers" />);
 
     const layout = screen.getByTestId("speaker-list-layout");
     expect(layout).toHaveAttribute("data-discovery-mode", "directory");
-    expect(layout).toContainElement(screen.getByRole("complementary", { name: "Speaker profile: Ada Lovelace" }));
     expect(layout.querySelector(".program-speaker-directory")).toBeInTheDocument();
     expect(layout.querySelector(".program-speaker-gallery-card")).not.toBeInTheDocument();
-    expect(within(layout).getAllByText(/View profile/)).toHaveLength(2);
-    await user.click(within(layout).getByRole("button", { name: "Close speaker profile" }));
+    expect(within(layout).queryByText(/View profile/)).not.toBeInTheDocument();
     expect(within(layout).queryByRole("complementary", { name: /Speaker profile:/ })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /Grace Hopper/i }));
-    expect(screen.getByRole("complementary", { name: "Speaker profile: Grace Hopper" })).toBeVisible();
+    expect(within(layout).queryByRole("button", { name: /Ada Lovelace/i })).not.toBeInTheDocument();
+    expect(layout.querySelectorAll(".program-speaker-list-entry")).toHaveLength(2);
 
     cleanup();
     render(<PublicProgramRenderer data={programResponse()} mode="embed" widget="speaker-gallery" />);
@@ -255,17 +252,19 @@ describe("PublicProgramRenderer", () => {
     expect(screen.queryByRole("button", { name: /View my itinerary/i })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "View Opening Keynote details" }));
     expect(screen.getByRole("complementary", { name: "Session details: Opening Keynote" })).toBeVisible();
+    expect(screen.getByTestId("public-program-renderer")).toHaveClass("has-session-inspector");
   });
 
-  it("keeps agenda sessions free of the shared detail inspector", async () => {
+  it("opens agenda session details and reserves layout space", async () => {
     const user = userEvent.setup();
     render(<PublicProgramRenderer data={programResponse()} mode="embed" widget="agenda" />);
 
-    await user.click(screen.getByRole("button", { name: "Save Opening Keynote to itinerary" }));
-    expect(screen.queryByRole("complementary", { name: /Session details:/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open Opening Keynote session details" }));
+    expect(screen.getByRole("complementary", { name: "Session details: Opening Keynote" })).toBeVisible();
+    expect(screen.getByTestId("public-program-renderer")).toHaveClass("has-session-inspector");
   });
 
-  it("shows existing speaker portraits in session details", async () => {
+  it("shows existing speaker portraits in session rows and details", async () => {
     const user = userEvent.setup();
     const data = programResponse({
       speakers: programResponse().speakers.map((speaker) => speaker.id === "sp-1"
@@ -274,6 +273,8 @@ describe("PublicProgramRenderer", () => {
     });
     render(<PublicProgramRenderer data={data} mode="embed" widget="sessions" />);
 
+    expect(within(screen.getByTestId("public-session-card-ses-1"))
+      .getByRole("img", { name: "Portrait of Ada Lovelace" })).toHaveAttribute("src", "/demo/speakers/speaker-3.webp");
     await user.click(screen.getByRole("button", { name: "Open Opening Keynote session details" }));
     expect(within(screen.getByRole("complementary", { name: "Session details: Opening Keynote" }))
       .getByRole("img", { name: "Portrait of Ada Lovelace" })).toHaveAttribute("src", "/demo/speakers/speaker-3.webp");
@@ -321,6 +322,15 @@ describe("PublicProgramRenderer", () => {
 
     rerender(<PublicProgramRenderer data={programResponse()} mode="embed" widget="speaker-gallery" />);
     expect(document.querySelector(".signal-search .lucide-search")).toBeInTheDocument();
+  });
+
+  it("keeps the speakers directory header minimal and aligned", () => {
+    render(<PublicProgramRenderer data={programResponse()} mode="embed" widget="speakers" />);
+    const header = document.querySelector(".widget-speakers .program-header");
+    const filters = document.querySelector(".speaker-directory-filters");
+    expect(header).not.toHaveTextContent(/Speakers list/i);
+    expect(filters).not.toHaveTextContent("2 speakers");
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
   });
   it("renders the dedicated agenda controls and preserves itinerary/filter behavior", async () => {
     const user = userEvent.setup();

@@ -23,16 +23,26 @@ test.describe("public embed regression geometry", () => {
     });
 
     expect(intersections).toBe(0);
+    const inspector = await page.getByRole("complementary", { name: /Session details:/ }).boundingBox();
+    const main = await page.locator(".itinerary-main").boundingBox();
+    expect(inspector).not.toBeNull();
+    expect(main).not.toBeNull();
+    expect(main!.x + main!.width).toBeLessThanOrEqual(inspector!.x + 1);
   });
 
-  test("speakers list keeps a full-height desktop inspector beside the directory", async ({ page }) => {
+  test("speakers list is a card-only directory with a compact aligned header", async ({ page }) => {
     await page.setViewportSize({ width: 1536, height: 1024 });
     await page.goto("/fixtures/embeds/speakers-list");
-    const inspector = page.getByRole("complementary", { name: /Speaker profile:/ });
-    const box = await inspector.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.y).toBeLessThanOrEqual(1);
-    expect(box!.height).toBeGreaterThanOrEqual(970);
+    await expect(page.getByRole("complementary", { name: /Speaker profile:/ })).toHaveCount(0);
+    await expect(page.getByText("View profile")).toHaveCount(0);
+    await expect(page.locator(".program-header").getByText("SPEAKERS LIST")).toHaveCount(0);
+    await expect(page.getByText("15 speakers")).toHaveCount(0);
+    const filters = await page.locator(".speaker-directory-filters").boundingBox();
+    const search = await page.locator(".speaker-directory-search").boundingBox();
+    expect(filters).not.toBeNull();
+    expect(search).not.toBeNull();
+    expect(filters!.height).toBeLessThanOrEqual(60);
+    expect(search!.y).toBeGreaterThanOrEqual(filters!.y);
   });
 
   test("speaker directory is materially denser than the portrait gallery", async ({ page }) => {
@@ -46,7 +56,9 @@ test.describe("public embed regression geometry", () => {
     await page.goto("/e/pacific-open-data-summit-2026/program/embed?widget=speaker-gallery&fixture=signal-rail");
     const galleryAvatar = await page.locator(".signal-gallery-grid .program-speaker-avatar").first().boundingBox();
     const galleryCard = await page.locator(".signal-gallery-grid .program-speaker-gallery-card").first().boundingBox();
-    const galleryInspectorRadius = await page.locator(".signal-speaker-intro .program-speaker-avatar").evaluate((node) => Number.parseFloat(getComputedStyle(node).borderRadius));
+    const galleryInspector = page.locator(".signal-speaker-intro .program-speaker-avatar");
+    const galleryInspectorRadius = await galleryInspector.evaluate((node) => Number.parseFloat(getComputedStyle(node).borderRadius));
+    const galleryInspectorBackground = await galleryInspector.evaluate((node) => getComputedStyle(node).backgroundColor);
 
     expect(directoryAvatar).not.toBeNull();
     expect(directoryRow).not.toBeNull();
@@ -56,7 +68,8 @@ test.describe("public embed regression geometry", () => {
     expect(directoryAvatar!.width).toBeGreaterThanOrEqual(92);
     expect(directoryAvatar!.width).toBeLessThanOrEqual(100);
     expect(directoryRadius).toBeLessThanOrEqual(12);
-    expect(galleryInspectorRadius).toBeLessThanOrEqual(12);
+    expect(galleryInspectorRadius).toBeGreaterThanOrEqual(50);
+    expect(galleryInspectorBackground).toBe("rgba(0, 0, 0, 0)");
     expect(galleryAvatar!.width).toBeGreaterThanOrEqual(110);
     expect(directoryRow!.height).toBeLessThan(galleryCard!.height * 0.8);
   });
@@ -75,12 +88,14 @@ test.describe("public embed regression geometry", () => {
     await expect(page.locator(".program-filters").getByRole("button", { name: /My schedule/ })).toBeVisible();
   });
 
-  test("speakers list inspector uses the full narrow viewport like the gallery", async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/fixtures/embeds/speakers-list");
-    const inspector = await page.getByRole("complementary", { name: /Speaker profile:/ }).boundingBox();
+  test("agenda inspector reserves space instead of covering session rows", async ({ page }) => {
+    await page.setViewportSize({ width: 1536, height: 1024 });
+    await page.goto("/fixtures/agenda-embed");
+    await page.getByRole("button", { name: "Open Public Infrastructure for Everyone session details" }).click();
+    const inspector = await page.getByRole("complementary", { name: /Session details:/ }).boundingBox();
+    const row = await page.locator(".agenda-row").first().boundingBox();
     expect(inspector).not.toBeNull();
-    expect(inspector!.x).toBeLessThanOrEqual(1);
-    expect(inspector!.width).toBeGreaterThanOrEqual(389);
+    expect(row).not.toBeNull();
+    expect(row!.x + row!.width).toBeLessThanOrEqual(inspector!.x + 1);
   });
 });

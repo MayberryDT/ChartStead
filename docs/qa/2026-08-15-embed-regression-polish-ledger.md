@@ -75,3 +75,23 @@ The personal schedule is retained because rubric criteria EMB-10 and EMB-11 requ
 - `npm run build`: pass; only the existing large-chunk advisory remains.
 - Visual evidence: `.scratch/qa/embed-schedule-speaker-distinction/` (local QA captures).
 - Repository-wide `npm test`: UI reached 163/167 and stopped on four pre-existing organizer-app assertions in `test/ui/app.test.tsx` (empty-event onboarding copy, speaker-announcement missing-address copy, duplicate `Submissions` headings, and proposals sort URL). This pass changes only public embed renderer/styles/tests; the scoped suites above are green. Because the UI command failed, the aggregate script did not proceed to worker or broad E2E stages.
+
+## Correction pass 4 — card-only directory, row portraits, and shared session details
+
+| Component | Before | After | Verification | Score | Status |
+|---|---|---|---|---:|---|
+| Sessions List rows | Initials only because rows received session-speaker records without `headshotUrl` | Rows resolve each session speaker against the public speaker directory and render the existing local portrait | 1536×1024 capture shows portraits on every populated row; component assertion checks the real image URL | 98 | Passing |
+| Speakers List header | Duplicate `Speakers list` labels, separate count baseline, and oversized vertical gaps | Event title/subtitle plus one aligned search/Track/Role/Clear row; speaker count removed | 1536×1024 capture; browser filter surface ≤60px tall | 97 | Passing |
+| Speakers List cards | Auto-selected first card opened a full-height profile inspector and repeated `View profile` actions | Semantic three-column card-only directory; no auto-selection, profile buttons, pressed state, or inspector | Component and browser assertions find zero profile actions/inspectors | 99 | Passing |
+| Speaker Gallery portraits | Corrective pass forced a square inspector crop; fallback blue background leaked as a circular edge halo | Restored circular inspector crop and made real-image avatar backgrounds transparent | Browser asserts circular radius and transparent computed background; visual capture clean | 97 | Passing |
+| Agenda details | Agenda bypassed shared session selection entirely | Whole-row accessible open target mounts shared Session Details; bookmark remains independently clickable | Component interaction plus desktop right-edge geometry | 98 | Passing |
+| Itinerary details | Fixed inspector mounted without a reserved-width root state | `has-session-inspector` reserves 390px desktop / 360px medium space | Browser proves itinerary main right edge ≤ inspector left edge | 98 | Passing |
+
+### Pass-4 verification
+
+- Focused component suites: 26/26 across public program, Speakers List fixture, and Agenda functionality.
+- Browser regressions: 5/5, covering Agenda/Itinerary inspector geometry, Sessions controls, card-only Speakers List, and circular Gallery portraits.
+- `npm run typecheck`: pass, including Wrangler bindings freshness.
+- `npm run build`: pass; only the existing large-chunk advisory remains.
+- Visual evidence: `.scratch/qa/embed-correction-pass-2/` at 1536×1024.
+- `/api/events`: JSON HTTP 200. Dev listener: `0.0.0.0:5447`.

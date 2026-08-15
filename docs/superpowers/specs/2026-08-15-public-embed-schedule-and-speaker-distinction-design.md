@@ -1,7 +1,7 @@
 # Public Embed Schedule and Speaker Distinction Design
 
 **Date:** 2026-08-15
-**Status:** Superseded in part by the corrective review later on 2026-08-15
+**Status:** Authoritative after corrective review pass 4 on 2026-08-15
 
 ## Goal
 
@@ -15,18 +15,20 @@ The personal schedule remains a real public feature because rubric criteria EMB-
 
 Sessions List shows one minimal Base UI/Lucide bookmark on every row. Clicking anywhere else on a row opens Session Details. Both controls update the same TanStack Query/Router-backed schedule state. There is no separate session-count strip: the compact `My schedule (n)` action lives directly in the search/filter row and remains visible while an inspector is open. The inspector contains exact saved membership and a combined ICS export.
 
-The desktop Sessions List reserves the inspector width immediately; the inspector never overlays rows, filters, or the count/schedule toolbar. At narrow widths the inspector becomes a full-viewport surface. Session Details reuses existing local speaker portraits and renders speaker identity metadata.
+The desktop Sessions List reserves the inspector width immediately; the inspector never overlays rows or filters. At narrow widths the inspector becomes a full-viewport surface. Session rows and Session Details both resolve existing local speaker portraits and render speaker identity metadata.
 
-The Schedule Itinerary keeps its visible saved-session rail. Its redundant `View my itinerary` button is removed because the rail already is the itinerary view. Grid cards remain directly openable and retain their independent save control because itinerary construction is the purpose of that embed.
+The Schedule Itinerary keeps its visible saved-session rail. Its redundant `View my itinerary` button is removed because the rail already is the itinerary view. Grid cards remain directly openable and retain their independent save control because itinerary construction is the purpose of that embed. Opening Session Details reserves inspector width on desktop instead of overlaying the grid.
+
+Agenda rows are directly openable and use the same Session Details surface. The Agenda reserves inspector width at desktop, reflows to a compact four-column row while details are open, and keeps its independent itinerary bookmark above the row-open target.
 
 ### Speaker surfaces
 
-Both speaker surfaces retain the persistent full-height desktop inspector and stacked narrow behavior. Their discovery panes become deliberately different:
+The two speaker surfaces are deliberately different:
 
-- **Speakers List:** the original information-first, alphabetized three-column card grid with 96px portraits, name, title, organization, `View profile`, and linked-session summaries. Portraits use restrained rounded rectangles rather than circular masks.
-- **Speaker Gallery:** portrait-first, multi-column tiles, 120px portraits, minimal identity metadata, and visual browsing. It optimizes discovery.
+- **Speakers List:** an information-first, alphabetized three-column card grid with 96px rounded-rectangle portraits, name, title, organization, and linked-session summaries. It is deliberately card-only: no profile inspector, profile buttons, selected state, or auto-selection.
+- **Speaker Gallery:** portrait-first, multi-column tiles, 120px circular portraits, minimal identity metadata, and a persistent selected-speaker inspector. It optimizes visual browsing.
 
-The List retains its original connected card grid and materially smaller portraits than the Gallery. The Gallery keeps its larger portrait-first tiles. Both use persistent side inspectors at desktop. The Gallery inspector uses limited Steel Blue structure and a rounded-rectangle hero portrait; the Gallery tiles themselves remain unchanged.
+The List retains its connected card grid and materially denser information layout than the Gallery. The Gallery keeps its larger portrait-first tiles and circular inspector portrait. Headshot containers with real images have transparent fallback backgrounds so no off-center blue halo leaks around antialiased circular images.
 
 ### Color and hierarchy
 
@@ -44,19 +46,19 @@ White remains the dominant canvas. No gradients, dark full-page panels, new deco
 - Session-row click and keyboard activation open details; a separate icon-only Base UI bookmark mutates schedule membership without opening details.
 - `My schedule (n)` has an accessible expanded state and opens a complementary panel with a close action.
 - Combined ICS export uses the existing public calendar URL builder and exactly the selected session IDs.
-- Speaker rows and gallery tiles retain pressed selection semantics, 44px minimum targets, focus-visible rings, and reduced-motion-safe panel behavior.
+- Gallery tiles retain pressed selection semantics, 44px minimum targets, focus-visible rings, and reduced-motion-safe panel behavior. Speakers List cards are semantic, non-interactive articles.
 - Existing itinerary persistence, optimistic rollback, URL restoration, filtering, privacy, and publication-revision boundaries do not change.
 
 ## Responsive behavior
 
-At desktop widths, session and speaker inspectors remain fixed to the right and reserve content space. On narrow screens they become full-width panels. The compact Speakers List uses two columns when space allows and one column at narrow widths; Gallery remains multi-column until its existing narrow breakpoint. Sessions rows use container-responsive grids so logistics wrap before the page overflows.
+At desktop widths, session inspectors remain fixed to the right and reserve content space. On narrow screens they become full-width panels. The Speakers List uses three columns when space allows, two at medium widths, and one at narrow widths; Gallery remains multi-column until its existing narrow breakpoint. Sessions rows use container-responsive grids so logistics wrap before the page overflows.
 
 ## Verification contract
 
-- Component tests prove Sessions List has a minimal row bookmark, My Schedule opens with exact membership, Session Details resolves speaker portraits, Agenda does not mount Session Details, and combined ICS contains the selected IDs.
-- Component tests prove Speakers List renders compact directory cards while Gallery renders larger portrait cards.
-- Browser tests prove the two speaker master panes have materially different portrait sizes/density and retain full-height inspectors.
-- Existing itinerary non-overlap geometry remains green after removal of the redundant action.
+- Component tests prove Sessions List has a minimal row bookmark, row and detail portraits resolve, My Schedule opens with exact membership, Agenda mounts Session Details, and combined ICS contains the selected IDs.
+- Component tests prove Speakers List renders non-interactive directory cards with no profile inspector while Gallery retains selectable portrait cards.
+- Browser tests prove the two speaker discovery panes remain materially different and the Gallery inspector portrait is circular with no fallback-background halo.
+- Agenda and Itinerary browser geometry proves their content right edges stop before the fixed inspector.
 - Focused UI tests, focused Playwright regressions, typecheck, production build, API JSON smoke, and listener binding all pass before completion.
 
 ## Scope boundary

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@base-ui/react/button";
-import { Bookmark, Search } from "lucide-react";
+import { Bookmark, RotateCcw, Search } from "lucide-react";
 import type { ReactNode } from "react";
 
 import type {
@@ -242,7 +242,6 @@ export function PublicProgramRenderer({
     () => new Set(),
   );
   const [internalSelectedSpeakerId, setInternalSelectedSpeakerId] = useState<string | null>(null);
-  const [speakerDetailDismissed, setSpeakerDetailDismissed] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [internalItinerarySessionIds, setInternalItinerarySessionIds] = useState<Set<string>>(
     () => new Set(initialItinerarySessionIds),
@@ -265,7 +264,6 @@ export function PublicProgramRenderer({
   };
 
   const selectSpeaker = (speakerId: string | null) => {
-    if (speakerId) setSpeakerDetailDismissed(false);
     if (onSelectSpeaker) onSelectSpeaker(speakerId);
     else setInternalSelectedSpeakerId(speakerId);
   };
@@ -369,10 +367,12 @@ export function PublicProgramRenderer({
       <AgendaEmbedView
         data={data}
         sessions={sessions}
+        selected={selected}
         fields={fields}
         filters={filters}
         itinerarySessionIds={itinerarySessionIds}
         onItinerarySessionIdsChange={changeItinerary}
+        onSelectSession={selectSession}
         onFiltersChange={(next) => {
           if (onFiltersChange) onFiltersChange(next);
           else setInternalFilters(next);
@@ -427,10 +427,9 @@ export function PublicProgramRenderer({
       data-testid="public-program-renderer"
     >
       <header className="program-header">
-        {currentWidget !== "sessions" ? <p className="eyebrow">{widgetLabel(currentWidget)}</p> : null}
+        {currentWidget !== "sessions" && currentWidget !== "speakers" ? <p className="eyebrow">{widgetLabel(currentWidget)}</p> : null}
         <div className="program-title-line">
           <h1 id="program-title">{data.event.name}</h1>
-          {currentWidget === "speakers" ? <span>Speakers list</span> : null}
         </div>
         <p>{currentWidget === "speakers" ? "Find and explore speakers by name, company, track, or role." : currentWidget === "sessions" ? <>{eventDateRange(data.event.startsOn, data.event.endsOn)}  •  A searchable catalog of conference sessions</> : <>
           {data.event.startsOn === data.event.endsOn
@@ -451,7 +450,7 @@ export function PublicProgramRenderer({
           </label>
           <AppSelect label="Track" value={filters.trackId ?? ""} options={[{ value: "", label: "All Tracks" }, ...data.event.tracks.map((track) => ({ value: track.id, label: track.name }))]} onValueChange={(value) => setFilters((current) => ({ ...current, trackId: value || undefined }))} />
           <AppSelect label="Role" value={filters.format ?? ""} options={[{ value: "", label: "All Roles" }, ...speakerRoles.map((role) => ({ value: role, label: role }))]} onValueChange={(value) => setFilters((current) => ({ ...current, format: value || undefined }))} />
-          <div className="speaker-directory-filter-actions"><span role="status" aria-live="polite">{visibleSpeakers.length} {countNoun(visibleSpeakers.length, "speaker", "speakers")}</span><Button type="button" onClick={() => setFilters(() => ({}))}>↻&nbsp; Clear filters</Button></div>
+          <div className="speaker-directory-filter-actions"><Button type="button" aria-label="Clear filters" onClick={() => setFilters(() => ({}))}><RotateCcw aria-hidden="true" />Clear filters</Button></div>
         </section>
       ) : <section className="program-filters" aria-label="Program filters">
         <label className="program-search-field">
@@ -530,6 +529,7 @@ export function PublicProgramRenderer({
             selectedId={selectedId}
             expandedSessionIds={expandedSessionIds}
             fields={fields}
+            speakerDirectory={data.speakers}
             itinerarySessionIds={itinerarySessionIds}
             itineraryPending={itineraryPending}
             onSelectSession={selectSession}
@@ -550,10 +550,9 @@ export function PublicProgramRenderer({
           sessions={sessions}
           fields={fields}
           variant="directory"
-          selectedSpeaker={speakerDetailDismissed ? null : selectedSpeaker ?? visibleSpeakers[0] ?? null}
+          selectedSpeaker={null}
           expandedSpeakerBioIds={expandedSpeakerBioIds}
           onSelectSpeaker={selectSpeaker}
-          onDismissSpeaker={() => { setSpeakerDetailDismissed(true); selectSpeaker(null); }}
           onSelectSession={selectSession}
           onToggleSpeakerBiography={toggleSpeakerBiography}
         />
@@ -581,19 +580,23 @@ export function PublicProgramRenderer({
 function AgendaEmbedView({
   data,
   sessions,
+  selected,
   fields,
   filters,
   onFiltersChange,
   itinerarySessionIds,
   onItinerarySessionIdsChange,
+  onSelectSession,
 }: {
   data: PublicProgramResponse;
   sessions: PublicProgramSession[];
+  selected: PublicProgramSession | null;
   fields: PublicEmbedFieldVisibility;
   filters: PublicProgramFilters;
   onFiltersChange: (filters: PublicProgramFilters) => void;
   itinerarySessionIds: Set<string>;
   onItinerarySessionIdsChange: (sessionIds: Set<string>) => void;
+  onSelectSession: (sessionId: string | null) => void;
 }) {
   const saved = itinerarySessionIds;
   const days = Array.from(new Set(data.sessions.map((session) => session.day).filter(Boolean))) as string[];
@@ -603,7 +606,7 @@ function AgendaEmbedView({
   const clearFilters = () => onFiltersChange({});
 
   return (
-    <div className="agenda-embed program-renderer widget-agenda" data-testid="public-program-renderer">
+    <div className={`agenda-embed program-renderer widget-agenda${selected ? " has-session-inspector" : ""}`} data-testid="public-program-renderer">
       <header className="agenda-heading">
         <div>
           <h1>{data.event.name}</h1>
@@ -628,7 +631,8 @@ function AgendaEmbedView({
           const isSaved = saved.has(session.id);
           const duration = session.startsAt && session.endsAt ? Math.max(15, Math.round((new Date(session.endsAt).getTime() - new Date(session.startsAt).getTime()) / 60000)) : 45;
           const gridSpan = Math.max(2, Math.ceil(duration / 30));
-          return <article key={session.id} role="article" aria-label={session.title} data-duration={duration} data-grid-span={gridSpan} style={{ ["--agenda-duration" as string]: duration }} className={`agenda-row tone-${kind.tone}${session.format.toLowerCase().includes("lunch") ? " is-meal" : ""}`}>
+          return <article key={session.id} role="article" aria-label={session.title} data-duration={duration} data-grid-span={gridSpan} style={{ ["--agenda-duration" as string]: duration }} className={`agenda-row tone-${kind.tone}${session.format.toLowerCase().includes("lunch") ? " is-meal" : ""}${selected?.id === session.id ? " is-selected" : ""}`}>
+            <Button type="button" className="agenda-row-open" aria-label={`Open ${session.title} session details`} aria-pressed={selected?.id === session.id} onClick={() => onSelectSession(selected?.id === session.id ? null : session.id)} />
             <div className="agenda-time">{fields.dateTime ? <><strong>{formatClock(session.startsAt)}</strong><span>{session.startsAt && session.endsAt ? `${Math.round((new Date(session.endsAt).getTime() - new Date(session.startsAt).getTime()) / 60000)} min` : "Time TBD"}</span></> : null}</div>
             <div className="agenda-kind"><span><AgendaIcon name={kind.icon} /></span></div>
             <div className="agenda-session-copy">
@@ -642,6 +646,7 @@ function AgendaEmbedView({
           </article>;
         })}
       </section>
+      {selected ? <SessionInspector session={selected} data={data} fields={fields} onClose={() => onSelectSession(null)} /> : null}
     </div>
   );
 }
@@ -771,7 +776,7 @@ function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, 
   const dateRange = start.getUTCFullYear() === end.getUTCFullYear() && start.getUTCMonth() === end.getUTCMonth()
     ? `${new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(start)} ${start.getUTCDate()}–${end.getUTCDate()}, ${end.getUTCFullYear()}`
     : `${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(start)} – ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(end)}`;
-  return <div className={`program-renderer indexed-itinerary mode-${mode} widget-itinerary theme-${theme}`} style={accentStyle} data-testid="public-program-renderer">
+  return <div className={`program-renderer indexed-itinerary mode-${mode} widget-itinerary theme-${theme}${selected ? " has-session-inspector" : ""}`} style={accentStyle} data-testid="public-program-renderer">
     <aside className="itinerary-rail" aria-label="My itinerary">
       <section className="itinerary-saved">
         <header><h2>My itinerary</h2><span>{savedSessions.length} saved</span></header>
@@ -926,6 +931,7 @@ function SessionListView({
   selectedId,
   expandedSessionIds,
   fields,
+  speakerDirectory,
   itinerarySessionIds,
   itineraryPending = false,
   onSelectSession,
@@ -937,6 +943,7 @@ function SessionListView({
   selectedId: string | null;
   expandedSessionIds: Set<string>;
   fields: PublicEmbedFieldVisibility;
+  speakerDirectory?: PublicProgramSpeaker[];
   itinerarySessionIds?: Set<string>;
   itineraryPending?: boolean;
   onSelectSession: (sessionId: string | null) => void;
@@ -952,7 +959,7 @@ function SessionListView({
         <ul className="program-session-list">
           {sessions.map((session) => (
             <li key={session.id}>
-              {atlas ? <AtlasSessionRow session={session} fields={fields} selected={selectedId === session.id} saved={itinerarySessionIds?.has(session.id) ?? false} itineraryPending={itineraryPending} onToggleSaved={onToggleSaved ? () => onToggleSaved(session.id) : undefined} onSelect={() => onSelectSession(selectedId === session.id ? null : session.id)} /> : <SessionCard
+              {atlas ? <AtlasSessionRow session={session} fields={fields} speakerDirectory={speakerDirectory ?? []} selected={selectedId === session.id} saved={itinerarySessionIds?.has(session.id) ?? false} itineraryPending={itineraryPending} onToggleSaved={onToggleSaved ? () => onToggleSaved(session.id) : undefined} onSelect={() => onSelectSession(selectedId === session.id ? null : session.id)} /> : <SessionCard
                 session={session}
                 selected={selectedId === session.id}
                 expanded={expandedSessionIds.has(session.id)}
@@ -968,9 +975,10 @@ function SessionListView({
   );
 }
 
-function AtlasSessionRow({ session, fields, selected, saved, itineraryPending, onToggleSaved, onSelect }: {
+function AtlasSessionRow({ session, fields, speakerDirectory, selected, saved, itineraryPending, onToggleSaved, onSelect }: {
   session: PublicProgramSession;
   fields: PublicEmbedFieldVisibility;
+  speakerDirectory: PublicProgramSpeaker[];
   selected: boolean;
   saved: boolean;
   itineraryPending: boolean;
@@ -978,6 +986,9 @@ function AtlasSessionRow({ session, fields, selected, saved, itineraryPending, o
   onSelect: () => void;
 }) {
   const speakers = session.speakers;
+  const resolvedSpeakers = speakers.map((sessionSpeaker) =>
+    speakerDirectory.find((speaker) => speaker.id === sessionSpeaker.id || speaker.name === sessionSpeaker.name) ?? null,
+  );
   const format = session.format || "Session";
   return (
     <article className={`atlas-session-row ${trackClass(session.trackId)}${selected ? " is-selected" : ""}`} data-testid={`public-session-card-${session.id}`}>
@@ -993,7 +1004,10 @@ function AtlasSessionRow({ session, fields, selected, saved, itineraryPending, o
       <div className="atlas-kind-speakers">
         {fields.format ? <div className="atlas-kind"><span aria-hidden="true">{format.toLowerCase().includes("workshop") ? "⌕" : format.toLowerCase().includes("panel") ? "♟" : "▣"}</span><strong>{format}</strong></div> : null}
         {fields.speakers ? <div className="atlas-speakers">
-          <span className="atlas-avatar-stack" aria-hidden="true">{speakers.slice(0, 3).map((speaker, index) => <i key={speaker.id} style={{ zIndex: 3 - index }}>{sessionSpeakerInitials(speaker.name)}</i>)}</span>
+          <span className="atlas-avatar-stack">{speakers.slice(0, 3).map((speaker, index) => {
+            const resolved = resolvedSpeakers[index];
+            return resolved ? <SpeakerAvatar key={speaker.id} speaker={resolved} /> : <i key={speaker.id} aria-hidden="true" style={{ zIndex: 3 - index }}>{sessionSpeakerInitials(speaker.name)}</i>;
+          })}</span>
           <span>{speakers.length === 1 ? speakers[0]?.name : `${speakers.length} speakers`}</span>
         </div> : null}
       </div>
@@ -1367,6 +1381,7 @@ function SpeakerListView({
                       selected={selectedSpeaker?.id === speaker.id}
                       fields={fields}
                       compact={false}
+                      interactive={variant !== "directory"}
                       onSelect={() => onSelectSpeaker(speaker.id)}
                     />
                   </li>
@@ -1393,7 +1408,7 @@ function SpeakerListView({
           ) : null}
         </div>
       )}
-      {selectedSpeaker ? (
+      {selectedSpeaker && variant !== "directory" ? (
         <SpeakerDetail
           speaker={selectedSpeaker}
           sessions={sessions.filter((session) => selectedSpeaker.sessionIds.includes(session.id))}
@@ -1401,7 +1416,6 @@ function SpeakerListView({
           biographyExpanded={expandedSpeakerBioIds.has(selectedSpeaker.id)}
           onToggleBiography={() => onToggleSpeakerBiography(selectedSpeaker.id)}
           onClose={onDismissSpeaker ?? (() => onSelectSpeaker(null))}
-          complementary={variant === "directory"}
           onSelectSession={onSelectSession}
         />
       ) : null}
@@ -1415,6 +1429,7 @@ function SpeakerDirectoryButton({
   selected,
   fields,
   compact = false,
+  interactive = true,
   onSelect,
 }: {
   speaker: PublicProgramSpeaker;
@@ -1422,20 +1437,15 @@ function SpeakerDirectoryButton({
   selected: boolean;
   fields: PublicEmbedFieldVisibility;
   compact?: boolean;
+  interactive?: boolean;
   onSelect: () => void;
 }) {
-  return (
-    <Button
-      type="button"
-      className="program-speaker-list-entry"
-      aria-pressed={selected}
-      onClick={onSelect}
-    >
+  const content = <>
       {fields.headshots ? <SpeakerAvatar speaker={speaker} /> : null}
       <span className="program-speaker-list-copy">
         <span className="program-speaker-list-heading">
         <strong>{speaker.name}</strong>
-          {!compact ? <span>View profile&nbsp; ›</span> : null}
+          {!compact && interactive ? <span>View profile&nbsp; ›</span> : null}
         </span>
         <span>{speaker.title || "Professional details pending"}</span>
         <b>{speaker.company || "Organization pending"}</b>
@@ -1443,8 +1453,9 @@ function SpeakerDirectoryButton({
           {compact ? <span>{sessions[0]!.title}{sessions.length > 1 ? ` +${sessions.length - 1} more` : ""}</span> : sessions.map((session, index) => <span key={session.id}>{index > 0 ? <i aria-hidden="true">•</i> : null}{session.title}</span>)}
         </span> : null}
       </span>
-    </Button>
-  );
+    </>;
+  if (!interactive) return <article className="program-speaker-list-entry">{content}</article>;
+  return <Button type="button" className="program-speaker-list-entry" aria-pressed={selected} onClick={onSelect}>{content}</Button>;
 }
 
 function SpeakerGalleryButton({
