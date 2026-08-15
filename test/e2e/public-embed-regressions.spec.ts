@@ -98,4 +98,43 @@ test.describe("public embed regression geometry", () => {
     expect(row).not.toBeNull();
     expect(row!.x + row!.width).toBeLessThanOrEqual(inspector!.x + 1);
   });
+
+  test("saved itinerary selection stays visibly highlighted", async ({ page }) => {
+    await page.setViewportSize({ width: 1536, height: 1024 });
+    await page.goto("/fixtures/itinerary-embed");
+    const savedSession = page.locator(".itinerary-saved-open").first();
+    const savedCard = savedSession.locator("xpath=ancestor::article");
+
+    await savedSession.click();
+
+    await expect(savedCard).toHaveClass(/is-selected/);
+    await expect(savedSession).toHaveAttribute("aria-current", "true");
+    await expect(savedCard).toHaveCSS("background-color", "rgb(240, 246, 255)");
+  });
+
+  test("inspectors and speaker cards use restrained motion states", async ({ page }) => {
+    await page.setViewportSize({ width: 1536, height: 1024 });
+    await page.goto("/demo/embeds/sessions-list");
+    await page.getByRole("button", { name: "Open Public Infrastructure for Everyone session details" }).click();
+    const sessionInspector = page.getByRole("complementary", { name: /Session details:/ });
+    await expect(sessionInspector).toHaveAttribute("data-motion-panel", "session");
+    await expect(sessionInspector).toHaveCSS("opacity", "1");
+
+    await page.goto("/fixtures/embeds/speakers-list");
+    const speakerCard = page.locator(".program-speaker-list-entry").first();
+    const before = await speakerCard.boundingBox();
+    await speakerCard.hover();
+    await expect(speakerCard).toHaveAttribute("data-motion-surface", "speaker-card");
+    await page.waitForTimeout(350);
+    const after = await speakerCard.boundingBox();
+    expect(before).not.toBeNull();
+    expect(after).not.toBeNull();
+    expect(after!.y).toBeLessThan(before!.y - 1);
+
+    await page.goto("/e/pacific-open-data-summit-2026/program/embed?widget=speaker-gallery&fixture=signal-rail");
+    const galleryInspector = page.getByRole("complementary", { name: /Selected speaker:/ });
+    await expect(galleryInspector.getByText("Selected speaker", { exact: true })).toHaveCount(0);
+    await page.locator(".signal-gallery-grid .program-speaker-gallery-card").nth(1).click();
+    await expect(galleryInspector.locator(".signal-speaker-panel-content")).toHaveCSS("opacity", "1");
+  });
 });

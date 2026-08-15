@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@base-ui/react/button";
 import { Bookmark, RotateCcw, Search } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { ReactNode } from "react";
 
 import type {
@@ -38,6 +39,18 @@ function dayLabel(day: string): string {
     day: "numeric",
     timeZone: "UTC",
   }).format(new Date(`${day}T00:00:00.000Z`));
+}
+
+const premiumSpring = { type: "spring" as const, duration: 0.3, bounce: 0 };
+
+function useInspectorMotion() {
+  const reduceMotion = useReducedMotion();
+  return {
+    initial: reduceMotion ? { opacity: 0 } : { opacity: 0, x: 34, filter: "blur(3px)" },
+    animate: { opacity: 1, x: 0, filter: "blur(0px)" },
+    exit: reduceMotion ? { opacity: 0 } : { opacity: 0, x: 18, filter: "blur(2px)" },
+    transition: reduceMotion ? { duration: 0.1 } : premiumSpring,
+  };
 }
 
 function trackClass(trackId: string): string {
@@ -541,7 +554,9 @@ export function PublicProgramRenderer({
             }}
             onToggleDescription={toggleDescription}
           />
-          {scheduleOpen ? <MyScheduleInspector sessions={data.sessions.filter((session) => itinerarySessionIds.has(session.id))} data={data} itineraryPending={itineraryPending} onClose={() => setScheduleOpen(false)} onRemove={(sessionId) => { const next = new Set(itinerarySessionIds); next.delete(sessionId); changeItinerary(next); }} onSelectSession={(sessionId) => { setScheduleOpen(false); selectSession(sessionId); }} /> : selected ? <SessionInspector session={selected} data={data} fields={fields} saved={itinerarySessionIds.has(selected.id)} itineraryPending={itineraryPending} onToggleSaved={() => { const next = new Set(itinerarySessionIds); if (next.has(selected.id)) next.delete(selected.id); else next.add(selected.id); changeItinerary(next); }} onClose={() => selectSession(null)} /> : null}
+          <AnimatePresence initial={false} mode="wait">
+            {scheduleOpen ? <MyScheduleInspector key="my-schedule" sessions={data.sessions.filter((session) => itinerarySessionIds.has(session.id))} data={data} itineraryPending={itineraryPending} onClose={() => setScheduleOpen(false)} onRemove={(sessionId) => { const next = new Set(itinerarySessionIds); next.delete(sessionId); changeItinerary(next); }} onSelectSession={(sessionId) => { setScheduleOpen(false); selectSession(sessionId); }} /> : selected ? <SessionInspector key={selected.id} session={selected} data={data} fields={fields} saved={itinerarySessionIds.has(selected.id)} itineraryPending={itineraryPending} onToggleSaved={() => { const next = new Set(itinerarySessionIds); if (next.has(selected.id)) next.delete(selected.id); else next.add(selected.id); changeItinerary(next); }} onClose={() => selectSession(null)} /> : null}
+          </AnimatePresence>
         </div>
       ) : currentWidget === "speakers" ? (
         <SpeakerListView
@@ -646,7 +661,9 @@ function AgendaEmbedView({
           </article>;
         })}
       </section>
-      {selected ? <SessionInspector session={selected} data={data} fields={fields} onClose={() => onSelectSession(null)} /> : null}
+      <AnimatePresence initial={false} mode="wait">
+        {selected ? <SessionInspector key={selected.id} session={selected} data={data} fields={fields} onClose={() => onSelectSession(null)} /> : null}
+      </AnimatePresence>
     </div>
   );
 }
@@ -662,6 +679,7 @@ function SignalRailGallery({ data, mode, theme, fields, filters, speakers, selec
   onSetFilters: (updater: (current: PublicProgramFilters) => PublicProgramFilters) => void;
   onSelectSpeaker: (id: string | null) => void; onSelectSession: (id: string) => void;
 }) {
+  const reduceMotion = useReducedMotion();
   const active = selectedSpeaker ?? speakers[0] ?? null;
   const linked = active ? data.sessions.filter((session) => active.sessionIds.includes(session.id)) : [];
   return <div className={`program-renderer signal-rail-gallery mode-${mode} widget-speaker-gallery theme-${theme}`} style={{ ["--program-accent" as string]: data.event.themeAccent }} data-testid="public-program-renderer" data-discovery-mode="gallery">
@@ -681,13 +699,23 @@ function SignalRailGallery({ data, mode, theme, fields, filters, speakers, selec
         <p className="signal-gallery-count" role="status" aria-live="polite">{speakers.length} {countNoun(speakers.length, "speaker")}</p>
         {speakers.length ? <ul className="signal-gallery-grid">{speakers.map((speaker) => <li key={speaker.id}><SpeakerGalleryButton speaker={speaker} selected={active?.id === speaker.id} fields={fields} onSelect={() => onSelectSpeaker(speaker.id)} /></li>)}</ul> : <div className="signal-gallery-empty"><h2>No speakers found</h2><p>Try clearing or changing the current filters.</p><button type="button" onClick={() => onSetFilters(() => ({}))}>Clear filters</button></div>}
       </section>
-      {active ? <aside className="signal-speaker-panel t-panel-slide" data-open="true" aria-label={`Selected speaker: ${active.name}`} aria-live="polite">
-        <p className="signal-selected-label">Selected speaker</p>
-        <div className="signal-speaker-intro">{fields.headshots ? <SpeakerAvatar speaker={active} large /> : null}<div><h2>{active.name}</h2><p>{active.title || "Professional details pending"}</p><p>{active.company || ""}</p><strong>{data.event.tracks.find((track) => linked.some((session) => session.trackId === track.id))?.name ?? "Data Leadership"}</strong><span>⌖ Wellington, New Zealand</span></div></div>
-        <section><h3>About {active.name.split(" ")[0]}</h3><p>{fields.biography && active.biography ? active.biography : "Biography pending."}</p></section>
-        <section><h3>Expertise</h3><ul className="signal-expertise"><li>◇ Data Governance</li><li>♙ Privacy &amp; Ethics</li><li>△ Public Policy</li><li>▥ Data Strategy</li></ul></section>
-        <section><h3>Linked Sessions ({linked.length})</h3><ul className="signal-linked-sessions">{linked.map((session) => <li key={session.id}><button type="button" onClick={() => onSelectSession(session.id)}><strong>{session.title}</strong><span>{session.format}　•　{session.day ? dayLabel(session.day) : "Date TBD"}　•　{formatClock(session.startsAt)}</span><b>›</b></button></li>)}</ul></section>
-      </aside> : null}
+      {active ? <motion.aside className="signal-speaker-panel" data-open="true" aria-label={`Selected speaker: ${active.name}`} aria-live="polite">
+        <AnimatePresence initial={false} mode="wait">
+          <motion.div
+            key={active.id}
+            className="signal-speaker-panel-content"
+            initial={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 14, filter: "blur(2px)" }}
+            animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
+            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -8, filter: "blur(1px)" }}
+            transition={reduceMotion ? { duration: 0.08 } : premiumSpring}
+          >
+            <div className="signal-speaker-intro">{fields.headshots ? <SpeakerAvatar speaker={active} large /> : null}<div><h2>{active.name}</h2><p>{active.title || "Professional details pending"}</p><p>{active.company || ""}</p><strong>{data.event.tracks.find((track) => linked.some((session) => session.trackId === track.id))?.name ?? "Data Leadership"}</strong><span>⌖ Wellington, New Zealand</span></div></div>
+            <section><h3>About {active.name.split(" ")[0]}</h3><p>{fields.biography && active.biography ? active.biography : "Biography pending."}</p></section>
+            <section><h3>Expertise</h3><ul className="signal-expertise"><li>◇ Data Governance</li><li>♙ Privacy &amp; Ethics</li><li>△ Public Policy</li><li>▥ Data Strategy</li></ul></section>
+            <section><h3>Linked Sessions ({linked.length})</h3><ul className="signal-linked-sessions">{linked.map((session) => <li key={session.id}><button type="button" onClick={() => onSelectSession(session.id)}><strong>{session.title}</strong><span>{session.format}　•　{session.day ? dayLabel(session.day) : "Date TBD"}　•　{formatClock(session.startsAt)}</span><b>›</b></button></li>)}</ul></section>
+          </motion.div>
+        </AnimatePresence>
+      </motion.aside> : null}
   </main></div>;
 }
 
@@ -704,10 +732,11 @@ function SessionInspector({ session, data, fields, saved, itineraryPending = fal
   onToggleSaved?: () => void;
   onClose: () => void;
 }) {
+  const panelMotion = useInspectorMotion();
   const speakers = session.speakers.map((sessionSpeaker) =>
     data.speakers.find((speaker) => speaker.id === sessionSpeaker.id || speaker.name === sessionSpeaker.name) ?? null,
   );
-  return <aside className="public-session-inspector t-panel-slide" data-open="true" role="complementary" aria-label={`Session details: ${session.title}`}>
+  return <motion.aside {...panelMotion} className="public-session-inspector" data-motion-panel="session" role="complementary" aria-label={`Session details: ${session.title}`}>
     <header><p>Session details</p><Button type="button" aria-label="Close session details" onClick={onClose}>×</Button></header>
     <h2>{fields.title ? session.title : "Session details"}</h2>
     <dl>
@@ -723,7 +752,7 @@ function SessionInspector({ session, data, fields, saved, itineraryPending = fal
     })}</ul></section> : null}
     {onToggleSaved ? <Button type="button" className="session-schedule-action" disabled={itineraryPending} aria-pressed={saved} aria-label={`${saved ? "Remove" : "Add"} ${session.title} ${saved ? "from" : "to"} my schedule`} onClick={onToggleSaved}>{saved ? "Remove from my schedule" : "Add to my schedule"}</Button> : null}
     <AddToCalendarMenu eventId={data.event.id} session={session} revisionId={data.revision.isCurrent ? undefined : data.revision.id} />
-  </aside>;
+  </motion.aside>;
 }
 
 function MyScheduleInspector({ sessions, data, itineraryPending, onClose, onRemove, onSelectSession }: {
@@ -734,7 +763,8 @@ function MyScheduleInspector({ sessions, data, itineraryPending, onClose, onRemo
   onRemove: (sessionId: string) => void;
   onSelectSession: (sessionId: string) => void;
 }) {
-  return <aside className="public-session-inspector my-schedule-inspector t-panel-slide" data-open="true" role="complementary" aria-label="My schedule">
+  const panelMotion = useInspectorMotion();
+  return <motion.aside {...panelMotion} className="public-session-inspector my-schedule-inspector" data-motion-panel="schedule" role="complementary" aria-label="My schedule">
     <header><p>My schedule</p><Button type="button" aria-label="Close my schedule" onClick={onClose}>×</Button></header>
     <div className="my-schedule-heading"><h2>Your sessions</h2><span>{sessions.length} saved</span></div>
     {sessions.length ? <ul className="my-schedule-list">{sessions.map((session) => <li key={session.id}>
@@ -742,7 +772,7 @@ function MyScheduleInspector({ sessions, data, itineraryPending, onClose, onRemo
       <Button type="button" className="my-schedule-remove" disabled={itineraryPending} aria-label={`Remove ${session.title} from my schedule`} onClick={() => onRemove(session.id)}>Remove</Button>
     </li>)}</ul> : <p className="my-schedule-empty">Add sessions from Session Details to build your schedule.</p>}
     {sessions.length ? <a className="my-schedule-export" href={publicProgramCalendarExportUrl(data.event.id, sessions.map((session) => session.id), data.revision.id)}>Export my schedule</a> : null}
-  </aside>;
+  </motion.aside>;
 }
 
 function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, selectedId, itinerarySessionIds, onItinerarySessionIdsChange, itineraryPending, itineraryError, onSelectSession, mode, theme, accentStyle }: {
@@ -780,12 +810,20 @@ function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, 
     <aside className="itinerary-rail" aria-label="My itinerary">
       <section className="itinerary-saved">
         <header><h2>My itinerary</h2><span>{savedSessions.length} saved</span></header>
-        {savedSessions.length ? savedSessions.map((session) => <article key={session.id}>
+        {savedSessions.length ? savedSessions.map((session) => {
+          const isSelected = selected?.id === session.id;
+          return <motion.article
+            key={session.id}
+            className={isSelected ? "is-selected" : undefined}
+            animate={isSelected ? { backgroundColor: "#f0f6ff", boxShadow: "inset 4px 0 0 #2f5d98" } : { backgroundColor: "#ffffff", boxShadow: "inset 0 0 0 rgba(47, 93, 152, 0)" }}
+            transition={premiumSpring}
+          >
           <span>{session.day ? dayLabel(session.day).toUpperCase() : "TIME TBD"} {formatClock(session.startsAt)}</span>
           <Button className="itinerary-saved-remove" type="button" disabled={itineraryPending} onClick={() => toggleSaved(session.id)} aria-label={`Remove ${session.title} from itinerary`}><BookmarkIcon filled /></Button>
-          <h3><button className="itinerary-saved-open" type="button" onClick={() => onSelectSession(session.id)}>{session.title}</button></h3><p>{session.speakers.map((speaker) => speaker.name).join(", ") || session.format}</p>
+          <h3><button className="itinerary-saved-open" type="button" aria-current={isSelected ? "true" : undefined} onClick={() => onSelectSession(session.id)}>{session.title}</button></h3><p>{session.speakers.map((speaker) => speaker.name).join(", ") || session.format}</p>
           <small>{session.trackName} · {session.startsAt && session.endsAt ? `${(new Date(session.endsAt).getTime() - new Date(session.startsAt).getTime()) / 60000} min` : "TBD"}</small>
-        </article>) : <p className="itinerary-none">Save sessions to build your personal schedule.</p>}
+        </motion.article>;
+        }) : <p className="itinerary-none">Save sessions to build your personal schedule.</p>}
       </section>
       <section className="itinerary-legend"><h2>Tracks</h2>{data.event.tracks.map((track) => <span key={track.id} className={trackClass(track.id)}><i />{track.name}</span>)}</section>
     </aside>
@@ -810,7 +848,9 @@ function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, 
       {pending.length ? <section className="itinerary-pending" aria-label="Time or location pending"><h2>To be scheduled</h2>{pending.map((session) => <span key={session.id}>{session.title} · {roomLabel(session)}</span>)}</section> : null}
       {itineraryError ? <p className="itinerary-error" role="alert">{itineraryError}</p> : null}
     </main>
-    {selected ? <SessionInspector session={selected} data={data} fields={DEFAULT_PUBLIC_EMBED_FIELDS} saved={savedIds.has(selected.id)} itineraryPending={itineraryPending} onToggleSaved={() => toggleSaved(selected.id)} onClose={() => onSelectSession(null)} /> : null}
+    <AnimatePresence initial={false} mode="wait">
+      {selected ? <SessionInspector key={selected.id} session={selected} data={data} fields={DEFAULT_PUBLIC_EMBED_FIELDS} saved={savedIds.has(selected.id)} itineraryPending={itineraryPending} onToggleSaved={() => toggleSaved(selected.id)} onClose={() => onSelectSession(null)} /> : null}
+    </AnimatePresence>
     <footer className="itinerary-footer">Powered by <strong>ChartStead</strong></footer>
   </div>;
 }
@@ -1440,6 +1480,7 @@ function SpeakerDirectoryButton({
   interactive?: boolean;
   onSelect: () => void;
 }) {
+  const reduceMotion = useReducedMotion();
   const content = <>
       {fields.headshots ? <SpeakerAvatar speaker={speaker} /> : null}
       <span className="program-speaker-list-copy">
@@ -1454,7 +1495,16 @@ function SpeakerDirectoryButton({
         </span> : null}
       </span>
     </>;
-  if (!interactive) return <article className="program-speaker-list-entry">{content}</article>;
+  if (!interactive) return <motion.article
+    className="program-speaker-list-entry"
+    data-motion-surface="speaker-card"
+    whileHover={reduceMotion ? undefined : {
+      y: -4,
+      scale: 1.012,
+      boxShadow: "0 14px 30px rgba(23, 73, 130, 0.16), inset 4px 0 0 #2f5d98",
+    }}
+    transition={premiumSpring}
+  >{content}</motion.article>;
   return <Button type="button" className="program-speaker-list-entry" aria-pressed={selected} onClick={onSelect}>{content}</Button>;
 }
 

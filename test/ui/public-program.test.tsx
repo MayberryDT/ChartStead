@@ -200,6 +200,7 @@ describe("PublicProgramRenderer", () => {
 
     const inspector = screen.getByRole("complementary", { name: "Selected speaker: Ada Lovelace" });
     expect(inspector).toBeVisible();
+    expect(within(inspector).queryByText("Selected speaker", { exact: true })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Grace Hopper/i }));
     expect(onSelectSpeaker).toHaveBeenCalledWith("sp-2");
 
@@ -213,6 +214,28 @@ describe("PublicProgramRenderer", () => {
       />,
     );
     expect(screen.getByRole("complementary", { name: "Selected speaker: Grace Hopper" })).toBe(inspector);
+  });
+
+  it("highlights the selected saved session in My itinerary", async () => {
+    const user = userEvent.setup();
+    render(
+      <PublicProgramRenderer
+        data={programResponse()}
+        mode="embed"
+        widget="itinerary"
+        initialItinerarySessionIds={["ses-1"]}
+      />,
+    );
+
+    const savedSession = screen.getByRole("button", { name: "Opening Keynote" });
+    const savedCard = savedSession.closest("article");
+    expect(savedCard).not.toHaveClass("is-selected");
+    expect(savedSession).not.toHaveAttribute("aria-current");
+
+    await user.click(savedSession);
+
+    expect(savedCard).toHaveClass("is-selected");
+    expect(savedSession).toHaveAttribute("aria-current", "true");
   });
 
   it("keeps the speakers list as a card-only directory without profile actions", () => {
@@ -243,7 +266,7 @@ describe("PublicProgramRenderer", () => {
     expect(screen.queryByText("›")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add Opening Keynote to my schedule" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Open Opening Keynote session details" }));
-    expect(screen.getByRole("complementary", { name: "Session details: Opening Keynote" })).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("complementary", { name: "Session details: Opening Keynote" })).toBeVisible());
     expect(screen.getByTestId("public-program-renderer")).toHaveClass("has-session-inspector");
     expect(screen.queryByText("□")).not.toBeInTheDocument();
 
@@ -251,7 +274,7 @@ describe("PublicProgramRenderer", () => {
     expect(screen.queryByText("ChartStead", { selector: ".itinerary-brand *" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /View my itinerary/i })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "View Opening Keynote details" }));
-    expect(screen.getByRole("complementary", { name: "Session details: Opening Keynote" })).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("complementary", { name: "Session details: Opening Keynote" })).toBeVisible());
     expect(screen.getByTestId("public-program-renderer")).toHaveClass("has-session-inspector");
   });
 
@@ -260,7 +283,7 @@ describe("PublicProgramRenderer", () => {
     render(<PublicProgramRenderer data={programResponse()} mode="embed" widget="agenda" />);
 
     await user.click(screen.getByRole("button", { name: "Open Opening Keynote session details" }));
-    expect(screen.getByRole("complementary", { name: "Session details: Opening Keynote" })).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("complementary", { name: "Session details: Opening Keynote" })).toBeVisible());
     expect(screen.getByTestId("public-program-renderer")).toHaveClass("has-session-inspector");
   });
 
@@ -302,7 +325,7 @@ describe("PublicProgramRenderer", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "true");
 
     const schedule = screen.getByRole("complementary", { name: "My schedule" });
-    expect(within(schedule).getByRole("button", { name: "Open Opening Keynote details" })).toBeVisible();
+    await waitFor(() => expect(within(schedule).getByRole("button", { name: "Open Opening Keynote details" })).toBeVisible());
     expect(within(schedule).queryByText("Community Circle")).not.toBeInTheDocument();
     expect(within(schedule).getByRole("link", { name: "Export my schedule" })).toHaveAttribute(
       "href",

@@ -9190,7 +9190,7 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
 .signal-speaker-intro p { margin: 0 0 3px; font-size: 15.5px; color: #435271; }
 .signal-speaker-intro strong { display: block; margin-top: 18px; padding-left: 11px; border-left: 4px solid #08a9ac; font-size: 13px; font-weight: 500; color: #007e82; }
 .signal-speaker-intro span { display: block; margin-top: 14px; font-size: 14px; color: #435271; }
-.signal-speaker-panel > section { padding: 21px 1px; border-top: 1px solid #d3dae4; }
+.signal-speaker-panel-content > section { padding: 21px 1px; border-top: 1px solid #d3dae4; }
 .signal-speaker-panel h3 { margin: 0 0 10px; font-size: 19px; color: #071b43; }
 .signal-speaker-panel section > p { margin: 0; max-width: 470px; font-size: 15.5px; line-height: 1.65; color: #435271; }
 .signal-expertise { display: grid; gap: 14px; margin: 16px 0 0; padding: 0; list-style: none; color: #435271; }
@@ -10310,6 +10310,12 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
   font: inherit;
   text-align: left;
 }
+.itinerary-saved article.is-selected {
+  position: relative;
+}
+.itinerary-saved article.is-selected .itinerary-saved-open {
+  color: #174f91;
+}
 .itinerary-saved article .itinerary-saved-remove { position: absolute; top: 12px; right: 10px; }
 
 .atlas-session-row { position: relative; }
@@ -10839,6 +10845,13 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
   border-color: transparent;
   outline: 0;
   background: #fff;
+}
+.program-renderer.widget-speakers .program-speaker-directory > li {
+  position: relative;
+  overflow: visible;
+}
+.program-renderer.widget-speakers .program-speaker-directory > li:hover {
+  z-index: 2;
 }
 
 .signal-rail-gallery .program-speaker-avatar:has(img) {
