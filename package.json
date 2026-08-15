@@ -35,6 +35,7 @@
     "@uppy/xhr-upload": "^5.2.0",
     "better-auth": "1.6.26",
     "hono": "4.13.1",
+    "lucide-react": "^0.468.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-email": "6.9.2",

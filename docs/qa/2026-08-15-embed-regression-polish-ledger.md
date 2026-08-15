@@ -38,3 +38,17 @@
 - `npm run typecheck`: pass, including Wrangler bindings freshness.
 - `npm run build`: pass; only the existing large-chunk advisory remains.
 - `/api/events`: JSON HTTP 200. Dev listener: `0.0.0.0:5447`.
+
+## Correction pass 2 — attached-image findings
+
+The attached 1873×923 screenshot exposed a verification gap: the prior collision check targeted Agenda list rows, while the visible collision was in the Itinerary time-by-room grid. Direct browser geometry found 12 intersecting card pairs after opening the session inspector.
+
+| Component | State | Transition decision | Correction | Verification | Score | Status |
+|---|---|---|---|---|---:|---|
+| Itinerary grid | Inspector open, 1873×923 | No transition fit; geometry only | Removed fixed 70px time-row/card heights; rows and cards now expand with content | Playwright intersection count 12 → 0 | 100 | Passing |
+| Sessions row | Default, hover, focus, open | Existing inspector reveal only | Removed View button and arrows; one invisible accessible target covers the full row while bookmark remains independent | Overlay bounds 1472×87.5 inside row 1480×89.5; component interaction test | 98 | Passing |
+| Speakers List inspector | Desktop | Existing reduced-motion-safe panel reveal | Inspector is fixed to the right edge and fills available viewport height, matching Gallery behavior | x=1056, y=0, 480×980 at 1536×1024 | 96 | Passing |
+| Speaker Gallery inspector | Speaker switch | No replay on content replacement | Removed speaker-key remount so the same inspector DOM node survives selection changes | Component identity regression test | 98 | Passing |
+| Public embed search icons | Sessions, Speakers List, Gallery, Itinerary | No transition fit | Replaced improvised glyphs/CSS drawing with Lucide `Search` | Component tests find `.lucide-search`; browser visual inspection | 97 | Passing |
+
+Pass-2 regression coverage: `test/e2e/public-embed-regressions.spec.ts` plus focused component tests in `test/ui/public-program.test.tsx`.

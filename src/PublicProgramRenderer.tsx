@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@base-ui/react/button";
+import { Search } from "lucide-react";
 import type { ReactNode } from "react";
 
 import type {
@@ -442,9 +443,8 @@ export function PublicProgramRenderer({
         <section className="speaker-directory-filters" aria-label="Speaker filters">
           <label className="speaker-directory-search">
             <span className="sr-only">Search by name or company</span>
-            <span aria-hidden="true" className="speaker-search-icon">⌕</span>
+            <span aria-hidden="true" className="speaker-search-icon"><Search /></span>
             <input type="search" value={filters.query ?? ""} placeholder="Search by name or company" onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value || undefined }))} />
-            <span aria-hidden="true" className="speaker-search-submit">⌕</span>
           </label>
           <AppSelect label="Track" value={filters.trackId ?? ""} options={[{ value: "", label: "All Tracks" }, ...data.event.tracks.map((track) => ({ value: track.id, label: track.name }))]} onValueChange={(value) => setFilters((current) => ({ ...current, trackId: value || undefined }))} />
           <AppSelect label="Role" value={filters.format ?? ""} options={[{ value: "", label: "All Roles" }, ...speakerRoles.map((role) => ({ value: role, label: role }))]} onValueChange={(value) => setFilters((current) => ({ ...current, format: value || undefined }))} />
@@ -452,7 +452,7 @@ export function PublicProgramRenderer({
         </section>
       ) : <section className="program-filters" aria-label="Program filters">
         <label className="program-search-field">
-          <span className="sessions-search-icon" aria-hidden="true"><SearchIcon /></span>
+          <span className="sessions-search-icon" aria-hidden="true"><Search /></span>
           <span className="sessions-visually-hidden">Search sessions or speakers</span>
           <input
             id="program-search"
@@ -657,7 +657,7 @@ function SignalRailGallery({ data, mode, theme, fields, filters, speakers, selec
           <span>Explore the leaders shaping an open, equitable, and data-informed future.</span>
         </header>
         <section className="signal-gallery-filters" aria-label="Program filters">
-          <label className="signal-search"><span className="sr-only">Search speakers</span><input type="search" value={filters.query ?? ""} placeholder="Search speakers…" onChange={(event) => onSetFilters((current) => ({ ...current, query: event.target.value || undefined }))} /></label>
+          <label className="signal-search"><span className="sr-only">Search speakers</span><span className="signal-search-icon" aria-hidden="true"><Search /></span><input type="search" value={filters.query ?? ""} placeholder="Search speakers…" onChange={(event) => onSetFilters((current) => ({ ...current, query: event.target.value || undefined }))} /></label>
           <AppSelect label="Track" value={filters.trackId ?? ""} options={[{ value: "", label: "All Tracks" }, ...data.event.tracks.map((track) => ({ value: track.id, label: track.name }))]} onValueChange={(value) => onSetFilters((current) => ({ ...current, trackId: value || undefined }))} />
           <AppSelect label="Role" value={filters.role ?? ""} options={[{ value: "", label: "All Roles" }, ...Array.from(new Set(data.speakers.map((speaker) => speaker.title).filter(Boolean))).map((role) => ({ value: role ?? "", label: role ?? "" }))]} onValueChange={(value) => onSetFilters((current) => ({ ...current, role: value || undefined }))} />
           <Button type="button" className="signal-clear-filters" disabled={!filters.query && !filters.trackId && !filters.role} onClick={() => onSetFilters(() => ({}))}>Clear filters</Button>
@@ -665,7 +665,7 @@ function SignalRailGallery({ data, mode, theme, fields, filters, speakers, selec
         <p className="signal-gallery-count" role="status" aria-live="polite">{speakers.length} {countNoun(speakers.length, "speaker")}</p>
         {speakers.length ? <ul className="signal-gallery-grid">{speakers.map((speaker) => <li key={speaker.id}><SpeakerGalleryButton speaker={speaker} selected={active?.id === speaker.id} fields={fields} onSelect={() => onSelectSpeaker(speaker.id)} /></li>)}</ul> : <div className="signal-gallery-empty"><h2>No speakers found</h2><p>Try clearing or changing the current filters.</p><button type="button" onClick={() => onSetFilters(() => ({}))}>Clear filters</button></div>}
       </section>
-      {active ? <aside className="signal-speaker-panel t-panel-slide" data-open="true" aria-label={`Selected speaker: ${active.name}`} aria-live="polite" key={active.id}>
+      {active ? <aside className="signal-speaker-panel t-panel-slide" data-open="true" aria-label={`Selected speaker: ${active.name}`} aria-live="polite">
         <p className="signal-selected-label">Selected speaker</p>
         <div className="signal-speaker-intro">{fields.headshots ? <SpeakerAvatar speaker={active} large /> : null}<div><h2>{active.name}</h2><p>{active.title || "Professional details pending"}</p><p>{active.company || ""}</p><strong>{data.event.tracks.find((track) => linked.some((session) => session.trackId === track.id))?.name ?? "Data Leadership"}</strong><span>⌖ Wellington, New Zealand</span></div></div>
         <section><h3>About {active.name.split(" ")[0]}</h3><p>{fields.biography && active.biography ? active.biography : "Biography pending."}</p></section>
@@ -677,10 +677,6 @@ function SignalRailGallery({ data, mode, theme, fields, filters, speakers, selec
 
 function BookmarkIcon({ filled = false }: { filled?: boolean }) {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6.5 3.5h11v17l-5.5-3.7-5.5 3.7z" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.7" /></svg>;
-}
-
-function SearchIcon() {
-  return <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.25" fill="none" stroke="currentColor" strokeWidth="1.8" /><path d="m15.2 15.2 4.3 4.3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>;
 }
 
 function SessionInspector({ session, data, fields, onClose }: {
@@ -754,7 +750,7 @@ function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, 
       <header className="itinerary-heading"><h1>{data.event.name}</h1><p>{dateRange}</p></header>
       <section className="itinerary-controls" aria-label="Program filters">
         <div className="itinerary-days" role="tablist" aria-label="Event day">{days.filter((day) => day !== "tbd").map((day) => <Button role="tab" aria-selected={activeDay === day} key={day} className={activeDay === day ? "is-active" : ""} onClick={() => update("day", day)}>{dayLabel(day)}</Button>)}</div>
-        <label className="itinerary-search"><span aria-hidden="true"><SearchIcon /></span><span className="sr-only">Search sessions or speakers</span><input type="search" value={filters.query ?? ""} placeholder="Search sessions, speakers, topics..." onChange={(event) => update("query", event.target.value)} /></label>
+        <label className="itinerary-search"><span aria-hidden="true"><Search /></span><span className="sr-only">Search sessions or speakers</span><input type="search" value={filters.query ?? ""} placeholder="Search sessions, speakers, topics..." onChange={(event) => update("query", event.target.value)} /></label>
         <AppSelect label="Track" value={filters.trackId ?? ""} options={[{ value: "", label: "Track" }, ...data.event.tracks.map((track) => ({ value: track.id, label: track.name }))]} onValueChange={(value) => update("trackId", value)} hideLabel />
         <AppSelect label="Location" value={filters.roomId ?? ""} options={[{ value: "", label: "Room" }, ...data.event.rooms.map((room) => ({ value: room.id, label: room.name })), { value: "tbd", label: "Location pending" }]} onValueChange={(value) => update("roomId", value)} hideLabel />
         <AppSelect label="Format" value={filters.format ?? ""} options={[{ value: "", label: "Session type" }, ...formats.map((format) => ({ value: format, label: format }))]} onValueChange={(value) => update("format", value)} hideLabel />
@@ -944,12 +940,13 @@ function AtlasSessionRow({ session, fields, selected, saved, onToggleSaved, onSe
   const format = session.format || "Session";
   return (
     <article className={`atlas-session-row ${trackClass(session.trackId)}${selected ? " is-selected" : ""}`} data-testid={`public-session-card-${session.id}`}>
+      <Button type="button" className="atlas-row-open" aria-label={`Open ${session.title} session details`} aria-pressed={selected} onClick={onSelect} />
       <div className="atlas-track">
         <span className="atlas-track-icon" aria-hidden="true">{session.trackName.includes("Data") ? "▤" : session.trackName.includes("Capacity") ? "♙" : session.trackName.includes("Environment") ? "◇" : session.trackName.includes("Privacy") ? "⬡" : "▥"}</span>
         {fields.track ? <strong>{session.trackName}</strong> : null}
       </div>
       <div className="atlas-summary">
-        <h3><button type="button" aria-pressed={selected} onClick={onSelect}>{fields.title ? session.title : "Session details"}</button></h3>
+        <h3>{fields.title ? session.title : "Session details"}</h3>
         {fields.description ? <p>{truncateDescription(session.description, 105)}</p> : null}
       </div>
       <div className="atlas-kind-speakers">
@@ -963,9 +960,7 @@ function AtlasSessionRow({ session, fields, selected, saved, onToggleSaved, onSe
         {fields.dateTime ? <span>{session.day ? `${dayLabel(session.day).replace(/^\w+,?\s*/, "")}, ${timeLabel(session)}` : "Time TBD"}</span> : null}
         {fields.room ? <span><b aria-hidden="true">⌖</b>{roomLabel(session)}</span> : null}
       </div>
-      <button type="button" className="atlas-view" aria-label={`View ${session.title} details`} aria-pressed={selected} onClick={onSelect}>View session</button>
       <Button type="button" className="atlas-save" aria-label={`${saved ? "Remove" : "Save"} ${session.title} ${saved ? "from" : "to"} itinerary`} aria-pressed={saved} onClick={onToggleSaved}><BookmarkIcon filled={saved} /></Button>
-      <span className="atlas-chevron" aria-hidden="true">›</span>
       <span className="sessions-visually-hidden">{sessionDuration(session)}</span>
     </article>
   );
