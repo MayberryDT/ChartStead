@@ -1,11 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useRouterState } from "@tanstack/react-router";
+import { Button } from "@base-ui/react/button";
 
 import type { PublicEmbedWidget, PublicProgramFilters } from "../shared/events";
 import { isPublicEmbedWidget } from "../shared/public-program";
 import markOnLightUrl from "../design/assets/brand/chartstead-mark-on-light.png";
 import { ApiError, fetchPublicEmbed, fetchPublicProgram } from "./api";
 import { PublicProgramRenderer } from "./PublicProgramRenderer";
+import { demoSpeakerGalleryFixture } from "./demoSpeakerGalleryFixture";
 
 type ProgramSurface = PublicEmbedWidget | "program";
 
@@ -17,6 +19,7 @@ function parseProgramFilters(search: Record<string, unknown>): PublicProgramFilt
     roomId: typeof search.roomId === "string" ? search.roomId : undefined,
     format: typeof search.format === "string" ? search.format : undefined,
     speakerId: typeof search.speakerId === "string" ? search.speakerId : undefined,
+    role: typeof search.role === "string" ? search.role : undefined,
   };
 }
 
@@ -25,6 +28,9 @@ function programSearch(
   filters: PublicProgramFilters,
   selectedSessionId: string | null,
   widget?: ProgramSurface,
+  selectedSpeakerId?: string | null,
+  itinerarySessionIds: string[] = [],
+  fixture?: string,
 ) {
   return {
     revision: revisionId,
@@ -35,7 +41,11 @@ function programSearch(
     roomId: filters.roomId,
     format: filters.format,
     speakerId: filters.speakerId,
+    role: filters.role,
     session: selectedSessionId ?? undefined,
+    speaker: selectedSpeakerId ?? undefined,
+    itinerary: itinerarySessionIds.length ? itinerarySessionIds.join(",") : undefined,
+    fixture,
   };
 }
 
@@ -56,16 +66,49 @@ export function PublicProgramPage({
     typeof search.revision === "string" ? search.revision : undefined;
   const searchWidget = isPublicEmbedWidget(search.widget) ? search.widget : undefined;
   const surface = widget ?? searchWidget ?? "program";
+  const useSignalRailFixture = surface === "speaker-gallery" && search.fixture === "signal-rail";
+  const fixture = typeof search.fixture === "string" ? search.fixture : undefined;
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const filters = parseProgramFilters(search);
   const selectedSessionId =
     typeof search.session === "string" ? search.session : null;
+  const selectedSpeakerId =
+    typeof search.speaker === "string" ? search.speaker : null;
+  const itineraryFromUrl = typeof search.itinerary === "string"
+    ? Array.from(new Set(search.itinerary.split(",").map((id) => id.trim()).filter(Boolean)))
+    : [];
+  const itineraryStorageKey = `chartstead:itinerary:${eventId}:${revisionId ?? "current"}`;
+  const itinerary = useQuery({
+    queryKey: ["public-itinerary", eventId, revisionId ?? "current"],
+    queryFn: () => {
+      if (itineraryFromUrl.length) return itineraryFromUrl;
+      try { return JSON.parse(localStorage.getItem(itineraryStorageKey) ?? "[]") as string[]; }
+      catch { return []; }
+    },
+    initialData: () => {
+      if (itineraryFromUrl.length) return itineraryFromUrl;
+      try { return JSON.parse(localStorage.getItem(itineraryStorageKey) ?? "[]") as string[]; }
+      catch { return []; }
+    },
+    staleTime: Infinity,
+  });
 
   const updateProgramSearch = (
     nextFilters: PublicProgramFilters,
     nextSessionId: string | null,
+    nextSpeakerId = selectedSpeakerId,
+    nextItinerarySessionIds = itinerary.data,
   ) => {
-    const nextSearch = programSearch(revisionId, nextFilters, nextSessionId, surface);
+    const nextSearch = programSearch(
+      revisionId,
+      nextFilters,
+      nextSessionId,
+      surface,
+      nextSpeakerId,
+      nextItinerarySessionIds,
+      fixture,
+    );
     if (mode === "embed") {
       void navigate({
         to: "/e/$eventId/program/embed",
@@ -80,6 +123,28 @@ export function PublicProgramPage({
       search: nextSearch,
     });
   };
+
+  const itineraryMutation = useMutation({
+    mutationFn: async (nextIds: string[]) => {
+      localStorage.setItem(itineraryStorageKey, JSON.stringify(nextIds));
+      return nextIds;
+    },
+    onMutate: async (nextIds) => {
+      const key = ["public-itinerary", eventId, revisionId ?? "current"] as const;
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<string[]>(key) ?? [];
+      queryClient.setQueryData(key, nextIds);
+      updateProgramSearch(filters, selectedSessionId, selectedSpeakerId, nextIds);
+      return { previous, key };
+    },
+    onError: (_error, _nextIds, context) => {
+      if (context) {
+        queryClient.setQueryData(context.key, context.previous);
+        updateProgramSearch(filters, selectedSessionId, selectedSpeakerId, context.previous);
+      }
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["public-itinerary", eventId] }),
+  });
 
   const program = useQuery({
     queryKey: ["public-program", eventId, revisionId ?? "current"],
@@ -104,6 +169,7 @@ export function PublicProgramPage({
               ? program.error.message
               : "Unable to load the public program."}
           </p>
+          <Button type="button" onClick={() => void program.refetch()}>Try again</Button>
           {mode === "page" ? <Link to="/">Return to ChartStead</Link> : null}
         </section>
       </main>
@@ -118,28 +184,34 @@ export function PublicProgramPage({
         </div>
       ) : null}
       <PublicProgramRenderer
-        data={program.data}
+        data={useSignalRailFixture ? demoSpeakerGalleryFixture : program.data}
         mode={mode}
         widget={surface}
         filters={filters}
         onFiltersChange={(nextFilters) => updateProgramSearch(nextFilters, null)}
         selectedSessionId={selectedSessionId}
         onSelectSession={(sessionId) => updateProgramSearch(filters, sessionId)}
+        selectedSpeakerId={selectedSpeakerId}
+        onSelectSpeaker={(speakerId) => updateProgramSearch(filters, selectedSessionId, speakerId)}
+        itinerarySessionIds={itinerary.data}
+        onItinerarySessionIdsChange={(sessionIds) => itineraryMutation.mutate(sessionIds)}
+        itineraryPending={itineraryMutation.isPending}
+        itineraryError={itineraryMutation.isError ? "We couldn't save that itinerary change." : null}
       />
-      <footer className="program-footer">
+      {surface !== "itinerary" ? <footer className="program-footer">
         <p>Powered by ChartStead</p>
         {mode === "page" ? (
           <p>
             <Link
               to="/e/$eventId/program/embed"
               params={{ eventId }}
-              search={programSearch(revisionId, filters, selectedSessionId, surface)}
+              search={programSearch(revisionId, filters, selectedSessionId, surface, selectedSpeakerId, itinerary.data, fixture)}
             >
               Embed view
             </Link>
           </p>
         ) : null}
-      </footer>
+      </footer> : null}
     </main>
   );
 }
@@ -195,6 +267,7 @@ export function PublicManagedEmbedPage() {
               ? embed.error.message
               : "Unable to load the public embed."}
           </p>
+          <Button type="button" onClick={() => void embed.refetch()}>Try again</Button>
         </section>
       </main>
     );

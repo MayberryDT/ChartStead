@@ -34,6 +34,10 @@ import { SubmitterEditPage } from "./SubmitterEditPage";
 import { SubmitterDashboardPage } from "./SubmitterDashboardPage";
 import { ReviewerInvitationPage } from "./ReviewerInvitationPage";
 import { DemoPersonasPage } from "./DemoPersonasPage";
+import { AgendaEmbedFixture } from "./AgendaEmbedFixture";
+import { SpeakersListFixturePage } from "./SpeakersListFixturePage";
+import { SessionsEmbedFixturePage } from "./SessionsEmbedFixturePage";
+import { ItineraryEmbedFixture } from "./ItineraryEmbedFixture";
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
@@ -49,6 +53,30 @@ const demoPersonasRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/demo",
   component: DemoPersonasPage,
+});
+
+const agendaEmbedFixtureRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/fixtures/agenda-embed",
+  component: AgendaEmbedFixture,
+});
+
+const speakersListFixtureRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/fixtures/embeds/speakers-list",
+  component: SpeakersListFixturePage,
+});
+
+const sessionsEmbedFixtureRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/demo/embeds/sessions-list",
+  component: SessionsEmbedFixturePage,
+});
+
+const itineraryEmbedFixtureRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/fixtures/itinerary-embed",
+  component: ItineraryEmbedFixture,
 });
 
 const cfpRoute = createRoute({
@@ -189,8 +217,12 @@ function validateProgramSearch(search: Record<string, unknown>) {
     roomId: typeof search.roomId === "string" ? search.roomId : undefined,
     format: typeof search.format === "string" ? search.format : undefined,
     speakerId: typeof search.speakerId === "string" ? search.speakerId : undefined,
+    role: typeof search.role === "string" ? search.role : undefined,
+    speaker: typeof search.speaker === "string" ? search.speaker : undefined,
     session: typeof search.session === "string" ? search.session : undefined,
+    itinerary: typeof search.itinerary === "string" ? search.itinerary : undefined,
     widget: typeof search.widget === "string" ? search.widget : undefined,
+    fixture: typeof search.fixture === "string" ? search.fixture : undefined,
   };
 }
 
@@ -269,6 +301,10 @@ function validateProposalQueueSearch(search: Record<string, unknown>): {
 const routeTree = rootRoute.addChildren([
   indexRoute,
   demoPersonasRoute,
+  agendaEmbedFixtureRoute,
+  speakersListFixtureRoute,
+  sessionsEmbedFixtureRoute,
+  itineraryEmbedFixtureRoute,
   cfpRoute,
   proposalDetailRoute,
   submitterEditRoute,
