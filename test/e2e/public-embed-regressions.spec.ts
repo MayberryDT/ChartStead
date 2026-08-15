@@ -78,6 +78,7 @@ test.describe("public embed regression geometry", () => {
     await page.setViewportSize({ width: 1873, height: 923 });
     await page.goto("/demo/embeds/sessions-list");
     await page.getByRole("button", { name: "Open Public Infrastructure for Everyone session details" }).click();
+    await expect(page.locator(".program-renderer.widget-sessions")).toHaveCSS("padding-right", "418px");
 
     const inspector = await page.getByRole("complementary", { name: /Session details:/ }).boundingBox();
     const row = await page.locator(".atlas-session-row").first().boundingBox();
@@ -92,6 +93,7 @@ test.describe("public embed regression geometry", () => {
     await page.setViewportSize({ width: 1536, height: 1024 });
     await page.goto("/fixtures/agenda-embed");
     await page.getByRole("button", { name: "Open Public Infrastructure for Everyone session details" }).click();
+    await expect(page.locator(".agenda-embed")).toHaveCSS("padding-right", "390px");
     const inspector = await page.getByRole("complementary", { name: /Session details:/ }).boundingBox();
     const row = await page.locator(".agenda-row").first().boundingBox();
     expect(inspector).not.toBeNull();
@@ -130,11 +132,32 @@ test.describe("public embed regression geometry", () => {
     expect(before).not.toBeNull();
     expect(after).not.toBeNull();
     expect(after!.y).toBeLessThan(before!.y - 1);
+    await expect(page.locator(".program-speaker-directory")).toHaveCSS("overflow", "visible");
+    await expect(speakerCard.locator(".program-speaker-hover-avatar")).not.toHaveCSS("transform", "none");
 
     await page.goto("/e/pacific-open-data-summit-2026/program/embed?widget=speaker-gallery&fixture=signal-rail");
     const galleryInspector = page.getByRole("complementary", { name: /Selected speaker:/ });
     await expect(galleryInspector.getByText("Selected speaker", { exact: true })).toHaveCount(0);
     await page.locator(".signal-gallery-grid .program-speaker-gallery-card").nth(1).click();
     await expect(galleryInspector.locator(".signal-speaker-panel-content")).toHaveCSS("opacity", "1");
+  });
+
+  test("the program surface eases around the session inspector", async ({ page }) => {
+    await page.setViewportSize({ width: 1536, height: 1024 });
+    await page.goto("/demo/embeds/sessions-list");
+    const sessions = page.locator(".program-renderer.widget-sessions");
+    expect(await sessions.evaluate((node) => Number.parseFloat(getComputedStyle(node).paddingRight))).toBe(28);
+
+    await page.getByRole("button", { name: "Open Public Infrastructure for Everyone session details" }).click();
+    const openingPadding = await sessions.evaluate((node) => Number.parseFloat(getComputedStyle(node).paddingRight));
+    expect(openingPadding).toBeGreaterThan(28);
+    expect(openingPadding).toBeLessThan(418);
+    await expect(sessions).toHaveCSS("padding-right", "418px");
+
+    await page.getByRole("button", { name: "Close session details" }).click();
+    const closingPadding = await sessions.evaluate((node) => Number.parseFloat(getComputedStyle(node).paddingRight));
+    expect(closingPadding).toBeGreaterThan(28);
+    expect(closingPadding).toBeLessThan(418);
+    await expect(sessions).toHaveCSS("padding-right", "28px");
   });
 });

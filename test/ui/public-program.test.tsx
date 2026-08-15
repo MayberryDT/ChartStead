@@ -238,6 +238,22 @@ describe("PublicProgramRenderer", () => {
     expect(savedSession).toHaveAttribute("aria-current", "true");
   });
 
+  it("highlights the selected session card in the itinerary schedule grid", async () => {
+    const user = userEvent.setup();
+    render(<PublicProgramRenderer data={programResponse()} mode="embed" widget="itinerary" />);
+
+    const grid = screen.getByRole("grid", { name: "Schedule itinerary" });
+    const session = within(grid).getByRole("button", { name: "View Opening Keynote details" });
+    const card = session.closest("article");
+    expect(card).not.toHaveClass("is-selected");
+    expect(session).not.toHaveAttribute("aria-current");
+
+    await user.click(session);
+
+    expect(card).toHaveClass("is-selected");
+    expect(session).toHaveAttribute("aria-current", "true");
+  });
+
   it("keeps the speakers list as a card-only directory without profile actions", () => {
     render(<PublicProgramRenderer data={programResponse()} mode="embed" widget="speakers" />);
 

@@ -53,6 +53,35 @@ function useInspectorMotion() {
   };
 }
 
+function useInspectorLayoutMotion(
+  surface: "sessions" | "agenda" | "itinerary",
+  open: boolean,
+) {
+  const reduceMotion = useReducedMotion();
+  const [viewportWidth, setViewportWidth] = useState(
+    () => typeof window === "undefined" ? 1440 : window.innerWidth,
+  );
+
+  useEffect(() => {
+    const updateWidth = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", updateWidth);
+    return () => window.removeEventListener("resize", updateWidth);
+  }, []);
+
+  const closedPadding = surface === "sessions" ? (viewportWidth <= 700 ? 16 : 28) : 0;
+  const openPadding = viewportWidth <= 900
+    ? closedPadding
+    : surface === "sessions"
+      ? viewportWidth <= 1200 ? 386 : 418
+      : viewportWidth <= 1200 ? 360 : 390;
+
+  return {
+    initial: false as const,
+    animate: { paddingRight: open ? openPadding : closedPadding },
+    transition: reduceMotion ? { duration: 0 } : premiumSpring,
+  };
+}
+
 function trackClass(trackId: string): string {
   if (!trackId) return "track-1";
   const known = [
@@ -374,6 +403,10 @@ export function PublicProgramRenderer({
     },
     [currentWidget, data.speakers, filters.format, speakers],
   );
+  const sessionLayoutMotion = useInspectorLayoutMotion(
+    "sessions",
+    currentWidget === "sessions" && Boolean(selected || scheduleOpen),
+  );
 
   if (currentWidget === "agenda") {
     return (
@@ -434,7 +467,8 @@ export function PublicProgramRenderer({
   }
 
   return (
-    <div
+    <motion.div
+      {...(currentWidget === "sessions" ? sessionLayoutMotion : {})}
       className={`program-renderer mode-${mode} widget-${currentWidget} theme-${theme}${currentWidget === "sessions" && (selected || scheduleOpen) ? " has-session-inspector" : ""}`}
       style={accentStyle}
       data-testid="public-program-renderer"
@@ -588,7 +622,7 @@ export function PublicProgramRenderer({
           onToggleSpeakerBiography={toggleSpeakerBiography}
         />
       )}
-    </div>
+    </motion.div>
   );
 }
 
@@ -613,6 +647,7 @@ function AgendaEmbedView({
   onItinerarySessionIdsChange: (sessionIds: Set<string>) => void;
   onSelectSession: (sessionId: string | null) => void;
 }) {
+  const layoutMotion = useInspectorLayoutMotion("agenda", Boolean(selected));
   const saved = itinerarySessionIds;
   const days = Array.from(new Set(data.sessions.map((session) => session.day).filter(Boolean))) as string[];
   const visibleSessions = filters.day ? sessions : sessions.filter((session) => session.day === days[0]);
@@ -621,7 +656,7 @@ function AgendaEmbedView({
   const clearFilters = () => onFiltersChange({});
 
   return (
-    <div className={`agenda-embed program-renderer widget-agenda${selected ? " has-session-inspector" : ""}`} data-testid="public-program-renderer">
+    <motion.div {...layoutMotion} className={`agenda-embed program-renderer widget-agenda${selected ? " has-session-inspector" : ""}`} data-testid="public-program-renderer">
       <header className="agenda-heading">
         <div>
           <h1>{data.event.name}</h1>
@@ -664,7 +699,7 @@ function AgendaEmbedView({
       <AnimatePresence initial={false} mode="wait">
         {selected ? <SessionInspector key={selected.id} session={selected} data={data} fields={fields} onClose={() => onSelectSession(null)} /> : null}
       </AnimatePresence>
-    </div>
+    </motion.div>
   );
 }
 
@@ -801,12 +836,13 @@ function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, 
   };
   const savedSessions = data.sessions.filter((session) => savedIds.has(session.id));
   const selected = data.sessions.find((session) => session.id === selectedId) ?? null;
+  const layoutMotion = useInspectorLayoutMotion("itinerary", Boolean(selected));
   const start = new Date(`${data.event.startsOn}T00:00:00Z`);
   const end = new Date(`${data.event.endsOn}T00:00:00Z`);
   const dateRange = start.getUTCFullYear() === end.getUTCFullYear() && start.getUTCMonth() === end.getUTCMonth()
     ? `${new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(start)} ${start.getUTCDate()}–${end.getUTCDate()}, ${end.getUTCFullYear()}`
     : `${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(start)} – ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(end)}`;
-  return <div className={`program-renderer indexed-itinerary mode-${mode} widget-itinerary theme-${theme}${selected ? " has-session-inspector" : ""}`} style={accentStyle} data-testid="public-program-renderer">
+  return <motion.div {...layoutMotion} className={`program-renderer indexed-itinerary mode-${mode} widget-itinerary theme-${theme}${selected ? " has-session-inspector" : ""}`} style={accentStyle} data-testid="public-program-renderer">
     <aside className="itinerary-rail" aria-label="My itinerary">
       <section className="itinerary-saved">
         <header><h2>My itinerary</h2><span>{savedSessions.length} saved</span></header>
@@ -840,9 +876,9 @@ function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, 
       {sessions.length === 0 ? <p className="itinerary-empty" role="status">No sessions match these filters.</p> : <div className="itinerary-grid-wrap">
         <div className="itinerary-grid" role="grid" aria-label="Schedule itinerary" style={{ ["--room-count" as string]: roomIds.length }}>
           <div className="itinerary-corner" role="columnheader">Time</div>{data.event.rooms.map((room) => <div key={room.id} className="itinerary-room" role="columnheader" aria-label={room.name}>{room.name}<small>{room.readiness === "ready" ? "Ready" : "Pending"}</small></div>)}
-          {times.map((time) => <div className="itinerary-time-row" role="row" key={time}><time>{formatClock(`2026-10-07T${time}:00.000Z`)}</time>{roomIds.map((roomId) => { const items = scheduled.filter((session) => session.startsAt!.slice(11, 16) === time && session.roomId === roomId); return <div className="itinerary-cell" role="gridcell" key={roomId}>{items.map((session) => <article key={session.id} className={`itinerary-card ${trackClass(session.trackId)} ${savedIds.has(session.id) ? "is-saved" : ""}`}>
-            <button type="button" className="itinerary-card-open" aria-label={`View ${session.title} details`} onClick={() => onSelectSession(session.id)}><span>{timeLabel(session)}</span><h2>{session.title}</h2>{session.speakers.length ? <p>{session.speakers.map((speaker) => speaker.name).join(", ")}</p> : null}<small><i />{session.trackName || session.format}</small></button><Button type="button" className="itinerary-card-save" disabled={itineraryPending} aria-label={savedIds.has(session.id) ? `Remove ${session.title} from itinerary` : `Save ${session.title}`} aria-pressed={savedIds.has(session.id)} onClick={() => toggleSaved(session.id)}><BookmarkIcon filled={savedIds.has(session.id)} /></Button>
-          </article>)}</div>})}</div>)}
+          {times.map((time) => <div className="itinerary-time-row" role="row" key={time}><time>{formatClock(`2026-10-07T${time}:00.000Z`)}</time>{roomIds.map((roomId) => { const items = scheduled.filter((session) => session.startsAt!.slice(11, 16) === time && session.roomId === roomId); return <div className="itinerary-cell" role="gridcell" key={roomId}>{items.map((session) => { const isSelected = selected?.id === session.id; return <article key={session.id} className={`itinerary-card ${trackClass(session.trackId)}${savedIds.has(session.id) ? " is-saved" : ""}${isSelected ? " is-selected" : ""}`}>
+            <button type="button" className="itinerary-card-open" aria-label={`View ${session.title} details`} aria-current={isSelected ? "true" : undefined} onClick={() => onSelectSession(session.id)}><span>{timeLabel(session)}</span><h2>{session.title}</h2>{session.speakers.length ? <p>{session.speakers.map((speaker) => speaker.name).join(", ")}</p> : null}<small><i />{session.trackName || session.format}</small></button><Button type="button" className="itinerary-card-save" disabled={itineraryPending} aria-label={savedIds.has(session.id) ? `Remove ${session.title} from itinerary` : `Save ${session.title}`} aria-pressed={savedIds.has(session.id)} onClick={() => toggleSaved(session.id)}><BookmarkIcon filled={savedIds.has(session.id)} /></Button>
+          </article>; })}</div>})}</div>)}
         </div>
       </div>}
       {pending.length ? <section className="itinerary-pending" aria-label="Time or location pending"><h2>To be scheduled</h2>{pending.map((session) => <span key={session.id}>{session.title} · {roomLabel(session)}</span>)}</section> : null}
@@ -852,7 +888,7 @@ function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, 
       {selected ? <SessionInspector key={selected.id} session={selected} data={data} fields={DEFAULT_PUBLIC_EMBED_FIELDS} saved={savedIds.has(selected.id)} itineraryPending={itineraryPending} onToggleSaved={() => toggleSaved(selected.id)} onClose={() => onSelectSession(null)} /> : null}
     </AnimatePresence>
     <footer className="itinerary-footer">Powered by <strong>ChartStead</strong></footer>
-  </div>;
+  </motion.div>;
 }
 
 function FullProgramLayout({
@@ -1482,8 +1518,8 @@ function SpeakerDirectoryButton({
 }) {
   const reduceMotion = useReducedMotion();
   const content = <>
-      {fields.headshots ? <SpeakerAvatar speaker={speaker} /> : null}
-      <span className="program-speaker-list-copy">
+      {fields.headshots ? <motion.span className="program-speaker-hover-avatar" variants={{ rest: { scale: 1, rotate: 0 }, hover: { scale: 1.055, rotate: -0.8 } }} transition={premiumSpring}><SpeakerAvatar speaker={speaker} /></motion.span> : null}
+      <motion.span className="program-speaker-list-copy" variants={{ rest: { x: 0 }, hover: { x: 3 } }} transition={premiumSpring}>
         <span className="program-speaker-list-heading">
         <strong>{speaker.name}</strong>
           {!compact && interactive ? <span>View profile&nbsp; ›</span> : null}
@@ -1493,15 +1529,16 @@ function SpeakerDirectoryButton({
         {sessions.length > 0 ? <span className={`program-speaker-session-links ${trackClass(sessions[0]!.trackId)}`}>
           {compact ? <span>{sessions[0]!.title}{sessions.length > 1 ? ` +${sessions.length - 1} more` : ""}</span> : sessions.map((session, index) => <span key={session.id}>{index > 0 ? <i aria-hidden="true">•</i> : null}{session.title}</span>)}
         </span> : null}
-      </span>
+      </motion.span>
     </>;
   if (!interactive) return <motion.article
     className="program-speaker-list-entry"
     data-motion-surface="speaker-card"
-    whileHover={reduceMotion ? undefined : {
-      y: -4,
-      scale: 1.012,
-      boxShadow: "0 14px 30px rgba(23, 73, 130, 0.16), inset 4px 0 0 #2f5d98",
+    initial="rest"
+    whileHover={reduceMotion ? undefined : "hover"}
+    variants={{
+      rest: { y: 0, scale: 1, boxShadow: "0 0 0 rgba(23, 73, 130, 0)", backgroundColor: "#ffffff" },
+      hover: { y: -4, scale: 1.012, boxShadow: "0 14px 30px rgba(23, 73, 130, 0.16), inset 4px 0 0 #2f5d98", backgroundColor: "#f7fbff" },
     }}
     transition={premiumSpring}
   >{content}</motion.article>;
