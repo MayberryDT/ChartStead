@@ -10476,11 +10476,27 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
   background: #e8f1fb;
 }
 .program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-detail-header {
+  position: relative;
   margin: -30px -28px 4px;
   padding: 24px 28px;
   border-bottom: 1px solid #c9d9ea;
   background: #e8f1fb;
 }
+.program-renderer.widget-speakers .program-speaker-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 34px;
+  min-height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #173b6b;
+  font-size: 24px;
+}
+.program-renderer.widget-speakers .program-speaker-close:hover { background: #f2f4f7; }
 .program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-detail { align-content: start; }
 
 .signal-gallery-heading { padding-left: 16px; border-left: 4px solid #2f5d98; }
@@ -10516,4 +10532,223 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
     border-inline: 0;
     border-radius: 0;
   }
+}
+
+/* Corrective embed pass: responsive sessions rail and compact speaker cards. */
+.widget-sessions .program-header { padding-right: 0; margin-bottom: 10px; }
+.sessions-meta-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  padding-block: 6px;
+  border-block: 1px solid #e1e6ed;
+}
+.widget-sessions .sessions-total {
+  position: static;
+  color: #526071;
+  font-size: 13px;
+  font-weight: 650;
+}
+.sessions-my-schedule {
+  position: static;
+  min-height: 36px;
+  gap: 8px;
+  padding: 0 10px;
+  border-color: #c7d1df;
+  border-radius: 4px;
+  background: #fff;
+  color: #173b6b;
+  font-size: 13px;
+}
+.sessions-my-schedule > svg { width: 16px; height: 16px; stroke-width: 1.8; }
+.sessions-my-schedule span {
+  min-width: 20px;
+  min-height: 20px;
+  background: #173b6b;
+  font-size: 11px;
+}
+.sessions-my-schedule:hover { border-color: #2f5d98; background: #f8fafc; }
+
+.program-renderer.widget-sessions { box-sizing: border-box; }
+.program-renderer.widget-sessions.has-session-inspector { padding-right: 418px; }
+.atlas-session-layout,
+.widget-sessions .program-schedule,
+.widget-sessions .program-session-list { min-width: 0; width: 100%; }
+.atlas-session-layout { container-type: inline-size; }
+.atlas-session-row {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  min-height: 90px;
+  grid-template-columns: minmax(145px, .72fr) minmax(250px, 1.6fr) minmax(180px, .95fr) minmax(170px, .88fr) 46px;
+}
+.atlas-session-row > * { min-width: 0; }
+.atlas-session-row > .atlas-save {
+  position: relative;
+  z-index: 3;
+  pointer-events: auto;
+  align-self: center;
+  justify-self: center;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #244c7d;
+}
+.atlas-save svg { width: 18px; height: 18px; stroke-width: 1.8; }
+.atlas-save:hover,
+.atlas-save:focus-visible { border-color: #aebdce; background: #fff; outline: none; }
+.atlas-save[aria-pressed="true"] { color: #0f4f99; }
+
+.public-session-inspector {
+  width: min(390px, 100vw);
+  gap: 18px;
+  padding: 24px;
+  box-shadow: -12px 0 32px rgb(8 29 58 / 9%);
+}
+.public-session-inspector header {
+  margin: 0;
+  padding: 0 0 12px;
+  border-bottom: 1px solid #d7dee7;
+  background: #fff;
+  box-shadow: inset 0 3px #2f5d98;
+}
+.public-session-inspector header p { padding-top: 7px; color: #345270; }
+.public-session-inspector header button { width: 34px; height: 34px; border-radius: 4px; font-size: 24px; }
+.public-session-inspector header button:hover { background: #f2f4f7; }
+.public-session-inspector h2 { font-size: clamp(23px, 2vw, 27px); }
+.session-inspector-speakers ul { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.session-inspector-speakers li { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 11px; align-items: center; }
+.session-inspector-speakers .program-speaker-avatar,
+.session-speaker-fallback { width: 44px; height: 44px; border-radius: 50%; }
+.session-speaker-fallback { display: grid; place-items: center; background: #d9e2e8; color: #17304f; font-size: 11px; font-weight: 700; }
+.session-inspector-speakers li > span:last-child { min-width: 0; display: grid; gap: 2px; }
+.session-inspector-speakers strong { font-size: 14px; }
+.session-inspector-speakers small { color: #526071; font-size: 12px; line-height: 1.35; }
+.session-schedule-action {
+  min-height: 42px;
+  border-color: #2f5d98;
+  background: #fff;
+  color: #214f88;
+}
+.session-schedule-action:hover { background: #f7f9fc; }
+.session-schedule-action[aria-pressed="true"] { background: #173b6b; color: #fff; }
+
+.program-renderer.widget-speakers .program-header {
+  margin: 0;
+  padding: 0 0 18px;
+  border-bottom: 1px solid #dde3eb;
+  background: #fff;
+}
+.program-renderer.widget-speakers .speaker-directory-filters {
+  grid-template-columns: minmax(260px, 1.4fr) minmax(150px, .72fr) minmax(150px, .72fr) auto;
+  gap: 12px;
+}
+.program-renderer.widget-speakers .speaker-directory-filter-actions { min-width: 108px; }
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  overflow: visible;
+  border: 0;
+}
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory > li,
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory > li:nth-child(2n),
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory > li:nth-last-child(-n + 2) {
+  border: 1px solid #d7dee7;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-list-entry {
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: 14px;
+  min-height: 124px;
+  padding: 14px;
+  align-items: start;
+}
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-list-entry .program-speaker-avatar { width: 76px; height: 76px; }
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-list-copy { gap: 3px; }
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-session-links {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 7px;
+  padding: 0;
+  border-left: 0;
+  color: #244c7d;
+  line-height: 1.35;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-list-entry:hover { background: #fafbfc; }
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-list-entry[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 2px #2f5d98;
+  background: #fff;
+}
+.program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-detail-header {
+  margin: -30px -28px 4px;
+  padding: 24px 28px 18px;
+  border-bottom: 1px solid #d7dee7;
+  background: #fff;
+  box-shadow: inset 0 3px #2f5d98;
+}
+.signal-gallery-grid .program-speaker-gallery-card[aria-pressed="true"] { background: #fff; box-shadow: inset 0 0 0 2px #2f5d98; }
+.signal-selected-label { background: #fff; }
+
+@container (max-width: 1050px) {
+  .atlas-session-row { grid-template-columns: minmax(135px, .72fr) minmax(230px, 1.45fr) minmax(170px, .9fr) 44px; }
+  .atlas-logistics { grid-column: 2 / 4; display: flex; gap: 18px; padding-top: 0; }
+}
+@container (max-width: 760px) {
+  .atlas-session-row { grid-template-columns: minmax(110px, .55fr) minmax(220px, 1.45fr) 42px; }
+  .atlas-kind-speakers { grid-column: 2; }
+  .atlas-logistics { grid-column: 2; flex-wrap: wrap; }
+  .atlas-save { grid-column: 3; grid-row: 1 / span 3; }
+}
+
+@media (max-width: 1200px) and (min-width: 901px) {
+  .program-renderer.widget-sessions.has-session-inspector { padding-right: 386px; }
+  .public-session-inspector { width: 360px; }
+}
+@media (max-width: 900px) {
+  .program-renderer.widget-sessions.has-session-inspector { padding-right: 16px; }
+  .public-session-inspector { width: 100vw; height: 100dvh; padding: 22px 18px; }
+  .program-renderer.widget-speakers .speaker-directory-filters { grid-template-columns: 1fr; }
+  .program-renderer.widget-speakers .speaker-directory-search,
+  .program-renderer.widget-speakers .speaker-directory-filter-actions { grid-column: auto; }
+  .program-renderer.widget-speakers .speaker-directory-filter-actions { min-width: 0; justify-items: start; }
+  .program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-directory { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .program-renderer.widget-speakers .program-speakers.is-directory .program-speaker-detail {
+    position: fixed;
+    z-index: 50;
+    inset: 0;
+    left: 0;
+    width: 100vw;
+    max-width: 100vw;
+    height: 100dvh;
+    max-height: none;
+    margin: 0;
+    overflow-y: auto;
+    border: 0;
+    border-radius: 0;
+    background: #fff;
+  }
+}
+@media (max-width: 620px) {
+  .sessions-meta-toolbar { margin-bottom: 12px; }
+  .widget-sessions .program-filters { grid-template-columns: 1fr; }
+  .atlas-session-row { grid-template-columns: 1fr 42px; padding: 0; }
+  .atlas-track,
+  .atlas-summary,
+  .atlas-kind-speakers,
+  .atlas-logistics { grid-column: 1; }
+  .atlas-save { grid-column: 2; grid-row: 1 / span 4; }
+  .atlas-track { min-height: 52px; }
 }

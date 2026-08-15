@@ -20,11 +20,17 @@ const rows = [
   ["Community-Led Data Governance", "Putting residents at the center of decisions about collection, access, stewardship, and accountability.", "Workshop", "privacy", "Room 204", "2026-10-08T17:15:00.000Z", "2026-10-08T18:45:00.000Z", ["Taylor Kim"]],
 ] as const;
 
+const knownPortraits: Record<string, number> = {
+  "Maya Chen": 3,
+  "Jordan Lee": 5,
+  "Priya Nair": 10,
+};
+
 export const sessionsEmbedFixture: PublicProgramResponse = {
   event: { id: "sessions-embed-fixture", name: "Pacific Open Data Summit 2026", startsOn: "2026-10-07", endsOn: "2026-10-08", timezone: "UTC", themeAccent: "#2f5d98", tracks: tracks.map(([id, name]) => ({ id, name })), rooms: ["Grand Hall", "Room 203", "Room 204"].map((name) => ({ id: name.toLowerCase().replace(/ /g, "-"), name, readiness: "ready" })) },
   revision: { id: "fixture-revision", version: 1, publishedAt: "2026-08-14T00:00:00.000Z", isCurrent: true },
   sessions: rows.map(([title, description, format, trackId, roomName, startsAt, endsAt, names], index) => ({ id: `fixture-session-${index + 1}`, title, description, format, trackId, trackName: tracks.find(([id]) => id === trackId)?.[1] ?? trackId, roomId: roomName.toLowerCase().replace(/ /g, "-"), roomName, roomPending: false, startsAt, endsAt, day: startsAt.slice(0, 10), calendarUid: `fixture-${index + 1}@chartstead.test`, calendarSequence: 0, speakers: names.map((name, speakerIndex) => ({ id: `fixture-speaker-${index}-${speakerIndex}`, name, title: "Public data leader", company: "Pacific Open Data Network", role: "primary" })) })),
-  speakers: rows.flatMap((row, index) => row[7].map((name, speakerIndex) => ({ id: `fixture-speaker-${index}-${speakerIndex}`, name, biography: "Public-safe deterministic fixture biography.", headshotAssetId: null, sessionIds: [`fixture-session-${index + 1}`] }))),
+  speakers: rows.flatMap((row, index) => row[7].map((name, speakerIndex) => ({ id: `fixture-speaker-${index}-${speakerIndex}`, name, title: "Public data leader", company: "Pacific Open Data Network", biography: "Public-safe deterministic fixture biography.", headshotAssetId: `fixture-headshot-${index}-${speakerIndex}`, headshotUrl: `/demo/speakers/speaker-${knownPortraits[name] ?? ((index + speakerIndex) % 15) + 1}.webp`, sessionIds: [`fixture-session-${index + 1}`] }))),
   revisions: [{ id: "fixture-revision", version: 1, publishedAt: "2026-08-14T00:00:00.000Z", isCurrent: true }],
 };
 

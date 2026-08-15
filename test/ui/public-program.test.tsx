@@ -156,8 +156,6 @@ describe("PublicProgramRenderer", () => {
         onItinerarySessionIdsChange={onItinerarySessionIdsChange}
       />,
     );
-    expect(screen.queryByRole("button", { name: "Save Opening Keynote to itinerary" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Open Opening Keynote session details" }));
     await user.click(screen.getByRole("button", { name: "Add Opening Keynote to my schedule" }));
     expect(onItinerarySessionIdsChange).toHaveBeenLastCalledWith(["ses-1"]);
 
@@ -227,6 +225,8 @@ describe("PublicProgramRenderer", () => {
     expect(layout.querySelector(".program-speaker-directory")).toBeInTheDocument();
     expect(layout.querySelector(".program-speaker-gallery-card")).not.toBeInTheDocument();
     expect(within(layout).queryByText(/View profile/)).not.toBeInTheDocument();
+    await user.click(within(layout).getByRole("button", { name: "Close speaker profile" }));
+    expect(within(layout).queryByRole("complementary", { name: /Speaker profile:/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Grace Hopper/i }));
     expect(screen.getByRole("complementary", { name: "Speaker profile: Grace Hopper" })).toBeVisible();
 
@@ -244,10 +244,10 @@ describe("PublicProgramRenderer", () => {
 
     expect(screen.queryByRole("button", { name: "View session" })).not.toBeInTheDocument();
     expect(screen.queryByText("›")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Save .* itinerary/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Opening Keynote to my schedule" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Open Opening Keynote session details" }));
     expect(screen.getByRole("complementary", { name: "Session details: Opening Keynote" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Add Opening Keynote to my schedule" })).toBeVisible();
+    expect(screen.getByTestId("public-program-renderer")).toHaveClass("has-session-inspector");
     expect(screen.queryByText("□")).not.toBeInTheDocument();
 
     rerender(<PublicProgramRenderer data={programResponse()} mode="embed" widget="itinerary" />);
@@ -255,6 +255,28 @@ describe("PublicProgramRenderer", () => {
     expect(screen.queryByRole("button", { name: /View my itinerary/i })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "View Opening Keynote details" }));
     expect(screen.getByRole("complementary", { name: "Session details: Opening Keynote" })).toBeVisible();
+  });
+
+  it("keeps agenda sessions free of the shared detail inspector", async () => {
+    const user = userEvent.setup();
+    render(<PublicProgramRenderer data={programResponse()} mode="embed" widget="agenda" />);
+
+    await user.click(screen.getByRole("button", { name: "Save Opening Keynote to itinerary" }));
+    expect(screen.queryByRole("complementary", { name: /Session details:/ })).not.toBeInTheDocument();
+  });
+
+  it("shows existing speaker portraits in session details", async () => {
+    const user = userEvent.setup();
+    const data = programResponse({
+      speakers: programResponse().speakers.map((speaker) => speaker.id === "sp-1"
+        ? { ...speaker, headshotAssetId: "ada-headshot", headshotUrl: "/demo/speakers/speaker-3.webp" }
+        : speaker),
+    });
+    render(<PublicProgramRenderer data={data} mode="embed" widget="sessions" />);
+
+    await user.click(screen.getByRole("button", { name: "Open Opening Keynote session details" }));
+    expect(within(screen.getByRole("complementary", { name: "Session details: Opening Keynote" }))
+      .getByRole("img", { name: "Portrait of Ada Lovelace" })).toHaveAttribute("src", "/demo/speakers/speaker-3.webp");
   });
 
   it("opens My Schedule with exact membership and a combined calendar export", async () => {
@@ -527,7 +549,7 @@ describe("PublicProgramRenderer", () => {
       /Date TBD.*Location pending/i,
     );
 
-    await user.click(within(detail).getByRole("button", { name: "Close" }));
+    await user.click(within(detail).getByRole("button", { name: "Close speaker profile" }));
     expect(screen.queryByRole("article", { name: "Grace Hopper" })).not.toBeInTheDocument();
     expect(search).toHaveValue("Grace");
     expect(within(gallery as HTMLElement).getByText("Grace Hopper")).toBeInTheDocument();

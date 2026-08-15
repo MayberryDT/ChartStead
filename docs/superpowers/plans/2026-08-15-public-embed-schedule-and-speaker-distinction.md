@@ -1,5 +1,7 @@
 # Public Embed Schedule and Speaker Distinction Implementation Plan
 
+> **Corrective review, 2026-08-15:** The final accepted direction restores a minimal row bookmark in Sessions List, reserves inspector width, adds speaker portraits to Session Details, restores compact two-column cards in Speakers List, removes pale-blue header/title fills, and prevents Agenda from mounting the shared Session Details inspector. The earlier row-removal and single-column-directory steps below are historical and no longer authoritative; the companion design spec records the final contract.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Preserve the required personal schedule with clear inspector-owned actions, make My Schedule functional, differentiate the speaker directory from the portrait gallery, and add restrained ChartStead-blue hierarchy.

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@base-ui/react/button";
-import { Search } from "lucide-react";
+import { Bookmark, Search } from "lucide-react";
 import type { ReactNode } from "react";
 
 import type {
@@ -242,6 +242,7 @@ export function PublicProgramRenderer({
     () => new Set(),
   );
   const [internalSelectedSpeakerId, setInternalSelectedSpeakerId] = useState<string | null>(null);
+  const [speakerDetailDismissed, setSpeakerDetailDismissed] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [internalItinerarySessionIds, setInternalItinerarySessionIds] = useState<Set<string>>(
     () => new Set(initialItinerarySessionIds),
@@ -264,6 +265,7 @@ export function PublicProgramRenderer({
   };
 
   const selectSpeaker = (speakerId: string | null) => {
+    if (speakerId) setSpeakerDetailDismissed(false);
     if (onSelectSpeaker) onSelectSpeaker(speakerId);
     else setInternalSelectedSpeakerId(speakerId);
   };
@@ -420,7 +422,7 @@ export function PublicProgramRenderer({
 
   return (
     <div
-      className={`program-renderer mode-${mode} widget-${currentWidget} theme-${theme}`}
+      className={`program-renderer mode-${mode} widget-${currentWidget} theme-${theme}${currentWidget === "sessions" && (selected || scheduleOpen) ? " has-session-inspector" : ""}`}
       style={accentStyle}
       data-testid="public-program-renderer"
     >
@@ -438,9 +440,12 @@ export function PublicProgramRenderer({
           Published revision {data.revision.version}
           {data.revision.isCurrent ? " (current)" : " (archived)"}
         </>}</p>
-        {currentWidget === "sessions" ? <span className="sessions-total">{data.sessions.length} sessions</span> : null}
-        {currentWidget === "sessions" ? <Button type="button" className="sessions-my-schedule" aria-label={`My schedule, ${itinerarySessionIds.size} saved ${countNoun(itinerarySessionIds.size, "session", "sessions")}`} aria-expanded={scheduleOpen} onClick={() => { selectSession(null); setScheduleOpen((open) => !open); }}>My schedule <span>{itinerarySessionIds.size}</span></Button> : null}
       </header>
+
+      {currentWidget === "sessions" ? <div className="sessions-meta-toolbar">
+        <span className="sessions-total">{data.sessions.length} sessions</span>
+        <Button type="button" className="sessions-my-schedule" aria-label={`My schedule, ${itinerarySessionIds.size} saved ${countNoun(itinerarySessionIds.size, "session", "sessions")}`} aria-expanded={scheduleOpen} onClick={() => { selectSession(null); setScheduleOpen((open) => !open); }}><Bookmark aria-hidden="true" />My schedule <span>{itinerarySessionIds.size}</span></Button>
+      </div> : null}
 
       {currentWidget === "speakers" ? (
         <section className="speaker-directory-filters" aria-label="Speaker filters">
@@ -529,7 +534,15 @@ export function PublicProgramRenderer({
             selectedId={selectedId}
             expandedSessionIds={expandedSessionIds}
             fields={fields}
+            itinerarySessionIds={itinerarySessionIds}
+            itineraryPending={itineraryPending}
             onSelectSession={selectSession}
+            onToggleSaved={(sessionId) => {
+              const next = new Set(itinerarySessionIds);
+              if (next.has(sessionId)) next.delete(sessionId);
+              else next.add(sessionId);
+              changeItinerary(next);
+            }}
             onToggleDescription={toggleDescription}
           />
           {scheduleOpen ? <MyScheduleInspector sessions={data.sessions.filter((session) => itinerarySessionIds.has(session.id))} data={data} itineraryPending={itineraryPending} onClose={() => setScheduleOpen(false)} onRemove={(sessionId) => { const next = new Set(itinerarySessionIds); next.delete(sessionId); changeItinerary(next); }} onSelectSession={(sessionId) => { setScheduleOpen(false); selectSession(sessionId); }} /> : selected ? <SessionInspector session={selected} data={data} fields={fields} saved={itinerarySessionIds.has(selected.id)} itineraryPending={itineraryPending} onToggleSaved={() => { const next = new Set(itinerarySessionIds); if (next.has(selected.id)) next.delete(selected.id); else next.add(selected.id); changeItinerary(next); }} onClose={() => selectSession(null)} /> : null}
@@ -541,9 +554,10 @@ export function PublicProgramRenderer({
           sessions={sessions}
           fields={fields}
           variant="directory"
-          selectedSpeaker={selectedSpeaker ?? visibleSpeakers[0] ?? null}
+          selectedSpeaker={speakerDetailDismissed ? null : selectedSpeaker ?? visibleSpeakers[0] ?? null}
           expandedSpeakerBioIds={expandedSpeakerBioIds}
           onSelectSpeaker={selectSpeaker}
+          onDismissSpeaker={() => { setSpeakerDetailDismissed(true); selectSpeaker(null); }}
           onSelectSession={selectSession}
           onToggleSpeakerBiography={toggleSpeakerBiography}
         />
@@ -689,6 +703,9 @@ function SessionInspector({ session, data, fields, saved, itineraryPending = fal
   onToggleSaved?: () => void;
   onClose: () => void;
 }) {
+  const speakers = session.speakers.map((sessionSpeaker) =>
+    data.speakers.find((speaker) => speaker.id === sessionSpeaker.id || speaker.name === sessionSpeaker.name) ?? null,
+  );
   return <aside className="public-session-inspector t-panel-slide" data-open="true" role="complementary" aria-label={`Session details: ${session.title}`}>
     <header><p>Session details</p><Button type="button" aria-label="Close session details" onClick={onClose}>×</Button></header>
     <h2>{fields.title ? session.title : "Session details"}</h2>
@@ -699,7 +716,10 @@ function SessionInspector({ session, data, fields, saved, itineraryPending = fal
       {fields.format ? <div><dt>Type</dt><dd>{session.format || "Format pending"}</dd></div> : null}
     </dl>
     {fields.description && session.description ? <p>{session.description}</p> : null}
-    {fields.speakers && session.speakers.length ? <section><h3>Speakers</h3><p>{session.speakers.map((speaker) => speaker.name).join(", ")}</p></section> : null}
+    {fields.speakers && session.speakers.length ? <section className="session-inspector-speakers"><h3>Speakers</h3><ul>{session.speakers.map((sessionSpeaker, index) => {
+      const speaker = speakers[index];
+      return <li key={sessionSpeaker.id}>{speaker ? <SpeakerAvatar speaker={speaker} /> : <span className="session-speaker-fallback" aria-hidden="true">{sessionSpeakerInitials(sessionSpeaker.name)}</span>}<span><strong>{sessionSpeaker.name}</strong><small>{[sessionSpeaker.title, sessionSpeaker.company].filter(Boolean).join(" · ")}</small></span></li>;
+    })}</ul></section> : null}
     {onToggleSaved ? <Button type="button" className="session-schedule-action" disabled={itineraryPending} aria-pressed={saved} aria-label={`${saved ? "Remove" : "Add"} ${session.title} ${saved ? "from" : "to"} my schedule`} onClick={onToggleSaved}>{saved ? "Remove from my schedule" : "Add to my schedule"}</Button> : null}
     <AddToCalendarMenu eventId={data.event.id} session={session} revisionId={data.revision.isCurrent ? undefined : data.revision.id} />
   </aside>;
@@ -910,7 +930,10 @@ function SessionListView({
   selectedId,
   expandedSessionIds,
   fields,
+  itinerarySessionIds,
+  itineraryPending = false,
   onSelectSession,
+  onToggleSaved,
   onToggleDescription,
 }: {
   atlas?: boolean;
@@ -918,7 +941,10 @@ function SessionListView({
   selectedId: string | null;
   expandedSessionIds: Set<string>;
   fields: PublicEmbedFieldVisibility;
+  itinerarySessionIds?: Set<string>;
+  itineraryPending?: boolean;
   onSelectSession: (sessionId: string | null) => void;
+  onToggleSaved?: (sessionId: string) => void;
   onToggleDescription: (sessionId: string) => void;
 }) {
   return (
@@ -930,7 +956,7 @@ function SessionListView({
         <ul className="program-session-list">
           {sessions.map((session) => (
             <li key={session.id}>
-              {atlas ? <AtlasSessionRow session={session} fields={fields} selected={selectedId === session.id} onSelect={() => onSelectSession(selectedId === session.id ? null : session.id)} /> : <SessionCard
+              {atlas ? <AtlasSessionRow session={session} fields={fields} selected={selectedId === session.id} saved={itinerarySessionIds?.has(session.id) ?? false} itineraryPending={itineraryPending} onToggleSaved={onToggleSaved ? () => onToggleSaved(session.id) : undefined} onSelect={() => onSelectSession(selectedId === session.id ? null : session.id)} /> : <SessionCard
                 session={session}
                 selected={selectedId === session.id}
                 expanded={expandedSessionIds.has(session.id)}
@@ -946,10 +972,13 @@ function SessionListView({
   );
 }
 
-function AtlasSessionRow({ session, fields, selected, onSelect }: {
+function AtlasSessionRow({ session, fields, selected, saved, itineraryPending, onToggleSaved, onSelect }: {
   session: PublicProgramSession;
   fields: PublicEmbedFieldVisibility;
   selected: boolean;
+  saved: boolean;
+  itineraryPending: boolean;
+  onToggleSaved?: () => void;
   onSelect: () => void;
 }) {
   const speakers = session.speakers;
@@ -976,6 +1005,7 @@ function AtlasSessionRow({ session, fields, selected, onSelect }: {
         {fields.dateTime ? <span>{session.day ? `${dayLabel(session.day).replace(/^\w+,?\s*/, "")}, ${timeLabel(session)}` : "Time TBD"}</span> : null}
         {fields.room ? <span><b aria-hidden="true">⌖</b>{roomLabel(session)}</span> : null}
       </div>
+      {onToggleSaved ? <Button type="button" className="atlas-save" disabled={itineraryPending} aria-pressed={saved} aria-label={`${saved ? "Remove" : "Add"} ${session.title} ${saved ? "from" : "to"} my schedule`} onClick={onToggleSaved}><Bookmark aria-hidden="true" fill={saved ? "currentColor" : "none"} /></Button> : null}
       <span className="sessions-visually-hidden">{sessionDuration(session)}</span>
     </article>
   );
@@ -1299,6 +1329,7 @@ function SpeakerListView({
   selectedSpeaker,
   expandedSpeakerBioIds,
   onSelectSpeaker,
+  onDismissSpeaker,
   onSelectSession,
   onToggleSpeakerBiography,
 }: {
@@ -1310,6 +1341,7 @@ function SpeakerListView({
   selectedSpeaker: PublicProgramSpeaker | null;
   expandedSpeakerBioIds: Set<string>;
   onSelectSpeaker: (speakerId: string | null) => void;
+  onDismissSpeaker?: () => void;
   onSelectSession: (sessionId: string) => void;
   onToggleSpeakerBiography: (speakerId: string) => void;
 }) {
@@ -1372,7 +1404,8 @@ function SpeakerListView({
           fields={fields}
           biographyExpanded={expandedSpeakerBioIds.has(selectedSpeaker.id)}
           onToggleBiography={() => onToggleSpeakerBiography(selectedSpeaker.id)}
-          onClose={variant === "directory" ? undefined : () => onSelectSpeaker(null)}
+          onClose={onDismissSpeaker ?? (() => onSelectSpeaker(null))}
+          complementary={variant === "directory"}
           onSelectSession={onSelectSession}
         />
       ) : null}
@@ -1396,7 +1429,7 @@ function SpeakerDirectoryButton({
   onSelect: () => void;
 }) {
   return (
-    <button
+    <Button
       type="button"
       className="program-speaker-list-entry"
       aria-pressed={selected}
@@ -1414,7 +1447,7 @@ function SpeakerDirectoryButton({
           {compact ? <span>{sessions[0]!.title}{sessions.length > 1 ? ` +${sessions.length - 1} more` : ""}</span> : sessions.map((session, index) => <span key={session.id}>{index > 0 ? <i aria-hidden="true">•</i> : null}{session.title}</span>)}
         </span> : null}
       </span>
-    </button>
+    </Button>
   );
 }
 
@@ -1466,6 +1499,7 @@ function SpeakerDetail({
   biographyExpanded,
   onToggleBiography,
   onClose,
+  complementary = false,
   onSelectSession,
 }: {
   speaker: PublicProgramSpeaker;
@@ -1474,6 +1508,7 @@ function SpeakerDetail({
   biographyExpanded: boolean;
   onToggleBiography: () => void;
   onClose?: () => void;
+  complementary?: boolean;
   onSelectSession: (sessionId: string) => void;
 }) {
   const biography = speaker.biography.trim();
@@ -1487,16 +1522,14 @@ function SpeakerDetail({
     ["Website", speaker.socialLinks?.website],
   ].filter((link): link is [string, string] => Boolean(link[1]));
   return (
-    <article className="program-speaker-detail t-panel-slide" data-open="true" role={onClose ? undefined : "complementary"} aria-label={onClose ? speaker.name : `Speaker profile: ${speaker.name}`}>
+    <article className="program-speaker-detail t-panel-slide" data-open="true" role={complementary ? "complementary" : undefined} aria-label={complementary ? `Speaker profile: ${speaker.name}` : speaker.name}>
       <div className="program-speaker-detail-header">
         {fields.headshots ? <SpeakerAvatar speaker={speaker} large /> : null}
         <div>
           <h3>{speaker.name}</h3>
           <p>{speakerSubtitle(speaker)}</p>
         </div>
-        {onClose ? <button type="button" className="program-speaker-close" onClick={onClose}>
-          Close
-        </button> : null}
+        {onClose ? <Button type="button" className="program-speaker-close" aria-label="Close speaker profile" onClick={onClose}>×</Button> : null}
       </div>
       <section>
         <h4>Biography</h4>

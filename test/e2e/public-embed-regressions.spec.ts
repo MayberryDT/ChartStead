@@ -49,9 +49,24 @@ test.describe("public embed regression geometry", () => {
     expect(directoryRow).not.toBeNull();
     expect(galleryAvatar).not.toBeNull();
     expect(galleryCard).not.toBeNull();
-    expect(directoryAvatar!.width).toBeLessThanOrEqual(60);
+    expect(directoryAvatar!.width).toBeGreaterThanOrEqual(68);
+    expect(directoryAvatar!.width).toBeLessThanOrEqual(84);
     expect(galleryAvatar!.width).toBeGreaterThanOrEqual(110);
-    expect(directoryRow!.height).toBeLessThan(galleryCard!.height * 0.65);
+    expect(directoryRow!.height).toBeLessThan(galleryCard!.height * 0.8);
+  });
+
+  test("sessions inspector reserves space and leaves schedule controls visible", async ({ page }) => {
+    await page.setViewportSize({ width: 1873, height: 923 });
+    await page.goto("/demo/embeds/sessions-list");
+    await page.getByRole("button", { name: "Open Public Infrastructure for Everyone session details" }).click();
+
+    const inspector = await page.getByRole("complementary", { name: /Session details:/ }).boundingBox();
+    const row = await page.locator(".atlas-session-row").first().boundingBox();
+    expect(inspector).not.toBeNull();
+    expect(row).not.toBeNull();
+    expect(row!.x + row!.width).toBeLessThanOrEqual(inspector!.x + 1);
+    await expect(page.getByText("10 sessions", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /My schedule/ })).toBeVisible();
   });
 
   test("speakers list inspector uses the full narrow viewport like the gallery", async ({ page }) => {
