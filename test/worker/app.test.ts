@@ -64,16 +64,14 @@ describe("ChartStead Worker", () => {
     const list = await listResponse.json<{
       events: Array<{ id: string; submissionCount: number }>;
     }>();
-    expect(list.events).toEqual([
-      expect.objectContaining({
-        id: "pacific-open-data-summit-2026",
-        submissionCount: 57,
-      }),
-      expect.objectContaining({
-        id: "ai-engineer-worlds-fair-2026",
-        submissionCount: 32,
-      }),
+    expect(list.events.map((event) => event.id)).toEqual([
+      "pacific-open-data-summit-2026",
+      "ai-engineer-worlds-fair-2026",
     ]);
+    const worldsFair = list.events.find((event) => event.id === "ai-engineer-worlds-fair-2026");
+    const pods = list.events.find((event) => event.id === "pacific-open-data-summit-2026");
+    expect(worldsFair?.submissionCount).toBeGreaterThanOrEqual(80);
+    expect(pods?.submissionCount).toBe(57);
 
     const selectedResponse = await demoApp.request(
       "https://chartstead.test/api/events/ai-engineer-worlds-fair-2026",
@@ -305,6 +303,70 @@ describe("ChartStead Worker", () => {
     }>();
 
     expect(proposals).toHaveLength(event.submissionCount);
+  });
+
+  it("publishes a Worlds Fair program the public embeds can resolve", async () => {
+    const eventId = "ai-engineer-worlds-fair-2026";
+    await env.EVENT_STORE.getByName(eventId).seedWorldsFairProgramIfNeeded();
+    const program = await demoApp.request(
+      `https://chartstead.test/api/events/${eventId}/program`,
+      undefined,
+      env,
+    );
+    expect(program.status).toBe(200);
+    const body = await program.json<{
+      event: { name: string; startsOn: string; endsOn: string };
+      sessions: Array<{ id: string; title: string; startsAt: string | null }>;
+      speakers: Array<{ id: string; name: string; headshotUrl: string | null }>;
+    }>();
+    expect(body.event).toMatchObject({
+      name: "AI Engineer World's Fair 2026",
+      startsOn: "2026-06-29",
+      endsOn: "2026-07-02",
+    });
+    expect(body.sessions.length).toBeGreaterThanOrEqual(80);
+    expect(body.speakers.some((speaker) => speaker.name === "Nora Ellison")).toBe(true);
+    expect(body.sessions.some((session) => session.id === "aewf-session-000")).toBe(true);
+    const days = new Set(
+      body.sessions
+        .map((session) => session.startsAt?.slice(0, 10))
+        .filter((day): day is string => Boolean(day)),
+    );
+    expect(days.has("2026-06-29")).toBe(true);
+    expect(days.has("2026-06-30")).toBe(true);
+    expect(days.has("2026-07-01")).toBe(true);
+    expect(days.has("2026-07-02")).toBe(true);
+    expect(body.speakers.every((speaker) => Boolean(speaker.headshotUrl))).toBe(true);
+    const nora = body.speakers.find((speaker) => speaker.name === "Nora Ellison");
+    const headshot = await demoApp.request(
+      `https://chartstead.test${nora?.headshotUrl}`,
+      undefined,
+      env,
+    );
+    expect(headshot.status).toBe(200);
+    expect(headshot.headers.get("content-type")).toBe("image/jpeg");
+
+    const embeds = await demoApp.request(
+      `https://chartstead.test/api/events/${eventId}/embed-configs`,
+      undefined,
+      env,
+    );
+    expect(embeds.status).toBe(200);
+    const embedBody = await embeds.json<{ configs: Array<{ id: string; widget: string }> }>();
+    expect(embedBody.configs.map((config) => config.widget).sort()).toEqual([
+      "agenda",
+      "itinerary",
+      "sessions",
+      "speaker-gallery",
+      "speakers",
+    ]);
+    expect(embedBody.configs.map((config) => config.id).sort()).toEqual([
+      "aewf-embed-agenda",
+      "aewf-embed-itinerary",
+      "aewf-embed-sessions",
+      "aewf-embed-speaker-gallery",
+      "aewf-embed-speakers",
+    ]);
   });
 
   it("reconciles persisted event aggregates when proposal rows are first seeded", async () => {

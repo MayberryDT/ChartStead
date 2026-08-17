@@ -96,14 +96,12 @@ export type SettingsChrome = {
 const EVENT_SECTIONS: SettingsSection[] = [
   { id: "event", label: "Event" },
   { id: "reviewers", label: "Reviewers" },
-  { id: "course-check", label: "Course Check" },
-  { id: "automation", label: "Automation" },
+  { id: "automation", label: "Agents" },
   { id: "airtable", label: "Airtable" },
 ];
 
 const EVENTLESS_SECTIONS: SettingsSection[] = [
-  { id: "course-check", label: "Course Check" },
-  { id: "automation", label: "Automation" },
+  { id: "automation", label: "Agents" },
   { id: "airtable", label: "Airtable" },
 ];
 
@@ -365,7 +363,7 @@ function AutomationAccessCard({ eventId }: { eventId: string }) {
     : `claude mcp add --transport http chartstead ${mcpUrl} --header "Authorization: Bearer cs_live_…"`;
 
   return (
-    <section className="settings-card automation-access" aria-label="Automation">
+    <section className="settings-card automation-access" aria-label="Agents">
       <h2>Connect your agent</h2>
       <div className="seg automation-method-seg" role="group" aria-label="Access method">
         <button type="button" aria-pressed={tab === "api"} onClick={() => setTab("api")}>

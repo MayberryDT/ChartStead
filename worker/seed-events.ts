@@ -1,5 +1,6 @@
 import type { EventRecord } from "../shared/events";
 import { COURSE_CHECK_DEMO_TRACK } from "./seed-course-check-demo";
+import { worldsFairEventRecord } from "./seed-worlds-fair";
 
 export const seedEvents: EventRecord[] = [
   {
@@ -28,26 +29,7 @@ export const seedEvents: EventRecord[] = [
       { id: "chart-room", name: "Chart Room", readiness: "ready" },
     ],
   },
-  {
-    id: "ai-engineer-worlds-fair-2026",
-    name: "AI Engineer World's Fair 2026",
-    startsOn: "2026-06-25",
-    endsOn: "2026-06-27",
-    timezone: "America/Los_Angeles",
-    submissionCount: 32,
-    unreviewedCount: 9,
-    themeAccent: "#081d3a",
-    tracks: [
-      { id: "agents", name: "Agents", proposalCount: 12 },
-      { id: "models", name: "Models", proposalCount: 8 },
-      { id: "infrastructure", name: "Infrastructure", proposalCount: 7 },
-      { id: "product", name: "Product", proposalCount: 5 },
-    ],
-    rooms: [
-      { id: "main-stage", name: "Main Stage", readiness: "ready" },
-      { id: "workshop-hall", name: "Workshop Hall", readiness: "pending" },
-    ],
-  },
+  worldsFairEventRecord(),
   {
     id: "civic-tech-summit-2026",
     name: "Civic Tech Summit 2026",

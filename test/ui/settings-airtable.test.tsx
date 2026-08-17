@@ -57,7 +57,7 @@ describe("Settings Airtable sync", () => {
       </QueryClientProvider>,
     );
 
-    await user.click(await screen.findByRole("button", { name: /^Automation$/i }));
+    await user.click(await screen.findByRole("button", { name: /^Agents$/i }));
     expect(await screen.findByRole("button", { name: /^API$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^MCP$/i })).toBeInTheDocument();
     expect(screen.queryByText(/Choose an assistant/i)).not.toBeInTheDocument();
@@ -103,7 +103,7 @@ describe("Settings Airtable sync", () => {
       </QueryClientProvider>,
     );
 
-    await user.click(await screen.findByRole("button", { name: /^Automation$/i }));
+    await user.click(await screen.findByRole("button", { name: /^Agents$/i }));
     expect(await screen.findByRole("button", { name: /Create API key/i })).toBeInTheDocument();
     expect(screen.queryByText(/Developer access/i)).not.toBeInTheDocument();
   });

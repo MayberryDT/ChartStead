@@ -18,8 +18,8 @@ describe("demo persona entry", () => {
       if (url === "/api/demo/personas") {
         return Response.json({
           event: {
-            id: "pacific-open-data-summit-2026",
-            name: "Pacific Open Data Summit 2026",
+            id: "ai-engineer-worlds-fair-2026",
+            name: "AI Engineer World's Fair 2026",
           },
           personas: [
             {
@@ -32,7 +32,7 @@ describe("demo persona entry", () => {
               id: "track-reviewer",
               role: "reviewer",
               label: "Track reviewer",
-              description: "Evaluate proposals in the Platform track with the shared review queue.",
+              description: "Evaluate proposals in the Agents track with the shared review queue.",
             },
             {
               id: "accepted-speaker",
@@ -45,8 +45,8 @@ describe("demo persona entry", () => {
       }
       if (url === "/api/demo/personas/track-reviewer/enter" && init?.method === "POST") {
         return Response.json({
-          path: "/e/pacific-open-data-summit-2026/submissions?track=platform",
-          persona: { role: "reviewer", trackIds: ["platform"] },
+          path: "/e/ai-engineer-worlds-fair-2026/submissions?track=agents",
+          persona: { role: "reviewer", trackIds: ["agents"] },
         });
       }
       throw new Error(`Unexpected request: ${url}`);
@@ -72,7 +72,7 @@ describe("demo persona entry", () => {
       expect.objectContaining({ method: "POST" }),
     );
     expect(navigateTo).toHaveBeenCalledWith(
-      "/e/pacific-open-data-summit-2026/submissions?track=platform",
+      "/e/ai-engineer-worlds-fair-2026/submissions?track=agents",
     );
   });
 

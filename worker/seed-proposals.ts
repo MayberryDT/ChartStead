@@ -1,8 +1,10 @@
 import type { EventRecord, OrganizerProposal, ProposalStatus } from "../shared/events";
+import { DEMO_EVENT_ID } from "../shared/demo-event";
 import {
   buildCourseCheckDemoProposals,
   COURSE_CHECK_DEMO_TRACK,
 } from "./seed-course-check-demo";
+import { createWorldsFairSeedProposals } from "./seed-worlds-fair";
 
 const EVENT_PREFIXES: Record<string, string> = {
   "pacific-open-data-summit-2026": "PODS",
@@ -13,6 +15,9 @@ const EVENT_PREFIXES: Record<string, string> = {
 const DECIDED_STATUSES: ProposalStatus[] = ["approve", "maybe", "deny"];
 
 export function createSeedProposals(event: EventRecord): OrganizerProposal[] {
+  if (event.id === DEMO_EVENT_ID) {
+    return createWorldsFairSeedProposals(event);
+  }
   const prefix = EVENT_PREFIXES[event.id] ?? "DEMO";
   let proposalIndex = 0;
 

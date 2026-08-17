@@ -1,3 +1,9 @@
+import {
+  DEMO_EVENT_ID,
+  DEMO_REVIEW_TRACK_ID,
+  DEMO_REVIEWER_PROPOSAL_ID,
+  DEMO_SPEAKER,
+} from "../shared/demo-event";
 import type { OrganizerPrincipal } from "../shared/events";
 import type { CourseCheckPlan } from "../shared/course-check";
 import { createApp } from "./app";
@@ -6,7 +12,7 @@ import { seedEvents } from "./seed-events";
 import { signPortalToken } from "./signed-links";
 import type { AppBindings } from "./types";
 
-export const demoEventId = "pacific-open-data-summit-2026";
+export const demoEventId = DEMO_EVENT_ID;
 
 export const demoPersonas = [
   {
@@ -19,7 +25,7 @@ export const demoPersonas = [
     id: "track-reviewer",
     role: "reviewer",
     label: "Track reviewer",
-    description: "Evaluate proposals in the Platform track with the shared review queue.",
+    description: "Evaluate proposals in the Agents track with the shared review queue.",
   },
   {
     id: "accepted-speaker",
@@ -39,8 +45,8 @@ const demoAdmin = {
 } satisfies OrganizerPrincipal;
 const demoReviewer = {
   id: "demo-track-reviewer",
-  name: "Platform Track Reviewer",
-  email: "platform-reviewer@chartstead-demo.invalid",
+  name: "Agents Track Reviewer",
+  email: "agents-reviewer@example.test",
 } satisfies AuthenticatedUser;
 
 function cookieValue(request: Request, name: string): string | null {
@@ -98,7 +104,7 @@ async function provisionDemoReviewer(env: AppBindings): Promise<void> {
       .all<{ track_id: string }>();
     if (
       assignments.results.length === 1 &&
-      assignments.results[0]?.track_id === "platform"
+      assignments.results[0]?.track_id === DEMO_REVIEW_TRACK_ID
     ) {
       return;
     }
@@ -107,7 +113,7 @@ async function provisionDemoReviewer(env: AppBindings): Promise<void> {
       {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ trackIds: ["platform"] }),
+        body: JSON.stringify({ trackIds: [DEMO_REVIEW_TRACK_ID] }),
       },
       env,
     );
@@ -143,7 +149,7 @@ async function provisionDemoReviewer(env: AppBindings): Promise<void> {
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: demoReviewer.email, trackIds: ["platform"] }),
+        body: JSON.stringify({ email: demoReviewer.email, trackIds: [DEMO_REVIEW_TRACK_ID] }),
       },
       env,
     );
@@ -210,15 +216,14 @@ async function provisionDemoSpeaker(env: AppBindings): Promise<{
       },
       body: JSON.stringify({
         sourceLabel: "Evaluation-ready demo",
-        title: "Building trustworthy public-data platforms",
-        format: "talk",
-        trackId: "platform",
+        title: DEMO_SPEAKER.talkTitle,
+        format: DEMO_SPEAKER.format,
+        trackId: DEMO_SPEAKER.trackId,
         speakers: [
           {
-            name: "Maya Chen",
-            email: "maya.chen@chartstead-demo.invalid",
-            biography:
-              "Maya leads public-data platform programs and helps teams make trustworthy delivery decisions.",
+            name: DEMO_SPEAKER.name,
+            email: DEMO_SPEAKER.email,
+            biography: DEMO_SPEAKER.biography,
           },
         ],
         idempotencyKey,
@@ -278,7 +283,7 @@ async function provisionDemoSpeaker(env: AppBindings): Promise<{
 async function resetDemoFixtures(env: AppBindings): Promise<Response> {
   await provisionDemoReviewer(env);
   const store = env.EVENT_STORE.getByName(demoEventId);
-  const reviewerProposalId = "SUB-PODS0001";
+  const reviewerProposalId = DEMO_REVIEWER_PROPOSAL_ID;
   if (!(await store.resetProposalReviewFixture(reviewerProposalId))) {
     throw new Error("Unable to reset the demo review fixture.");
   }
@@ -287,9 +292,8 @@ async function resetDemoFixtures(env: AppBindings): Promise<Response> {
   const speakerReset = await store.resetSpeakerPortalFixture({
     courseCheckPlanId: speaker.planId,
     speakerId: speaker.speakerId,
-    name: "Maya Chen",
-    biography:
-      "Maya leads public-data platform programs and helps teams make trustworthy delivery decisions.",
+    name: DEMO_SPEAKER.name,
+    biography: DEMO_SPEAKER.biography,
   });
   if (!speakerReset.reset) throw new Error("Unable to reset the demo speaker fixture.");
   if (env.ASSETS) {
@@ -340,8 +344,8 @@ export async function handleDemoPersonaRequest(
     await provisionDemoReviewer(env);
     return Response.json(
       {
-        path: `/e/${demoEventId}/submissions?track=platform`,
-        persona: { role: "reviewer", trackIds: ["platform"] },
+        path: `/e/${demoEventId}/submissions?track=${DEMO_REVIEW_TRACK_ID}`,
+        persona: { role: "reviewer", trackIds: [DEMO_REVIEW_TRACK_ID] },
       },
       { headers: { "set-cookie": personaCookie("track-reviewer") } },
     );

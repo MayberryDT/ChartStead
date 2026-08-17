@@ -12,6 +12,7 @@ import {
 } from "./demo-personas";
 import { listAllEventWorkspaceIds, loadEventWorkspace } from "./event-catalog";
 import { seedEvents } from "./seed-events";
+import { seedWorldsFairHeadshotObjects } from "./seed-worlds-fair";
 import type { AppBindings } from "./types";
 
 export { EventStore } from "./event-store";
@@ -39,7 +40,9 @@ async function ensureDemoShowcase(env: AppBindings): Promise<void> {
   for (const seed of seedEvents) {
     await loadEventWorkspace(env, seed.id);
     env.EVENT_STORE.getByName(seed.id).seedDemoShowcaseIfNeeded();
+    env.EVENT_STORE.getByName(seed.id).seedWorldsFairProgramIfNeeded();
   }
+  await seedWorldsFairHeadshotObjects(env.ASSETS);
 }
 
 export default {
