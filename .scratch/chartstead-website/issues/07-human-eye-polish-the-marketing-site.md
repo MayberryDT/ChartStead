@@ -1,6 +1,6 @@
 # 07 — Human-eye polish the marketing website
 
-**Status:** in-progress
+**Status:** done
 
 **Blocked by:** None — Website 01–05 done; marketing site live on chartstead.com.
 
@@ -10,11 +10,11 @@ Tyler reviews every marketing route with his own eyes after the real images, vid
 
 ## Acceptance criteria
 
-- [ ] Homepage, Product, Open Source, Design Partners, Privacy, and Terms are reviewed at desktop and narrow widths.
-- [ ] Hero video, image replacements, and both CTAs are judged in context, not as isolated assets.
-- [ ] No leftover conceptual chrome, workers.dev visitor links, or mismatched sample names remain.
-- [ ] Reduced-motion, focus, and tap-target behavior are acceptable on the live ChartStead-domain site.
-- [ ] Final notes and the production URL are recorded here.
+- [x] Homepage, Product, Open Source, Design Partners, Privacy, and Terms are reviewed at desktop and narrow widths.
+- [x] Hero video, image replacements, and both CTAs are judged in context, not as isolated assets.
+- [x] No leftover conceptual chrome, workers.dev visitor links, or mismatched sample names remain.
+- [x] Reduced-motion, focus, and tap-target behavior are acceptable on the live ChartStead-domain site.
+- [x] Final notes and the production URL are recorded here.
 
 ## Comments
 
@@ -29,3 +29,5 @@ Tyler reviews every marketing route with his own eyes after the real images, vid
 - 2026-08-17 — Tyler polish dump in progress: hero spacing + “Product tour” caption only; marketing videos at 1.5×; live program without site header + mobile bottom surface bar; public agenda/itinerary day tabs → Agenda-style ‹ day › stepper; embed mobile overflow/layout pass.
 
 - 2026-08-17 — Follow-up from screenshots: enforce 1.5× on play events; strip sample-event caption chrome everywhere and center stage labels; more space under “Explore the full app”; live bar is Back to ChartStead + surface control only; hide empty itinerary rail on mobile; speaker gallery cards/overflow + mobile detail sheet.
+
+- 2026-08-17 — Tyler QA complete. Status → `done`. Production: https://chartstead.com/ and https://chartstead.com/live-program (embeds via https://demo.chartstead.com/). Shipped: 1.5× proof videos, centered stage captions (no sample-event chrome), tight hero spacing, live-program Back to ChartStead bar, itinerary/agenda day steppers, mobile speaker-gallery detail sheet.
