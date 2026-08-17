@@ -22,3 +22,4 @@ Tyler reviews every marketing route with his own eyes after the real images, vid
 - 2026-08-16 — Tyler correction: Website 06 is done (`https://chartstead.com`). Remaining blockers are Website 01–05.
 
 - 2026-08-17 — frontier-reconcile: Still blocked on: Website 01 (ready-for-agent); Website 02 (blocked); Website 03 (ready-for-agent); Website 04 (blocked); Website 05 (ready-for-agent).
+- 2026-08-17 — frontier-reconcile: Website 04 done. Still blocked on: Website 01 (in-review); Website 02 (blocked); Website 03 (in-review); Website 05 (in-review). Remains human-tandem.

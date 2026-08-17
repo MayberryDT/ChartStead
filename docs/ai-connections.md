@@ -74,6 +74,8 @@ claude mcp add --transport http chartstead https://<host>/mcp \
 
 Credential and integration-configuration paths are blocked from MCP tools. Course Check stage execution still re-checks scopes and mode on every call.
 
+Full desk capability map (UI → HTTP → MCP → activity attribution): [agent-api-mcp-parity-matrix.md](./agent-api-mcp-parity-matrix.md).
+
 ## Security notes
 
 - Treat tokens like passwords; never commit them.

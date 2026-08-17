@@ -1,10 +1,13 @@
 import { Hono } from "hono";
 
 import type {
+  EventRecord,
+  OrganizerActivityByActorResponse,
   OrganizerCfpForm,
   OrganizerCfpFormSummary,
   OrganizerPrincipal,
   OrganizerProposal,
+  OrganizerTeamMember,
   ProposalAuditEvent,
   ProposalStatus,
   SessionPlacementPatch,
@@ -48,11 +51,15 @@ import {
   listEventWorkspaces,
   loadEventWorkspace,
 } from "../event-catalog";
-import type { EventRecord } from "../../shared/events";
 import {
   anonymizeEvaluationProposal,
   evaluationRoundAccessError,
 } from "../evaluation-plans";
+import {
+  parseInitiatingHumanHeader,
+  toCourseCheckActor,
+} from "../course-check/agent-authz";
+import { formatCourseCheckActorLabel } from "../../shared/course-check";
 
 export type PrincipalResolver = (
   request: Request,
@@ -425,6 +432,10 @@ export function createV1App(options: V1AppOptions = {}) {
     }
 
     try {
+      const reviewActor = toCourseCheckActor(
+        principal,
+        parseInitiatingHumanHeader(c.req.raw),
+      );
       const proposal = await store.updateProposalReview({
         proposalId: submissionId,
         status: body.status,
@@ -433,8 +444,9 @@ export function createV1App(options: V1AppOptions = {}) {
             ? body.committeeNote.trim()
             : undefined,
         expectedVersion: body.expectedVersion ?? existing.reviewVersion,
-        actorId: principal.id,
-        actorName: principal.displayName,
+        actorId: reviewActor.id,
+        actorName: formatCourseCheckActorLabel(reviewActor),
+        actorJson: JSON.stringify(reviewActor),
         roundId,
       });
       if (!proposal) {
@@ -627,6 +639,112 @@ export function createV1App(options: V1AppOptions = {}) {
     await loadEvent(c.env, seed);
     const program = await c.env.EVENT_STORE.getByName(eventId).getPublicProgram();
     return c.json(program);
+  });
+
+  app.get("/events/:eventId/organizer/activity", async (c) => {
+    const principal = await resolveV1Principal(c.req.raw, c.env, options);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    const seed = findSeed(eventId);
+    if (!seed) return c.json({ error: "Event not found" }, 404);
+    await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const isAdmin = eventRole(principal, eventId) === "admin";
+
+    const membershipRows = await c.env.AUTH_DB.prepare(
+      `SELECT u.id, u.name, u.email, m.role
+       FROM event_memberships AS m
+       JOIN "user" AS u ON u.id = m.user_id
+       WHERE m.event_id = ? AND m.role IN ('admin', 'reviewer')
+       ORDER BY u.name COLLATE NOCASE, u.id`,
+    )
+      .bind(eventId)
+      .all<{ id: string; name: string; email: string; role: "admin" | "reviewer" }>();
+
+    let actors: OrganizerTeamMember[] = membershipRows.results.map((row) => ({
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      role: row.role,
+      kind: "human" as const,
+    }));
+    if (!isAdmin) {
+      actors = actors.filter((member) => member.id === principal!.id);
+    } else {
+      const agentActors = await store.listAgentActivityActors();
+      const knownIds = new Set(actors.map((member) => member.id));
+      for (const agent of agentActors) {
+        if (knownIds.has(agent.id)) continue;
+        actors.push({
+          id: agent.id,
+          name: agent.name,
+          email: "",
+          role: "admin",
+          kind: "agent",
+        });
+        knownIds.add(agent.id);
+      }
+    }
+
+    const actorIdParam = c.req.query("actorId");
+    const actorId =
+      typeof actorIdParam === "string" && actorIdParam.trim()
+        ? actorIdParam.trim()
+        : null;
+    const limitParam = c.req.query("limit");
+    const parsedLimit =
+      typeof limitParam === "string" && limitParam.trim()
+        ? Number.parseInt(limitParam.trim(), 10)
+        : 50;
+    const limit = Number.isFinite(parsedLimit)
+      ? Math.min(100, Math.max(1, parsedLimit))
+      : 50;
+    const beforeParam = c.req.query("before");
+    const before =
+      typeof beforeParam === "string" && beforeParam.trim()
+        ? beforeParam.trim()
+        : null;
+
+    let actor: OrganizerTeamMember | null = null;
+    let entries: OrganizerActivityByActorResponse["entries"] = [];
+    let hasMore = false;
+
+    if (actorId) {
+      if (!isAdmin && actorId !== principal!.id) {
+        return c.json({ error: "Forbidden" }, 403);
+      }
+      const activity = await store.listTeamActivityByActor(actorId, {
+        limit,
+        before,
+      });
+      entries = activity.entries;
+      hasMore = activity.hasMore;
+      actor = actors.find((member) => member.id === actorId) ?? null;
+      if (!actor) {
+        const agentMatch = entries.find((entry) => entry.actorId === actorId);
+        if (agentMatch) {
+          actor = {
+            id: actorId,
+            name: agentMatch.actorName,
+            email: "",
+            role: "admin",
+            kind: "agent",
+          };
+        }
+      }
+    }
+
+    const body: OrganizerActivityByActorResponse = {
+      actorId,
+      actor,
+      actors,
+      entries,
+      limit,
+      hasMore,
+    };
+    return c.json(body);
   });
 
   app.get("/events/:eventId/integrations/airtable", async (c) => {

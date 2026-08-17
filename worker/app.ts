@@ -130,6 +130,7 @@ import {
 } from "./course-check/agent-authz";
 import {
   assertPolicyDoesNotWeakenBaseline,
+  formatCourseCheckActorLabel,
   mergeCourseCheckPolicy,
   type EventCourseCheckPolicy,
 } from "../shared/course-check";
@@ -3535,9 +3536,24 @@ export function createApp(options: AppOptions = {}) {
       name: row.name,
       email: row.email,
       role: row.role,
+      kind: "human" as const,
     }));
     if (!isAdmin) {
       actors = actors.filter((member) => member.id === principal.id);
+    } else {
+      const agentActors = await store.listAgentActivityActors();
+      const knownIds = new Set(actors.map((member) => member.id));
+      for (const agent of agentActors) {
+        if (knownIds.has(agent.id)) continue;
+        actors.push({
+          id: agent.id,
+          name: agent.name,
+          email: "",
+          role: "admin",
+          kind: "agent",
+        });
+        knownIds.add(agent.id);
+      }
     }
 
     const actorIdParam = c.req.query("actorId");
@@ -3583,6 +3599,19 @@ export function createApp(options: AppOptions = {}) {
             name: principal.displayName,
             email: "",
             role,
+            kind: "human",
+          };
+        }
+      }
+      if (!actor) {
+        const agentMatch = entries.find((entry) => entry.actorId === actorId);
+        if (agentMatch) {
+          actor = {
+            id: actorId,
+            name: agentMatch.actorName,
+            email: "",
+            role: "admin",
+            kind: "agent",
           };
         }
       }

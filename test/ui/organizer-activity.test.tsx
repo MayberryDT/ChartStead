@@ -229,6 +229,7 @@ describe("Course Check 24 — activity by actor and onboarding attribution", () 
       `/e/${eventId}/submissions/SUB-1`,
     );
     expect(screen.getByText("Recommend")).toBeVisible();
+    expect(screen.getAllByText("Ada Admin").length).toBeGreaterThan(0);
     expect(screen.getByRole("link", { name: "Compiler ops" })).toHaveAttribute(
       "href",
       `/e/${eventId}/submissions/SUB-2`,

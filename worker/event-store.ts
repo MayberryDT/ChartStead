@@ -38,6 +38,7 @@ import {
   DEFAULT_AGE_WARNING_HOURS,
   DEFAULT_COURSE_CHECK_POLICY,
   DEFAULT_DECISION_BATCH_LIMIT,
+  formatCourseCheckActorLabel,
   mergeCourseCheckPolicy,
   type CourseCheckStageEndorsement,
   type EventCourseCheckPolicy,
@@ -459,6 +460,23 @@ function parseCourseCheckActor(
     }
   }
   return { id, displayName };
+}
+
+/** Persist organizer-facing label (includes agent on-behalf-of when present). */
+function storedCourseCheckActorName(actor: CourseCheckActor): string {
+  return formatCourseCheckActorLabel(actor);
+}
+
+function teamActivityActorName(
+  actorId: string,
+  actorName: string,
+  actorJson?: string | null,
+): string {
+  if (actorJson) {
+    const parsed = parseCourseCheckActor(actorId, actorName, actorJson);
+    if (parsed.kind === "agent") return formatCourseCheckActorLabel(parsed);
+  }
+  return actorName;
 }
 
 interface SpeakerRow {
@@ -919,6 +937,7 @@ interface AuditEventRow {
   type: string;
   actor_id: string;
   actor_name: string;
+  actor_json: string | null;
   from_status: string;
   to_status: string;
   committee_note_changed: number;
@@ -953,12 +972,13 @@ interface TeamActivityAgendaRow {
 }
 
 interface TeamActivityMutationRow {
-  [key: string]: string;
+  [key: string]: string | null;
   id: string;
   plan_id: string;
   kind: string;
   actor_id: string;
   actor_name: string;
+  actor_json: string | null;
   at: string;
   summary: string;
 }
@@ -1356,7 +1376,7 @@ function mapAuditEvent(row: AuditEventRow): ProposalAuditEvent {
     roundId: row.review_round_id ?? null,
     type,
     actorId: row.actor_id,
-    actorName: row.actor_name,
+    actorName: teamActivityActorName(row.actor_id, row.actor_name, row.actor_json),
     fromStatus: row.from_status as ProposalStatus,
     toStatus: row.to_status as ProposalStatus,
     committeeNoteChanged: Boolean(row.committee_note_changed),
@@ -1374,7 +1394,7 @@ function mapActorAuditEvent(row: ActorAuditEventRow): OrganizerActorActivityEntr
     proposalTitle: row.proposal_title ?? row.proposal_id,
     type,
     actorId: row.actor_id,
-    actorName: row.actor_name,
+    actorName: teamActivityActorName(row.actor_id, row.actor_name, row.actor_json),
     fromStatus: row.from_status,
     toStatus: row.to_status,
     committeeNoteChanged: Boolean(row.committee_note_changed),
@@ -1453,7 +1473,7 @@ function mapAuditEventToTeamActivity(
     source: "audit_events" as const,
     type: row.type,
     actorId: row.actor_id,
-    actorName: row.actor_name,
+    actorName: teamActivityActorName(row.actor_id, row.actor_name, row.actor_json),
     createdAt: row.created_at,
     proposalId,
     proposalTitle,
@@ -1613,10 +1633,10 @@ function mapMutationToTeamActivity(row: TeamActivityMutationRow): OrganizerTeamA
     source: "course_check_mutations",
     domain,
     type: row.kind,
-    label: mutationActivityLabel(row.kind, row.summary),
+    label: mutationActivityLabel(row.kind, row.summary || ""),
     summary: row.summary || row.kind,
     actorId: row.actor_id,
-    actorName: row.actor_name,
+    actorName: teamActivityActorName(row.actor_id, row.actor_name, row.actor_json),
     createdAt: row.at,
     planId: row.plan_id,
   };
@@ -2248,6 +2268,7 @@ export class EventStore extends DurableObject<AppBindings> {
         )
       `);
       this.ensureColumn("audit_events", "review_round_id", "TEXT");
+      this.ensureColumn("audit_events", "actor_json", "TEXT");
 
       this.ctx.storage.sql.exec(`
         CREATE INDEX IF NOT EXISTS audit_events_proposal_created_idx
@@ -6571,6 +6592,7 @@ export class EventStore extends DurableObject<AppBindings> {
     scorecardValues?: Record<string, ScorecardCriterionValue>;
     actorId: string;
     actorName: string;
+    actorJson?: string | null;
   }): OrganizerProposal | null {
     const existing = this.getProposal(input.proposalId);
     if (!existing) throw new Error(`Proposal ${input.proposalId} not found.`);
@@ -6648,14 +6670,15 @@ export class EventStore extends DurableObject<AppBindings> {
       }
       this.ctx.storage.sql.exec(
         `INSERT INTO audit_events
-          (id, proposal_id, review_round_id, type, actor_id, actor_name, from_status,
+          (id, proposal_id, review_round_id, type, actor_id, actor_name, actor_json, from_status,
            to_status, committee_note_changed, created_at)
-          VALUES (?, ?, ?, 'proposal.review.changed', ?, ?, ?, ?, ?, ?)`,
+          VALUES (?, ?, ?, 'proposal.review.changed', ?, ?, ?, ?, ?, ?, ?)`,
         auditId,
         input.proposalId,
         input.roundId ?? null,
         input.actorId,
         input.actorName,
+        input.actorJson ?? null,
         existing.status,
         nextStatus,
         committeeNoteChanged ? 1 : 0,
@@ -6883,7 +6906,7 @@ export class EventStore extends DurableObject<AppBindings> {
   listProposalAuditEvents(proposalId: string): ProposalAuditEvent[] {
     return this.ctx.storage.sql
       .exec<AuditEventRow>(
-        `SELECT id, proposal_id, review_round_id, type, actor_id, actor_name, from_status,
+        `SELECT id, proposal_id, review_round_id, type, actor_id, actor_name, actor_json, from_status,
                 to_status, committee_note_changed, created_at
          FROM audit_events
          WHERE proposal_id = ?
@@ -6902,7 +6925,7 @@ export class EventStore extends DurableObject<AppBindings> {
     return this.ctx.storage.sql
       .exec<ActorAuditEventRow>(
         `SELECT a.id, a.proposal_id, p.title AS proposal_title, a.review_round_id, a.type,
-                a.actor_id, a.actor_name, a.from_status, a.to_status,
+                a.actor_id, a.actor_name, a.actor_json, a.from_status, a.to_status,
                 a.committee_note_changed, a.created_at
          FROM audit_events AS a
          JOIN proposals AS p ON p.id = a.proposal_id
@@ -6929,21 +6952,24 @@ export class EventStore extends DurableObject<AppBindings> {
     const beforeClauseAliased = (alias: string, column: string) =>
       before ? `AND ${alias}.${column} < ?` : "";
     const mutationKinds = [...TEAM_ACTIVITY_MUTATION_KINDS];
+    // Match the principal id and agent work done on behalf of that person.
+    const actorMatchAliased = (alias: string, jsonColumn: string) =>
+      `(${alias}.actor_id = ? OR json_extract(${alias}.${jsonColumn}, '$.initiatingHuman.id') = ?)`;
 
     const auditRows = this.ctx.storage.sql
       .exec<ActorAuditEventRow>(
         `SELECT a.id, a.proposal_id, p.title AS proposal_title, a.review_round_id, a.type,
-                a.actor_id, a.actor_name, a.from_status, a.to_status,
+                a.actor_id, a.actor_name, a.actor_json, a.from_status, a.to_status,
                 a.committee_note_changed, a.created_at
          FROM audit_events AS a
          LEFT JOIN proposals AS p ON p.id = a.proposal_id
-         WHERE a.actor_id = ?
+         WHERE ${actorMatchAliased("a", "actor_json")}
            ${beforeClauseAliased("a", "created_at")}
          ORDER BY a.created_at DESC, a.id DESC
          LIMIT ?`,
         ...(before
-          ? ([actorId, before, fetchLimit] as const)
-          : ([actorId, fetchLimit] as const)),
+          ? ([actorId, actorId, before, fetchLimit] as const)
+          : ([actorId, actorId, fetchLimit] as const)),
       )
       .toArray();
 
@@ -6980,16 +7006,16 @@ export class EventStore extends DurableObject<AppBindings> {
     const mutationKindPlaceholders = mutationKinds.map(() => "?").join(", ");
     const mutationRows = this.ctx.storage.sql
       .exec<TeamActivityMutationRow>(
-        `SELECT id, plan_id, kind, actor_id, actor_name, at, summary
+        `SELECT id, plan_id, kind, actor_id, actor_name, actor_json, at, summary
          FROM course_check_mutations
-         WHERE actor_id = ?
+         WHERE (actor_id = ? OR json_extract(actor_json, '$.initiatingHuman.id') = ?)
            AND kind IN (${mutationKindPlaceholders})
            ${before ? "AND at < ?" : ""}
          ORDER BY at DESC, id DESC
          LIMIT ?`,
         ...(before
-          ? ([actorId, ...mutationKinds, before, fetchLimit] as const)
-          : ([actorId, ...mutationKinds, fetchLimit] as const)),
+          ? ([actorId, actorId, ...mutationKinds, before, fetchLimit] as const)
+          : ([actorId, actorId, ...mutationKinds, fetchLimit] as const)),
       )
       .toArray();
 
@@ -7038,6 +7064,37 @@ export class EventStore extends DurableObject<AppBindings> {
       entries: merged.slice(0, limit),
       hasMore,
     };
+  }
+
+  /** Distinct agent principals that have written Course Check / audit activity. */
+  listAgentActivityActors(): Array<{ id: string; name: string }> {
+    const mutationAgents = this.ctx.storage.sql
+      .exec<{ actor_id: string; actor_name: string; actor_json: string | null }>(
+        `SELECT actor_id, actor_name, actor_json
+         FROM course_check_mutations
+         WHERE json_extract(actor_json, '$.kind') = 'agent'
+         ORDER BY at DESC`,
+      )
+      .toArray();
+    const auditAgents = this.ctx.storage.sql
+      .exec<{ actor_id: string; actor_name: string; actor_json: string | null }>(
+        `SELECT actor_id, actor_name, actor_json
+         FROM audit_events
+         WHERE json_extract(actor_json, '$.kind') = 'agent'
+         ORDER BY created_at DESC`,
+      )
+      .toArray();
+    const byId = new Map<string, string>();
+    for (const row of [...mutationAgents, ...auditAgents]) {
+      if (byId.has(row.actor_id)) continue;
+      byId.set(
+        row.actor_id,
+        teamActivityActorName(row.actor_id, row.actor_name, row.actor_json),
+      );
+    }
+    return [...byId.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
   }
 
   queueOutboxMessage(input: {
@@ -12629,7 +12686,7 @@ export class EventStore extends DurableObject<AppBindings> {
       JSON.stringify(input.body),
       input.at,
       input.actor.id,
-      input.actor.displayName,
+      storedCourseCheckActorName(input.actor),
       serializeCourseCheckActor(input.actor),
       input.mutationKind,
       input.summary,
@@ -12644,7 +12701,7 @@ export class EventStore extends DurableObject<AppBindings> {
       input.version,
       input.mutationKind,
       input.actor.id,
-      input.actor.displayName,
+      storedCourseCheckActorName(input.actor),
       serializeCourseCheckActor(input.actor),
       input.at,
       input.summary,
@@ -13077,7 +13134,7 @@ export class EventStore extends DurableObject<AppBindings> {
           effect.state,
           effect.state,
           input.actor.id,
-          input.actor.displayName,
+          storedCourseCheckActorName(input.actor),
           `Airtable stage ${input.disposition}`,
           now,
         );
@@ -13168,7 +13225,7 @@ export class EventStore extends DurableObject<AppBindings> {
         now,
         now,
         input.actor.id,
-        input.actor.displayName,
+        storedCourseCheckActorName(input.actor),
         serializeCourseCheckActor(input.actor),
       );
       this.recordPlanVersion({
@@ -13448,7 +13505,7 @@ export class EventStore extends DurableObject<AppBindings> {
       now,
       now,
       input.actor.id,
-      input.actor.displayName,
+      storedCourseCheckActorName(input.actor),
         serializeCourseCheckActor(input.actor),
     );
     const plan = this.getCourseCheckPlan(planId);
@@ -13883,7 +13940,7 @@ export class EventStore extends DurableObject<AppBindings> {
       now,
       now,
       input.actor.id,
-      input.actor.displayName,
+      storedCourseCheckActorName(input.actor),
         serializeCourseCheckActor(input.actor),
     );
     this.recordPlanVersion({
@@ -14329,7 +14386,7 @@ export class EventStore extends DurableObject<AppBindings> {
           input.stageId,
           now,
           input.actor.id,
-          input.actor.displayName,
+          storedCourseCheckActorName(input.actor),
           serializeCourseCheckActor(input.actor),
         );
 
@@ -14364,13 +14421,14 @@ export class EventStore extends DurableObject<AppBindings> {
         });
         this.ctx.storage.sql.exec(
           `INSERT INTO audit_events
-            (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+            (id, proposal_id, type, actor_id, actor_name, actor_json, from_status, to_status,
              committee_note_changed, created_at)
-           VALUES (?, ?, 'course_check.communication.drafts_created', ?, ?, ?, ?, 0, ?)`,
+           VALUES (?, ?, 'course_check.communication.drafts_created', ?, ?, ?, ?, ?, 0, ?)`,
           crypto.randomUUID(),
           communicationBody.recipientGroups[0]?.proposalId || plan.id,
           input.actor.id,
-          input.actor.displayName,
+          storedCourseCheckActorName(input.actor),
+          serializeCourseCheckActor(input.actor),
           plan.state,
           `${frozen.drafts.length} drafts frozen`,
           now,
@@ -14930,7 +14988,7 @@ export class EventStore extends DurableObject<AppBindings> {
           plan.digest,
           now,
           input.actor.id,
-          input.actor.displayName,
+          storedCourseCheckActorName(input.actor),
           serializeCourseCheckActor(input.actor),
         );
         this.ctx.storage.sql.exec(
@@ -14958,13 +15016,14 @@ export class EventStore extends DurableObject<AppBindings> {
         });
         this.ctx.storage.sql.exec(
           `INSERT INTO audit_events
-            (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+            (id, proposal_id, type, actor_id, actor_name, actor_json, from_status, to_status,
              committee_note_changed, created_at)
-           VALUES (?, ?, 'course_check.communication.send_started', ?, ?, ?, ?, 0, ?)`,
+           VALUES (?, ?, 'course_check.communication.send_started', ?, ?, ?, ?, ?, 0, ?)`,
           crypto.randomUUID(),
           communicationBody.recipientGroups[0]?.proposalId || plan.id,
           input.actor.id,
-          input.actor.displayName,
+          storedCourseCheckActorName(input.actor),
+          serializeCourseCheckActor(input.actor),
           plan.state,
           `${effects.length} effects queued`,
           now,
@@ -15098,20 +15157,21 @@ export class EventStore extends DurableObject<AppBindings> {
         plan.version,
         plan.version,
         input.actor.id,
-        input.actor.displayName,
+        storedCourseCheckActorName(input.actor),
         serializeCourseCheckActor(input.actor),
         now,
         `Manual retry queued for ${effect.effectId}.`,
       );
       this.ctx.storage.sql.exec(
         `INSERT INTO audit_events
-          (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+          (id, proposal_id, type, actor_id, actor_name, actor_json, from_status, to_status,
            committee_note_changed, created_at)
-         VALUES (?, ?, 'course_check.communication.effect_retry', ?, ?, ?, 'queued', 0, ?)`,
+         VALUES (?, ?, 'course_check.communication.effect_retry', ?, ?, ?, ?, 'queued', 0, ?)`,
         crypto.randomUUID(),
         communicationBody.recipientGroups[0]?.proposalId || plan.id,
         input.actor.id,
-        input.actor.displayName,
+        storedCourseCheckActorName(input.actor),
+        serializeCourseCheckActor(input.actor),
         effect.status,
         now,
       );
@@ -15233,21 +15293,22 @@ export class EventStore extends DurableObject<AppBindings> {
         plan.version,
         plan.version,
         input.actor.id,
-        input.actor.displayName,
+        storedCourseCheckActorName(input.actor),
         serializeCourseCheckActor(input.actor),
         now,
         `Reconciled ${effect.effectId} as ${input.outcome}: ${note}`,
       );
       this.ctx.storage.sql.exec(
         `INSERT INTO audit_events
-          (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+          (id, proposal_id, type, actor_id, actor_name, actor_json, from_status, to_status,
            committee_note_changed, created_at)
-         VALUES (?, ?, 'course_check.communication.effect_reconciled', ?, ?,
+         VALUES (?, ?, 'course_check.communication.effect_reconciled', ?, ?, ?,
                  'unknown', ?, 0, ?)`,
         crypto.randomUUID(),
         communicationBody.recipientGroups[0]?.proposalId || plan.id,
         input.actor.id,
-        input.actor.displayName,
+        storedCourseCheckActorName(input.actor),
+        serializeCourseCheckActor(input.actor),
         input.outcome,
         now,
       );
@@ -15488,7 +15549,7 @@ export class EventStore extends DurableObject<AppBindings> {
         now,
         now,
         input.actor.id,
-        input.actor.displayName,
+        storedCourseCheckActorName(input.actor),
         serializeCourseCheckActor(input.actor),
       );
       this.recordPlanVersion({
@@ -15526,20 +15587,21 @@ export class EventStore extends DurableObject<AppBindings> {
         original.version,
         original.version,
         input.actor.id,
-        input.actor.displayName,
+        storedCourseCheckActorName(input.actor),
         serializeCourseCheckActor(input.actor),
         now,
         `Linked reviewed correction ${planId} to delivered effect ${effect.effectId}; original effect retained.`,
       );
       this.ctx.storage.sql.exec(
         `INSERT INTO audit_events
-          (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+          (id, proposal_id, type, actor_id, actor_name, actor_json, from_status, to_status,
            committee_note_changed, created_at)
-         VALUES (?, ?, 'course_check.communication.correction_created', ?, ?, ?, ?, 0, ?)`,
+         VALUES (?, ?, 'course_check.communication.correction_created', ?, ?, ?, ?, ?, 0, ?)`,
         crypto.randomUUID(),
         originalDraft.proposalId || original.id,
         input.actor.id,
-        input.actor.displayName,
+        storedCourseCheckActorName(input.actor),
+        serializeCourseCheckActor(input.actor),
         effect.status,
         planId,
         now,
@@ -15750,7 +15812,7 @@ export class EventStore extends DurableObject<AppBindings> {
         input.plan.version,
         input.plan.version,
         input.actor.id,
-        input.actor.displayName,
+        storedCourseCheckActorName(input.actor),
         serializeCourseCheckActor(input.actor),
         now,
         `Recorded two-person endorsement for stage ${input.stageId}.`,
@@ -15864,20 +15926,21 @@ export class EventStore extends DurableObject<AppBindings> {
         plan.version,
         plan.version,
         input.actor.id,
-        input.actor.displayName,
+        storedCourseCheckActorName(input.actor),
         serializeCourseCheckActor(input.actor),
         now,
         `Privacy erasure: ${input.reason.trim()} (${erased.fieldsRedacted} fields).`,
       );
       this.ctx.storage.sql.exec(
         `INSERT INTO audit_events
-          (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+          (id, proposal_id, type, actor_id, actor_name, actor_json, from_status, to_status,
            committee_note_changed, created_at)
-         VALUES (?, ?, 'course_check.privacy.erased', ?, ?, ?, ?, 0, ?)`,
+         VALUES (?, ?, 'course_check.privacy.erased', ?, ?, ?, ?, ?, 0, ?)`,
         crypto.randomUUID(),
         plan.id,
         input.actor.id,
-        input.actor.displayName,
+        storedCourseCheckActorName(input.actor),
+        serializeCourseCheckActor(input.actor),
         plan.state,
         "privacy_erased",
         now,
@@ -15999,7 +16062,7 @@ export class EventStore extends DurableObject<AppBindings> {
       now,
       now,
       input.actor.id,
-      input.actor.displayName,
+      storedCourseCheckActorName(input.actor),
         serializeCourseCheckActor(input.actor),
     );
     this.recordPlanVersion({
@@ -16321,7 +16384,7 @@ export class EventStore extends DurableObject<AppBindings> {
           input.stageId,
           now,
           input.actor.id,
-          input.actor.displayName,
+          storedCourseCheckActorName(input.actor),
           serializeCourseCheckActor(input.actor),
         );
         const hasDeferredDecisionItems =
@@ -16373,14 +16436,15 @@ export class EventStore extends DurableObject<AppBindings> {
               : "guaranteed_speaker";
         this.ctx.storage.sql.exec(
           `INSERT INTO audit_events
-            (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+            (id, proposal_id, type, actor_id, actor_name, actor_json, from_status, to_status,
              committee_note_changed, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
           crypto.randomUUID(),
           proposalId || plan.id,
           auditType,
           input.actor.id,
-          input.actor.displayName,
+          storedCourseCheckActorName(input.actor),
+          serializeCourseCheckActor(input.actor),
           plan.state,
           outcomeLabel,
           now,
@@ -17156,7 +17220,7 @@ export class EventStore extends DurableObject<AppBindings> {
           plan.id,
           effect.state,
           input.actor.id,
-          input.actor.displayName,
+          storedCourseCheckActorName(input.actor),
           `Attempt ${effect.attemptCount + 1}`,
           now,
         );
@@ -17254,7 +17318,7 @@ export class EventStore extends DurableObject<AppBindings> {
           effect.compensates_effect_id,
           effect.plan_id,
           input.actor.id,
-          input.actor.displayName,
+          storedCourseCheckActorName(input.actor),
           `Reversed by ${input.effectId}`,
           now,
         );
@@ -17270,19 +17334,20 @@ export class EventStore extends DurableObject<AppBindings> {
         effect.state,
         input.state,
         input.actor.id,
-        input.actor.displayName,
+        storedCourseCheckActorName(input.actor),
         input.error ?? input.providerRecordId ?? input.state,
         now,
       );
       this.ctx.storage.sql.exec(
         `INSERT INTO audit_events
-          (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+          (id, proposal_id, type, actor_id, actor_name, actor_json, from_status, to_status,
            committee_note_changed, created_at)
-         VALUES (?, ?, 'course_check.airtable.effect_result', ?, ?, ?, ?, 0, ?)`,
+         VALUES (?, ?, 'course_check.airtable.effect_result', ?, ?, ?, ?, ?, 0, ?)`,
         crypto.randomUUID(),
         effect.plan_id,
         input.actor.id,
-        input.actor.displayName,
+        storedCourseCheckActorName(input.actor),
+        serializeCourseCheckActor(input.actor),
         effect.state,
         input.state,
         now,
@@ -17378,20 +17443,21 @@ export class EventStore extends DurableObject<AppBindings> {
         compensation.id,
         plan.id,
         input.actor.id,
-        input.actor.displayName,
+        storedCourseCheckActorName(input.actor),
         reason,
         now,
       );
       this.ctx.storage.sql.exec(
         `INSERT INTO audit_events
-          (id, proposal_id, type, actor_id, actor_name, from_status, to_status,
+          (id, proposal_id, type, actor_id, actor_name, actor_json, from_status, to_status,
            committee_note_changed, created_at)
-         VALUES (?, ?, 'course_check.airtable.compensation_created', ?, ?,
+         VALUES (?, ?, 'course_check.airtable.compensation_created', ?, ?, ?,
                  'succeeded', ?, 0, ?)`,
         crypto.randomUUID(),
         plan.id,
         input.actor.id,
-        input.actor.displayName,
+        storedCourseCheckActorName(input.actor),
+        serializeCourseCheckActor(input.actor),
         reason,
         now,
       );

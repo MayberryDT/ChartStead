@@ -154,6 +154,7 @@ export function TeamActivityPanel({ eventId }: { eventId: string }) {
                   {entry.summary}
                 </ActivityEntryLink>
                 <span>{entry.label}</span>
+                <span className="muted team-activity-actor">{entry.actorName}</span>
               </div>
               <time dateTime={entry.createdAt}>{formatWhen(entry.createdAt)}</time>
             </li>

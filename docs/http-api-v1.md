@@ -101,6 +101,14 @@ Speaker responses keep `name`, `email`, and `biography` as the current reusable 
 
 Unauthenticated public HTML/API for attendees uses `/api/events/:eventId/program` (and the React routes `/e/:eventId/program` and `/program/embed`). Payloads are filtered — no committee notes or internal delivery state.
 
+### Organizer activity (Course Check 24 / 25)
+
+| Method | Path | Role |
+| --- | --- | --- |
+| GET | `/api/v1/events/:eventId/organizer/activity` | member (admin: any actor; reviewer: self) |
+
+Query: `actorId`, optional `limit` (1–100), optional `before` (ISO cursor). Lists team members plus agents that have written activity. Agent mutations with `X-ChartStead-Initiating-Human` appear under both the agent and that person, labeled `{agent} (agent on behalf of {person})`.
+
 ### Airtable integration
 
 | Method | Path | Role |

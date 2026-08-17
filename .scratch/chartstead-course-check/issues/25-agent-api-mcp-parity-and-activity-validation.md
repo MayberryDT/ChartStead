@@ -4,7 +4,7 @@
 
 **Blocked by:** Course Check 24 — Organizer activity by actor (per-user history).
 
-**Status:** ready-for-agent
+**Status:** in-review
 
 ## Problem
 
@@ -42,14 +42,14 @@ Treat this as a **parity matrix + live agent suite + activity attribution**, not
 
 ## Goals
 
-- [ ] Published **parity matrix** (in-repo doc or test table) covering organizer desk capabilities: each row has UI action → v1 HTTP → MCP path → scopes/mode required → activity/attribution expectation.
-- [ ] Automated tests prove **human UI/session, agent HTTP, and agent MCP** produce equivalent authorization, durable state, and audit outcomes for every in-scope row (or explicitly mark intentional non-goals such as credential minting / Airtable credential config, which MCP already blocks).
-- [ ] Mutating agent calls with `X-ChartStead-Initiating-Human` show **`{agent name} (agent on behalf of {person})`** in Course Check history, entity history where applicable, and Course Check **24** activity-by-actor.
-- [ ] Mutating agent calls **without** initiating human show **`{agent name} (agent)`** and never appear as the human’s bare name.
-- [ ] Activity-by-actor for the initiating human includes those agent-on-behalf actions; organizers can tell agent work apart from the human acting directly in the UI.
-- [ ] Propose-only, scope denial, live revocation, and MCP credential-path blocks remain covered (regressions caught if 08/13 behavior drifts).
-- [ ] Updated agent handoff / QA brief lets a non-developer organizer (or Tyler) run a multi-step API **and** MCP acceptance pass against a Tailscale demo, then verify activity attribution.
-- [ ] Any parity holes found during the matrix are fixed (or filed with a clear owner) before this ticket leaves `in-review`.
+- [x] Published **parity matrix** (in-repo doc or test table) covering organizer desk capabilities: each row has UI action → v1 HTTP → MCP path → scopes/mode required → activity/attribution expectation.
+- [x] Automated tests prove **human UI/session, agent HTTP, and agent MCP** produce equivalent authorization, durable state, and audit outcomes for every in-scope row (or explicitly mark intentional non-goals such as credential minting / Airtable credential config, which MCP already blocks).
+- [x] Mutating agent calls with `X-ChartStead-Initiating-Human` show **`{agent name} (agent on behalf of {person})`** in Course Check history, entity history where applicable, and Course Check **24** activity-by-actor.
+- [x] Mutating agent calls **without** initiating human show **`{agent name} (agent)`** and never appear as the human’s bare name.
+- [x] Activity-by-actor for the initiating human includes those agent-on-behalf actions; organizers can tell agent work apart from the human acting directly in the UI.
+- [x] Propose-only, scope denial, live revocation, and MCP credential-path blocks remain covered (regressions caught if 08/13 behavior drifts).
+- [x] Updated agent handoff / QA brief lets a non-developer organizer (or Tyler) run a multi-step API **and** MCP acceptance pass against a Tailscale demo, then verify activity attribution.
+- [x] Any parity holes found during the matrix are fixed (or filed with a clear owner) before this ticket leaves `in-review`.
 
 ## Non-goals
 
@@ -63,6 +63,19 @@ Treat this as a **parity matrix + live agent suite + activity attribution**, not
 Tyler (2026-08-17): thorough testing of MCP and API agent integration; agents must be able to do everything a human can in the UI; changes must attribute as agent on behalf of the person; blocked on Course Check 24 because activity logging / activity-by-actor is the accountability surface for that attribution.
 
 ## Comments
+
+- 2026-08-17 — Ready for human QA (`in-review`).
+  - Demo: http://100.105.117.93:5825/
+  - What to test:
+    1. Settings → Automation access: mint a delegated key with decisions scope; copy API + MCP config.
+    2. Soft-lean or decline a seed proposal via API or MCP with `X-ChartStead-Initiating-Human: <your-id>|<Your Name>`.
+    3. Settings → Activity: pick **yourself** — see `{agent} (agent on behalf of {you})` on the row (not bare you).
+    4. Same Activity picker: pick the **agent** — same on-behalf-of wording.
+    5. Propose-only key cannot apply; MCP still blocks `/api-keys` and `/integrations`.
+  - Verified: `test/worker/agent-api-mcp-parity.test.ts` 5/5; organizer-activity / ai-connections / course-check-agent-api 27/27 worker; UI organizer-activity 2/2.
+  - Gap-closes: stored on-behalf labels; activity dual-index on initiating human; agents in Activity picker; `GET /api/v1/.../organizer/activity`; Activity rows show actor name.
+
+- 2026-08-17 — Claimed for implementation: parity matrix, human/API/MCP equivalence tests, agent-on-behalf activity attribution (incl. initiating-human dual index), gap-close, handoff brief.
 
 - 2026-08-17 — Filed as Course Check 25. Status `blocked` on Course Check 24 (organizer activity by actor). Approach: parity matrix + automated human/API/MCP equivalence + on-behalf-of activity attribution; gap-close where the matrix fails. Kernel and connection UX from 08/13 are prerequisites already `done`.
 

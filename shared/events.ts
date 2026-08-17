@@ -262,6 +262,8 @@ export interface OrganizerTeamMember {
   name: string;
   email: string;
   role: "admin" | "reviewer";
+  /** Present when this picker row is a scoped agent principal, not a human member. */
+  kind?: "human" | "agent";
 }
 
 export interface OrganizerActorActivityEntry {

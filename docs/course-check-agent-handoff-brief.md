@@ -114,17 +114,41 @@ Idempotency-Key: agent-suite-apply-1
 
 8. Ask the human (do not skip): open the plan URL and confirm they see the same decision and agent attribution you reported. One yes/no.
 
-### E — Write a short debrief
+### E — Activity attribution (Course Check 24 / 25)
 
-9. End with:
-   - What worked
+9. Soft-lean or apply with initiating human set. Then either call activity yourself or ask the human:
+
+```http
+GET /api/v1/events/{eventId}/organizer/activity?actorId={initiating-human-id}
+Authorization: Bearer PASTE_KEY_HERE
+```
+
+Confirm at least one entry shows `{your agent name} (agent on behalf of {person})` — not the person's bare name alone.
+
+10. Also check activity for the **agent** id (Settings → Activity picker lists agents that have acted). Same on-behalf-of wording.
+
+### F — MCP path (same key)
+
+11. If the human connected MCP (Settings → Automation access → MCP), mirror steps B–C with tools:
+    - `chartstead_list_event_work` (submissions)
+    - `chartstead_prepare_decision` (decline a different seed id)
+    - `chartstead_event_api` for apply and `GET /organizer/activity?actorId=…`
+12. Confirm MCP results match what HTTP reported (same plan fields, same activity labels).
+
+### G — Write a short debrief
+
+13. End with:
+   - What worked (HTTP and/or MCP)
    - What the key is allowed / not allowed to do
    - Whether Course Check felt like the same safety path as the UI (same plan, digest, stages)
+   - Whether activity showed agent-on-behalf-of correctly
    - Anything confusing for a non-technical organizer
+
+Parity matrix (full desk map): `docs/agent-api-mcp-parity-matrix.md`
 
 ## Example first message from the human
 
-> Here is my ChartStead agent key and base URL. Run the Course Check acceptance suite in the handoff brief. Prefer declining a seed proposal. Tell me in plain English what you did and give me the plan link to click.
+> Here is my ChartStead agent key and base URL. Run the Course Check acceptance suite in the handoff brief. Prefer declining a seed proposal. Tell me in plain English what you did and give me the plan link to click. Also confirm activity shows agent on behalf of me.
 
 ---
 
@@ -133,23 +157,23 @@ Idempotency-Key: agent-suite-apply-1
 ```
 You are a ChartStead Course Check agent.
 
-Base URL: http://100.105.117.93:5189
+Base URL: http://100.105.117.93:5825
 Event: pacific-open-data-summit-2026
 API key: PASTE_KEY_HERE
 Header on every call: Authorization: Bearer <key>
 Optional: X-ChartStead-Initiating-Human: tyler|Tyler
 
-I am not a developer. Do not give me curl. Call the HTTP API yourself.
+I am not a developer. Do not give me curl. Call the HTTP API yourself (MCP tools are fine if configured).
 
 Run this suite:
 1) GET /api/v1/health
 2) GET /api/v1/events/pacific-open-data-summit-2026/course-checks
 3) GET /api/v1/events/pacific-open-data-summit-2026/submissions — summarize a few
-4) POST .../course-checks/decisions declining SUB-PODS0002 with a unique idempotency key
+4) POST .../course-checks/decisions declining SUB-PODS0002 with a unique idempotency key and initiating-human header
 5) If your key allows execution, POST .../apply with that plan’s version + digest and stageId apply-decision
-6) Give me the plan UI link:
-   http://100.105.117.93:5189/e/pacific-open-data-summit-2026/course-checks/<planId>
-7) Plain-English debrief: what worked, what the key blocked, whether you show up as an agent actor
+6) GET .../organizer/activity?actorId=tyler — confirm agent on behalf of Tyler
+7) Give me the plan UI link and Settings → Activity check
+8) Plain-English debrief: what worked, what the key blocked, attribution
 
 Rules: frozen plan digest only; no inventing success; prefer decline for smoke tests.
 ```
