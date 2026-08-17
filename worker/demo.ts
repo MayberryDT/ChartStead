@@ -10,6 +10,7 @@ import {
   handleDemoPersonaRequest,
   resolveDemoPrincipal,
 } from "./demo-personas";
+import { isDemoWorkerPath, redirectLegacyDemoHost } from "./demo-host";
 import { listAllEventWorkspaceIds, loadEventWorkspace } from "./event-catalog";
 import { seedEvents } from "./seed-events";
 import type { AppBindings } from "./types";
@@ -44,8 +45,22 @@ async function ensureDemoShowcase(env: AppBindings): Promise<void> {
 
 export default {
   fetch: async (request: Request, env: AppBindings, ctx: ExecutionContext) => {
+    const redirected = redirectLegacyDemoHost(request);
+    if (redirected) {
+      return redirected;
+    }
     await ensureDemoShowcase(env);
-    return (await handleDemoPersonaRequest(request, env)) ?? app.fetch(request, env, ctx);
+    const personaResponse = await handleDemoPersonaRequest(request, env);
+    if (personaResponse) {
+      return personaResponse;
+    }
+    if (isDemoWorkerPath(new URL(request.url).pathname)) {
+      return app.fetch(request, env, ctx);
+    }
+    if (env.STATIC_ASSETS) {
+      return env.STATIC_ASSETS.fetch(request);
+    }
+    return app.fetch(request, env, ctx);
   },
   async scheduled(_controller, env) {
     const sender = createResendSender(env);

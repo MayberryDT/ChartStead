@@ -45,6 +45,16 @@ describe("evaluation-ready demo personas", () => {
     ]);
   });
 
+  it("redirects the legacy workers.dev host before the SPA runs", async () => {
+    const response = await demoWorker.fetch(
+      new Request("https://chartstead-demo.mayberrydt.workers.dev/demo"),
+      env,
+      {} as ExecutionContext,
+    );
+    expect(response.status).toBe(308);
+    expect(response.headers.get("Location")).toBe("https://demo.chartstead.com/demo");
+  });
+
   it("declares the three safe evaluator entry points without exposing credentials", async () => {
     const response = await demoWorker.fetch(
       new Request("https://chartstead.test/api/demo/personas"),
