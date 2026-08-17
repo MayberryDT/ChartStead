@@ -223,6 +223,128 @@ describe("Ticket 08 agenda workspace", () => {
     expect(router.state.location.search.sessionIds).toBe("ses-2");
   });
 
+  it("exposes every day for a 4-day World's Fair event and keeps selection cues", async () => {
+    const user = userEvent.setup();
+    const fourDayEventId = "ai-engineer-worlds-fair-2026";
+    const fourDayEvents: EventListResponse = {
+      ...eventsResponse,
+      principal: {
+        ...eventsResponse.principal,
+        eventIds: [fourDayEventId],
+      },
+      events: [
+        {
+          ...eventsResponse.events[0],
+          id: fourDayEventId,
+          name: "AI Engineer World's Fair 2026",
+          startsOn: "2026-06-29",
+          endsOn: "2026-07-02",
+        },
+      ],
+    };
+    const dayTwoSession = session({
+      id: "ses-day2",
+      title: "Agents Deep Dive",
+      roomId: "harbor-hall",
+      roomName: "Harbor Hall",
+      startsAt: "2026-06-30T16:00:00.000Z",
+      endsAt: "2026-06-30T16:45:00.000Z",
+      placementStatus: "placed",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = requestUrl(input);
+        if (url.endsWith("/api/events") || url.endsWith("/api/events/")) {
+          return Response.json(fourDayEvents);
+        }
+        if (url.endsWith(`/api/events/${fourDayEventId}/sessions`)) {
+          return Response.json(
+            agendaResponse({
+              eventId: fourDayEventId,
+              sessions: [dayTwoSession, session({ id: "ses-unplaced", title: "Unplaced Talk" })],
+            }),
+          );
+        }
+        throw new Error(`Unexpected request ${url}`);
+      }),
+    );
+
+    const { container, router } = renderAgenda(
+      `/e/${fourDayEventId}/agenda?session=ses-day2&day=2026-06-29`,
+    );
+
+    await screen.findByLabelText("Unplaced sessions");
+    const toolbar = container.querySelector(".shell-toolbar") as HTMLElement;
+    const dayTabs = within(toolbar).getByRole("tablist", { name: "Event days" });
+    expect(dayTabs).toHaveAttribute("data-day-count", "4");
+    const expectedDays = [
+      { day: "2026-06-29", label: /Mon, Jun 29/ },
+      { day: "2026-06-30", label: /Tue, Jun 30/ },
+      { day: "2026-07-01", label: /Wed, Jul 1/ },
+      { day: "2026-07-02", label: /Thu, Jul 2/ },
+    ];
+    for (const { day, label } of expectedDays) {
+      const tab = within(dayTabs).getByRole("tab", { name: label });
+      expect(tab).toBeVisible();
+      expect(tab).toHaveAttribute("data-day", day);
+    }
+    expect(within(dayTabs).getAllByRole("tab")).toHaveLength(4);
+    expect(
+      within(dayTabs).getByRole("tab", { name: /Tue, Jun 30/ }),
+    ).toHaveClass("has-selection-elsewhere");
+
+    await user.click(within(dayTabs).getByRole("tab", { name: /Thu, Jul 2/ }));
+    await waitFor(() => {
+      expect(
+        within(dayTabs).getByRole("tab", { name: /Thu, Jul 2/, selected: true }),
+      ).toBeVisible();
+    });
+    expect(router.state.location.search.day).toBe("2026-07-02");
+    expect(within(toolbar).getByLabelText(/unplaced/i)).toBeVisible();
+
+    within(dayTabs).getByRole("tab", { name: /Thu, Jul 2/, selected: true }).focus();
+    await user.keyboard("{ArrowLeft}");
+    await waitFor(() => {
+      expect(
+        within(dayTabs).getByRole("tab", { name: /Wed, Jul 1/, selected: true }),
+      ).toBeVisible();
+    });
+  });
+
+  it("keeps a reachable two-day toolbar control without clipping to a binary pair", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = requestUrl(input);
+        if (url.endsWith("/api/events") || url.endsWith("/api/events/")) {
+          return Response.json(eventsResponse);
+        }
+        if (url.endsWith(`/api/events/${eventId}/sessions`)) {
+          return Response.json(agendaResponse());
+        }
+        throw new Error(`Unexpected request ${url}`);
+      }),
+    );
+
+    const { container } = renderAgenda(`/e/${eventId}/agenda`);
+    await screen.findByLabelText("Unplaced sessions");
+    const toolbar = container.querySelector(".shell-toolbar") as HTMLElement;
+    const dayTabs = within(toolbar).getByRole("tablist", { name: "Event days" });
+    expect(dayTabs).toHaveAttribute("data-day-count", "2");
+    expect(within(dayTabs).getAllByRole("tab")).toHaveLength(2);
+    expect(within(dayTabs).getByRole("tab", { name: /Wed, Oct 7/, selected: true })).toBeVisible();
+    expect(within(dayTabs).getByRole("tab", { name: /Thu, Oct 8/ })).toBeVisible();
+
+    await user.click(within(dayTabs).getByRole("tab", { name: /Thu, Oct 8/ }));
+    await waitFor(() => {
+      expect(
+        within(dayTabs).getByRole("tab", { name: /Thu, Oct 8/, selected: true }),
+      ).toBeVisible();
+    });
+  });
+
   it("shows unplaced pool, live counts, TBD labels, and keyboard Move Session", async () => {
     const user = userEvent.setup();
     let agenda = agendaResponse();

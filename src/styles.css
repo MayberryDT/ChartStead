@@ -5500,20 +5500,29 @@ details[open] > summary .course-check-chevron { transform: rotate(180deg); }
   color: var(--on-error-container);
 }
 
-.agenda-day-tabs.seg {
+/* Organizer Agenda days: plain toolbar buttons — no segmented box / card wrap. */
+.agenda-day-switcher {
   display: inline-flex;
-  flex: 0 0 auto;
-  min-height: 34px;
-}
-
-.agenda-day-tabs.seg button {
-  display: inline-flex;
+  flex: 0 1 auto;
   align-items: center;
   gap: 6px;
-  min-height: 34px;
-  height: 34px;
-  padding: 0 10px;
-  font-size: 12px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+
+.shell-toolbar .agenda-day-switcher .agenda-day-btn,
+.topbar-tools .agenda-day-switcher .agenda-day-btn {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 44px;
+  min-height: 44px;
+  height: 44px;
+  padding: 0 12px;
   white-space: nowrap;
 }
 
@@ -5530,25 +5539,26 @@ details[open] > summary .course-check-chevron { transform: rotate(180deg); }
   font-weight: 600;
 }
 
-.agenda-day-tabs.seg button[aria-selected="true"] {
+.shell-toolbar .agenda-day-switcher .agenda-day-btn.is-selected,
+.shell-toolbar .agenda-day-switcher .agenda-day-btn[aria-selected="true"],
+.topbar-tools .agenda-day-switcher .agenda-day-btn.is-selected,
+.topbar-tools .agenda-day-switcher .agenda-day-btn[aria-selected="true"] {
   background: var(--primary);
   color: var(--on-primary);
+  border-color: var(--primary);
   box-shadow: none;
 }
 
-.agenda-day-tabs.seg button[aria-selected="true"] .agenda-day-count {
+.shell-toolbar .agenda-day-switcher .agenda-day-btn.is-selected .agenda-day-count,
+.shell-toolbar .agenda-day-switcher .agenda-day-btn[aria-selected="true"] .agenda-day-count,
+.topbar-tools .agenda-day-switcher .agenda-day-btn.is-selected .agenda-day-count,
+.topbar-tools .agenda-day-switcher .agenda-day-btn[aria-selected="true"] .agenda-day-count {
   opacity: 0.9;
 }
 
-.agenda-day-tabs.seg button.has-selection-elsewhere {
+.shell-toolbar .agenda-day-switcher .agenda-day-btn.has-selection-elsewhere,
+.topbar-tools .agenda-day-switcher .agenda-day-btn.has-selection-elsewhere {
   box-shadow: inset 0 -2px 0 var(--secondary);
-}
-
-@media (max-width: 760px) {
-  .shell-toolbar .agenda-day-tabs.seg button {
-    min-height: 44px;
-    height: 44px;
-  }
 }
 
 
@@ -9278,9 +9288,19 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
 .agenda-search { height: 56px; display: flex; align-items: center; gap: 14px; padding: 0 16px; border: 1px solid #cbd5e1; border-radius: 7px; color: #48617f; }
 .agenda-search input { min-width: 0; width: 100%; height: 100%; border: 0; outline: 0; background: transparent; color: #081d3a; font: 16px Inter, sans-serif; }
 .agenda-search input::placeholder { color: #60718c; }
-.agenda-controls { min-height: 84px; display: grid; grid-template-columns: 270px repeat(4, minmax(150px, 1fr)) 126px; align-items: center; gap: 12px; padding: 14px 42px; }
-.agenda-day-tabs { display: grid; grid-template-columns: 1fr 1fr; height: 56px; }
-.agenda-day-tabs button { border: 1px solid #cbd5e1; background: #fff; color: #081d3a; font: 500 16px Inter, sans-serif; }
+.agenda-controls { min-height: 84px; display: grid; grid-template-columns: max-content repeat(4, minmax(140px, 1fr)) 126px; align-items: center; gap: 12px; padding: 14px 42px; }
+/* Public agenda embed: day tabs must scale with N days — never a fixed 2-column / 270px box. */
+.agenda-day-tabs {
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(6.5rem, max-content);
+  height: 56px;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.agenda-day-tabs button { border: 1px solid #cbd5e1; background: #fff; color: #081d3a; font: 500 16px Inter, sans-serif; white-space: nowrap; }
 .agenda-day-tabs button:first-child { border-radius: 6px 0 0 6px; }
 .agenda-day-tabs button:last-child { border-radius: 0 6px 6px 0; }
 .agenda-day-tabs button.is-active { border-color: #276fbd; background: #276fbd; color: #fff; }
