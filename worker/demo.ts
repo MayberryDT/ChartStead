@@ -37,13 +37,20 @@ const app = createApp({
   signingSecret: "demo-local-signing-secret-not-for-production",
 });
 
+let demoShowcasePromise: Promise<void> | null = null;
+
 async function ensureDemoShowcase(env: AppBindings): Promise<void> {
-  for (const seed of seedEvents) {
-    await loadEventWorkspace(env, seed.id);
-    env.EVENT_STORE.getByName(seed.id).seedDemoShowcaseIfNeeded();
-    env.EVENT_STORE.getByName(seed.id).seedWorldsFairProgramIfNeeded();
+  if (!demoShowcasePromise) {
+    demoShowcasePromise = (async () => {
+      for (const seed of seedEvents) {
+        await loadEventWorkspace(env, seed.id);
+        await env.EVENT_STORE.getByName(seed.id).seedDemoShowcaseIfNeeded();
+        await env.EVENT_STORE.getByName(seed.id).seedWorldsFairProgramIfNeeded();
+      }
+      await seedWorldsFairHeadshotObjects(env.ASSETS);
+    })();
   }
-  await seedWorldsFairHeadshotObjects(env.ASSETS);
+  await demoShowcasePromise;
 }
 
 export default {
