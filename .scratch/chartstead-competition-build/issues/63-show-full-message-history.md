@@ -1,6 +1,6 @@
 # 63 — Show full message history in the Messages inspector
 
-**Status:** ready-for-agent
+**Status:** in-review
 
 **Blocked by:** None — can start immediately.
 
@@ -20,5 +20,7 @@ Do not change Course Check send, approval, or outbox semantics. This is history 
 - [ ] A Tailscale demo URL and what-to-test list are recorded before `in-review`.
 
 ## Comments
+
+- 2026-08-16 — Still open for Tyler QA (not merged). Demo will be on single port with 63 worktree.
 
 - 2026-08-17 — Tyler walkthrough: Messages says there are three open, but clicking someone shows no messages on the right. Need to see all historical messages.

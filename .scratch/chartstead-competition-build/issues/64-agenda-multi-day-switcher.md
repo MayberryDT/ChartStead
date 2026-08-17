@@ -1,6 +1,6 @@
 # 64 — Make the Agenda day switcher fit every event date
 
-**Status:** in-review
+**Status:** done
 
 **Blocked by:** None — can start immediately.
 
@@ -20,6 +20,8 @@ Organizers must be able to reach every event day. Replace or rebuild the toggle 
 - [x] A Tailscale demo URL and what-to-test list are recorded before `in-review`.
 
 ## Comments
+
+- 2026-08-16 — Tyler QA approved. Merged to `main`. Status → done.
 
 - 2026-08-16 — Tyler QA: reject boxed/seg day control (“don’t wrap a box around these buttons; drop them on the toolbar”). Also fix broken public agenda embed day tabs. Reworked organizer control to plain toolbar `btn` day switches (no `.seg` card). Embed: day strip uses auto columns + `max-content` controls column (was fixed 270px / 1fr 1fr). Combined demo: http://100.105.117.93:5870/e/ai-engineer-worlds-fair-2026/agenda — embed: http://100.105.117.93:5870/e/ai-engineer-worlds-fair-2026/program/agenda and http://100.105.117.93:5870/fixtures/agenda-embed
 

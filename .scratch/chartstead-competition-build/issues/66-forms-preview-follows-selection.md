@@ -1,6 +1,6 @@
 # 66 — Make the Forms preview follow the selected form
 
-**Status:** in-review
+**Status:** done
 
 **Blocked by:** None — can start immediately.
 
@@ -19,6 +19,8 @@ Selecting a row must show that form’s name and definition. Do not change build
 - [x] A Tailscale demo URL and what-to-test list are recorded before `in-review`.
 
 ## Comments
+
+- 2026-08-16 — Tyler QA approved. Merged to `main`. Status → done.
 
 - 2026-08-16 — Tyler QA: forms preview is fine. Keeping as-is on combined review demo http://100.105.117.93:5870/e/ai-engineer-worlds-fair-2026/forms
 

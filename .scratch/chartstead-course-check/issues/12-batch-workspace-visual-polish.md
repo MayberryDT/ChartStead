@@ -24,4 +24,4 @@
 - 2026-08-11 — Tyler after Course Check 02 QA: function is fine; the shared batch workspace **looks horrible** and needs a full visual overhaul. Human-tandem only.
 - Related single-decision flow polish remains Course Check 11; this ticket owns the batch/shared workspace surface shipped in 02.
 
-- 2026-08-13 — frontier-reconcile: Blockers satisfied; remains human-tandem only (not agent-ready).
+- 2026-08-17 — frontier-reconcile: Blockers satisfied; remains human-tandem only (not agent-ready).

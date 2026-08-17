@@ -1,6 +1,6 @@
 # 65 — Fix the broken Speakers search field
 
-**Status:** in-review
+**Status:** done
 
 **Blocked by:** None — can start immediately.
 
@@ -19,6 +19,8 @@ Match the working topbar search used on Forms / Submissions: one field, icon and
 - [x] A screenshot or focused layout assertion is recorded; Tailscale demo URL and what-to-test before `in-review`.
 
 ## Comments
+
+- 2026-08-16 — Tyler QA approved. Merged to `main`. Status → done.
 
 - 2026-08-16 — Tyler QA: speakers search looks good. Keeping as-is on combined review demo http://100.105.117.93:5870/e/ai-engineer-worlds-fair-2026/speakers
 

@@ -1,6 +1,6 @@
 # 67 — Make locked Submissions rows obvious without a tooltip
 
-**Status:** in-review
+**Status:** done
 
 **Blocked by:** None — can start immediately.
 
@@ -20,6 +20,8 @@ Rows must stay openable for inspect. Batch select can stay locked after a final 
 - [x] A Tailscale demo URL and what-to-test list are recorded before `in-review`.
 
 ## Comments
+
+- 2026-08-16 — Tyler QA approved. Merged to `main`. Status → done.
 
 - 2026-08-16 — Tyler QA: reject in-row “Outcome locked” (adds vertical space) and grayed/disabled batch checkbox. Direction: add a real **Locked** status (filter + status column) instead. Reverted prior treatment. Now: status column shows Locked when `programOutcome` is set; status filter includes Locked; locked rows omit the batch checkbox (no grayed control, no extra talk-line). Combined demo: http://100.105.117.93:5870/e/ai-engineer-worlds-fair-2026/submissions
 
