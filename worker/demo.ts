@@ -7,6 +7,7 @@ import { createResendCommunicationSender, createResendSender } from "./email";
 import { flushCommunicationEffects } from "./course-check/communication-delivery";
 import { flushEventOutbox } from "./outbox";
 import {
+  ensureDemoTeamMemberships,
   handleDemoPersonaRequest,
   resolveDemoPrincipal,
 } from "./demo-personas";
@@ -42,10 +43,12 @@ let demoShowcasePromise: Promise<void> | null = null;
 async function ensureDemoShowcase(env: AppBindings): Promise<void> {
   if (!demoShowcasePromise) {
     demoShowcasePromise = (async () => {
+      await ensureDemoTeamMemberships(env);
       for (const seed of seedEvents) {
         await loadEventWorkspace(env, seed.id);
         await env.EVENT_STORE.getByName(seed.id).seedDemoShowcaseIfNeeded();
         await env.EVENT_STORE.getByName(seed.id).seedWorldsFairProgramIfNeeded();
+        await env.EVENT_STORE.getByName(seed.id).seedDemoTeamActivityIfNeeded();
       }
       await seedWorldsFairHeadshotObjects(env.ASSETS);
     })();

@@ -20,6 +20,8 @@ import type {
   OrganizerCfpFormSummary,
   OrganizerPrincipal,
   OrganizerProposal,
+  OrganizerTeamMember,
+  OrganizerActivityByActorResponse,
   ProposalAuditEvent,
   ProposalReviewerRecusal,
   ProposalStatus,
@@ -3500,6 +3502,101 @@ export function createApp(options: AppOptions = {}) {
     }
 
     return c.json({ proposal: toPublicProposal(proposal) });
+  });
+
+  app.get("/api/events/:eventId/organizer/activity", async (c) => {
+    const principal = await resolvePrincipal(c.req.raw, c.env);
+    const eventId = c.req.param("eventId");
+    if (!canAccessEvent(principal, eventId)) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const seed = findSeed(eventId);
+    if (!seed) {
+      return c.json({ error: "Event not found" }, 404);
+    }
+
+    await loadEvent(c.env, seed);
+    const store = c.env.EVENT_STORE.getByName(eventId);
+    const isAdmin = eventRole(principal, eventId) === "admin";
+
+    const membershipRows = await c.env.AUTH_DB.prepare(
+      `SELECT u.id, u.name, u.email, m.role
+       FROM event_memberships AS m
+       JOIN "user" AS u ON u.id = m.user_id
+       WHERE m.event_id = ? AND m.role IN ('admin', 'reviewer')
+       ORDER BY u.name COLLATE NOCASE, u.id`,
+    )
+      .bind(eventId)
+      .all<{ id: string; name: string; email: string; role: "admin" | "reviewer" }>();
+
+    let actors: OrganizerTeamMember[] = membershipRows.results.map((row) => ({
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      role: row.role,
+    }));
+    if (!isAdmin) {
+      actors = actors.filter((member) => member.id === principal.id);
+    }
+
+    const actorIdParam = c.req.query("actorId");
+    const actorId =
+      typeof actorIdParam === "string" && actorIdParam.trim()
+        ? actorIdParam.trim()
+        : null;
+
+    const limitParam = c.req.query("limit");
+    const parsedLimit =
+      typeof limitParam === "string" && limitParam.trim()
+        ? Number.parseInt(limitParam.trim(), 10)
+        : 50;
+    const limit = Number.isFinite(parsedLimit)
+      ? Math.min(100, Math.max(1, parsedLimit))
+      : 50;
+    const beforeParam = c.req.query("before");
+    const before =
+      typeof beforeParam === "string" && beforeParam.trim()
+        ? beforeParam.trim()
+        : null;
+
+    let actor: OrganizerTeamMember | null = null;
+    let entries: OrganizerActivityByActorResponse["entries"] = [];
+    let hasMore = false;
+
+    if (actorId) {
+      if (!isAdmin && actorId !== principal.id) {
+        return c.json({ error: "Forbidden" }, 403);
+      }
+      const activity = await store.listTeamActivityByActor(actorId, {
+        limit,
+        before,
+      });
+      entries = activity.entries;
+      hasMore = activity.hasMore;
+      actor = actors.find((member) => member.id === actorId) ?? null;
+      if (!actor && actorId === principal.id) {
+        const role = eventRole(principal, eventId);
+        if (role === "admin" || role === "reviewer") {
+          actor = {
+            id: principal.id,
+            name: principal.displayName,
+            email: "",
+            role,
+          };
+        }
+      }
+    }
+
+    const body: OrganizerActivityByActorResponse = {
+      actorId,
+      actor,
+      actors,
+      entries,
+      limit,
+      hasMore,
+    };
+    return c.json(body);
   });
 
   app.get("/api/events/:eventId/organizer/proposals/:proposalId", async (c) => {

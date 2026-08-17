@@ -32,6 +32,7 @@ import type {
   OnboardingReminderDraft,
   OnboardingReminderAutomationPolicy,
   OnboardingTaskBatchResult,
+  OrganizerActivityByActorResponse,
   OrganizerCfpForm,
   OrganizerCfpFormSummary,
   OrganizerProposal,
@@ -587,6 +588,32 @@ export async function fetchOrganizerProposal(
   if (!response.ok || !("proposal" in body)) {
     throw new ApiError(
       "error" in body ? body.error : "Unable to load proposal",
+      response.status,
+      body,
+    );
+  }
+  return body;
+}
+
+export async function fetchOrganizerActivityByActor(
+  eventId: string,
+  actorId?: string | null,
+  options?: { limit?: number; before?: string | null },
+): Promise<OrganizerActivityByActorResponse> {
+  const params = new URLSearchParams();
+  if (actorId) params.set("actorId", actorId);
+  if (options?.limit != null) params.set("limit", String(options.limit));
+  if (options?.before) params.set("before", options.before);
+  const query = params.toString();
+  const response = await fetch(
+    `/api/events/${eventId}/organizer/activity${query ? `?${query}` : ""}`,
+  );
+  const body = await readJson<OrganizerActivityByActorResponse | { error: string }>(
+    response,
+  );
+  if (!response.ok || !("actors" in body) || !("entries" in body)) {
+    throw new ApiError(
+      "error" in body ? body.error : "Unable to load team activity",
       response.status,
       body,
     );

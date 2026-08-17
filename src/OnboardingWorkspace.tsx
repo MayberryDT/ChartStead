@@ -1846,6 +1846,9 @@ export function OnboardingWorkspace({
                               <div>
                                 <strong>{humanHistoryType(entry.type)}</strong>
                                 <p>{entry.summary}</p>
+                                {entry.actorName ? (
+                                  <p className="muted-line">by {entry.actorName}</p>
+                                ) : null}
                               </div>
                             </li>
                           ))}

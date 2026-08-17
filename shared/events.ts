@@ -257,6 +257,76 @@ export interface ProposalReviewResponse {
   scorecard: ProposalScorecardReviewProjection | null;
 }
 
+export interface OrganizerTeamMember {
+  id: string;
+  name: string;
+  email: string;
+  role: "admin" | "reviewer";
+}
+
+export interface OrganizerActorActivityEntry {
+  id: string;
+  proposalId: string;
+  proposalTitle: string;
+  type: ProposalAuditEventType;
+  actorId: string;
+  actorName: string;
+  fromStatus: string;
+  toStatus: string;
+  committeeNoteChanged: boolean;
+  createdAt: string;
+}
+
+export type OrganizerTeamActivityDomain =
+  | "proposal"
+  | "course_check"
+  | "onboarding"
+  | "agenda"
+  | "program"
+  | "evaluation"
+  | "directory"
+  | "messaging";
+
+export type OrganizerTeamActivitySource =
+  | "audit_events"
+  | "onboarding_history"
+  | "agenda_audit_events"
+  | "course_check_mutations"
+  | "evaluation_plan_audit_events"
+  | "speaker_imports";
+
+export interface OrganizerTeamActivityEntry {
+  id: string; // `${source}:${rawId}`
+  source: OrganizerTeamActivitySource;
+  domain: OrganizerTeamActivityDomain;
+  type: string;
+  label: string; // short plain verb/outcome for the right column / secondary line
+  summary: string; // primary line title (proposal title, speaker name, session summary, etc.)
+  actorId: string;
+  actorName: string;
+  createdAt: string;
+  href?: string | null;
+  proposalId?: string | null;
+  proposalTitle?: string | null;
+  speakerId?: string | null;
+  speakerName?: string | null;
+  sessionIds?: string[];
+  planId?: string | null;
+  roundId?: string | null;
+  fromStatus?: string | null;
+  toStatus?: string | null;
+  committeeNoteChanged?: boolean;
+}
+
+export interface OrganizerActivityByActorResponse {
+  actorId: string | null;
+  actor: OrganizerTeamMember | null;
+  actors: OrganizerTeamMember[];
+  entries: OrganizerTeamActivityEntry[];
+  limit: number;
+  hasMore: boolean;
+}
+
 export type ScorecardCriterionType = "numeric" | "dropdown" | "text";
 export type ScorecardCriterionValue = string | number | null;
 

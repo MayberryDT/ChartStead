@@ -26,6 +26,7 @@ import {
 import { EventConfigurationCard } from "./EventWorkspaceManagement";
 import { SettingsCheckbox, SettingsSelectField, SettingsTextField } from "./SettingsFields";
 import { ReviewerRouting } from "./SubmissionsWorkspace";
+import { TeamActivityPanel } from "./TeamActivityPanel";
 
 const MODE_LABELS: Record<AgentOperatingMode, string> = {
   propose_only: "Propose only",
@@ -78,6 +79,7 @@ function healthTone(health: AirtableSyncHealth): string {
 export type SettingsSectionId =
   | "event"
   | "reviewers"
+  | "activity"
   | "course-check"
   | "automation"
   | "airtable";
@@ -96,6 +98,7 @@ export type SettingsChrome = {
 const EVENT_SECTIONS: SettingsSection[] = [
   { id: "event", label: "Event" },
   { id: "reviewers", label: "Reviewers" },
+  { id: "activity", label: "Activity" },
   { id: "automation", label: "Agents" },
   { id: "airtable", label: "Airtable" },
 ];
@@ -894,6 +897,9 @@ export function SettingsWorkspace({
             <h2>Reviewer access</h2>
             <ReviewerRouting event={event} />
           </section>
+        ) : null}
+        {section === "activity" && eventId ? (
+          <TeamActivityPanel eventId={eventId} />
         ) : null}
         {section === "course-check" ? <CourseCheckPolicyCard eventId={eventId} /> : null}
         {section === "automation" ? <AutomationAccessCard eventId={eventId} /> : null}

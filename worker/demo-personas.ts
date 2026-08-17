@@ -84,6 +84,33 @@ async function tokenFromOutbox(
   return bodies?.text.match(/reviewer-invitations\/([^\s]+)/)?.[1] ?? null;
 }
 
+export async function ensureDemoTeamMemberships(env: AppBindings): Promise<void> {
+  const now = Date.now();
+  await env.AUTH_DB.batch([
+    env.AUTH_DB.prepare(
+      `INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt)
+       VALUES (?, ?, ?, 1, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         name = excluded.name,
+         email = excluded.email,
+         emailVerified = 1,
+         updatedAt = excluded.updatedAt`,
+    ).bind(
+      demoAdmin.id,
+      demoAdmin.displayName,
+      "demo-admin@chartstead.test",
+      now,
+      now,
+    ),
+    env.AUTH_DB.prepare(
+      `INSERT INTO event_memberships (event_id, user_id, role)
+       VALUES (?, ?, 'admin')
+       ON CONFLICT(event_id, user_id) DO UPDATE SET role = 'admin'`,
+    ).bind(demoEventId, demoAdmin.id),
+  ]);
+  await provisionDemoReviewer(env);
+}
+
 async function provisionDemoReviewer(env: AppBindings): Promise<void> {
   const adminApp = createApp({
     resolvePrincipal: async () => demoAdmin,
@@ -332,6 +359,7 @@ export async function handleDemoPersonaRequest(
   if (request.method !== "POST" || !match) return null;
   const personaId = match[1];
   if (personaId === "organizer") {
+    await ensureDemoTeamMemberships(env);
     return Response.json(
       {
         path: `/e/${demoEventId}/submissions`,

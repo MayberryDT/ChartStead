@@ -8675,6 +8675,63 @@ body:has(.agenda-auto-scope) .app-select-popup-toolbar {
   background: var(--surface-subtle);
 }
 
+.team-activity-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  border-top: 1px solid var(--outline);
+}
+
+.team-activity-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 16px;
+  align-items: baseline;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--outline);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.team-activity-list li:last-child {
+  border-bottom: 0;
+}
+
+.team-activity-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.team-activity-main a {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.team-activity-main a:hover {
+  text-decoration: underline;
+}
+
+.team-activity-main span {
+  color: var(--on-surface-variant);
+}
+
+.team-activity-list time {
+  color: var(--on-surface-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.team-activity-more {
+  margin-top: 12px;
+}
+
 @media (max-width: 900px) {
   .evaluation-round-fields {
     grid-template-columns: 1fr 1fr;

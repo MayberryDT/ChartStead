@@ -144,6 +144,9 @@ import type {
   PortalMessage,
   PortalOnboardingTask,
   ProposalAuditEvent,
+  OrganizerActorActivityEntry,
+  OrganizerTeamActivityEntry,
+  OrganizerTeamActivityDomain,
   ProposalScorecardReviewProjection,
   ProposalReviewerRecusal,
   ProposalInput,
@@ -922,6 +925,63 @@ interface AuditEventRow {
   created_at: string;
 }
 
+interface ActorAuditEventRow extends AuditEventRow {
+  proposal_title: string | null;
+}
+
+interface TeamActivityOnboardingRow {
+  [key: string]: string | null;
+  id: string;
+  speaker_id: string;
+  speaker_name: string | null;
+  type: string;
+  summary: string;
+  actor_id: string;
+  actor_name: string;
+  created_at: string;
+}
+
+interface TeamActivityAgendaRow {
+  [key: string]: string;
+  id: string;
+  type: string;
+  actor_id: string;
+  actor_name: string;
+  session_ids_json: string;
+  summary: string;
+  created_at: string;
+}
+
+interface TeamActivityMutationRow {
+  [key: string]: string;
+  id: string;
+  plan_id: string;
+  kind: string;
+  actor_id: string;
+  actor_name: string;
+  at: string;
+  summary: string;
+}
+
+interface TeamActivityEvaluationRow {
+  [key: string]: string | null;
+  id: string;
+  round_id: string | null;
+  action: string;
+  actor_id: string;
+  actor_name: string;
+  created_at: string;
+}
+
+interface TeamActivitySpeakerImportRow {
+  [key: string]: string;
+  id: string;
+  result_json: string;
+  actor_id: string;
+  actor_name: string;
+  applied_at: string;
+}
+
 interface ReviewEvidenceRow {
   [key: string]: string | number | null;
   proposal_id: string;
@@ -1302,6 +1362,356 @@ function mapAuditEvent(row: AuditEventRow): ProposalAuditEvent {
     committeeNoteChanged: Boolean(row.committee_note_changed),
     createdAt: row.created_at,
   };
+}
+
+function mapActorAuditEvent(row: ActorAuditEventRow): OrganizerActorActivityEntry {
+  const type = PROPOSAL_AUDIT_TYPES.has(row.type)
+    ? (row.type as OrganizerActorActivityEntry["type"])
+    : "proposal.review.changed";
+  return {
+    id: row.id,
+    proposalId: row.proposal_id,
+    proposalTitle: row.proposal_title ?? row.proposal_id,
+    type,
+    actorId: row.actor_id,
+    actorName: row.actor_name,
+    fromStatus: row.from_status,
+    toStatus: row.to_status,
+    committeeNoteChanged: Boolean(row.committee_note_changed),
+    createdAt: row.created_at,
+  };
+}
+
+const TEAM_ACTIVITY_AUDIT_TYPES = new Set([
+  "proposal.review.changed",
+  "proposal.review.recused",
+  "course_check.decision.applied",
+]);
+
+const TEAM_ACTIVITY_MUTATION_KINDS = new Set([
+  "apply",
+  "send",
+  "create_drafts",
+  "revise",
+  "create",
+  "airtable_defer",
+  "airtable_remove",
+  "airtable_execute",
+  "airtable_reconcile",
+  "airtable_compensate",
+]);
+
+function softLeanActivityLabel(toStatus: string): string {
+  switch (toStatus) {
+    case "approve":
+      return "Recommend";
+    case "deny":
+      return "Not recommend";
+    case "maybe":
+      return "Unreviewed";
+    case "unreviewed":
+      return "Unreviewed";
+    default:
+      return toStatus || "Updated";
+  }
+}
+
+function decisionAppliedActivityLabel(toStatus: string): string {
+  if (toStatus === "guaranteed_speaker") return "Guaranteed speaker";
+  if (toStatus === "accepted") return "Accepted";
+  if (toStatus === "declined") return "Denied";
+  return "Decision";
+}
+
+function communicationActivityLabel(type: string): string {
+  switch (type) {
+    case "course_check.communication.drafts_created":
+      return "Drafts created";
+    case "course_check.communication.send_started":
+      return "Send started";
+    case "course_check.communication.effect_retry":
+      return "Retry";
+    case "course_check.communication.effect_reconciled":
+      return "Reconciled";
+    case "course_check.communication.correction_created":
+      return "Correction";
+    default:
+      return "Communication";
+  }
+}
+
+function mapAuditEventToTeamActivity(
+  row: ActorAuditEventRow,
+): OrganizerTeamActivityEntry | null {
+  if (!TEAM_ACTIVITY_AUDIT_TYPES.has(row.type)) return null;
+
+  const proposalId = row.proposal_id || null;
+  const proposalTitle = row.proposal_title || null;
+  const summary = proposalTitle || proposalId || "Decision";
+  const base = {
+    id: `audit_events:${row.id}`,
+    source: "audit_events" as const,
+    type: row.type,
+    actorId: row.actor_id,
+    actorName: row.actor_name,
+    createdAt: row.created_at,
+    proposalId,
+    proposalTitle,
+    roundId: row.review_round_id ?? null,
+    fromStatus: row.from_status,
+    toStatus: row.to_status,
+    committeeNoteChanged: Boolean(row.committee_note_changed),
+  };
+
+  if (row.type === "proposal.review.changed") {
+    return {
+      ...base,
+      domain: "proposal",
+      label: softLeanActivityLabel(row.to_status),
+      summary,
+    };
+  }
+  if (row.type === "proposal.review.recused") {
+    return {
+      ...base,
+      domain: "proposal",
+      label: "Recused",
+      summary,
+    };
+  }
+  if (row.type === "course_check.decision.applied") {
+    return {
+      ...base,
+      domain: "course_check",
+      label: decisionAppliedActivityLabel(row.to_status),
+      summary: proposalTitle || "Decision",
+    };
+  }
+  if (row.type.startsWith("course_check.communication.")) {
+    return {
+      ...base,
+      domain: "messaging",
+      label: communicationActivityLabel(row.type),
+      summary,
+    };
+  }
+  if (row.type === "course_check.publication.applied") {
+    return {
+      ...base,
+      domain: "program",
+      label: "Published program",
+      summary: proposalTitle || "Publication",
+    };
+  }
+  return null;
+}
+
+function onboardingHistoryActivityLabel(type: string): string {
+  const known: Record<string, string> = {
+    profile_updated: "Profile updated",
+    directory_speaker_added: "Added to directory",
+    task_created: "Task created",
+    task_completed: "Task completed",
+    task_attachment_replaced: "Attachment replaced",
+    reminder_draft_created: "Reminder prepared",
+    reminder_discarded: "Reminder discarded",
+    reminder_queued: "Reminder queued",
+    reminder_sent: "Reminder sent",
+    reminder_send_failed: "Reminder failed",
+    participation_updated: "Participation updated",
+  };
+  if (known[type]) return known[type];
+  return type
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function mapOnboardingHistoryToTeamActivity(
+  row: TeamActivityOnboardingRow,
+): OrganizerTeamActivityEntry {
+  const domain: OrganizerTeamActivityDomain =
+    row.type === "directory_speaker_added" ? "directory" : "onboarding";
+  return {
+    id: `onboarding_history:${row.id}`,
+    source: "onboarding_history",
+    domain,
+    type: row.type,
+    label: onboardingHistoryActivityLabel(row.type),
+    summary: row.summary || row.speaker_name || row.type,
+    actorId: row.actor_id,
+    actorName: row.actor_name,
+    createdAt: row.created_at,
+    speakerId: row.speaker_id,
+    speakerName: row.speaker_name,
+  };
+}
+
+function mapAgendaAuditToTeamActivity(row: TeamActivityAgendaRow): OrganizerTeamActivityEntry {
+  let sessionIds: string[] = [];
+  try {
+    const parsed = JSON.parse(row.session_ids_json) as unknown;
+    if (Array.isArray(parsed)) {
+      sessionIds = parsed.filter((value): value is string => typeof value === "string");
+    }
+  } catch {
+    sessionIds = [];
+  }
+  const label =
+    row.type === "manual_placement"
+      ? "Placed on agenda"
+      : row.type === "auto_place.applied"
+        ? "Auto-placed sessions"
+        : row.type;
+  return {
+    id: `agenda_audit_events:${row.id}`,
+    source: "agenda_audit_events",
+    domain: "agenda",
+    type: row.type,
+    label,
+    summary: row.summary || label,
+    actorId: row.actor_id,
+    actorName: row.actor_name,
+    createdAt: row.created_at,
+    sessionIds,
+  };
+}
+
+function mutationActivityLabel(kind: string, summary: string): string {
+  switch (kind) {
+    case "apply":
+      return "Applied plan";
+    case "send":
+      return "Send started";
+    case "create_drafts":
+      return "Drafts created";
+    case "revise":
+      return "Revised plan";
+    case "create":
+      return "Created plan";
+    case "airtable_defer":
+      return "Airtable deferred";
+    case "airtable_remove":
+      return "Airtable removed";
+    case "airtable_execute":
+      return "Airtable executed";
+    case "airtable_reconcile":
+      return "Airtable reconciled";
+    case "airtable_compensate":
+      return "Airtable compensated";
+    default:
+      return summary || kind;
+  }
+}
+
+function mapMutationToTeamActivity(row: TeamActivityMutationRow): OrganizerTeamActivityEntry {
+  const domain: OrganizerTeamActivityDomain =
+    row.kind === "send" || row.kind === "create_drafts" ? "messaging" : "course_check";
+  return {
+    id: `course_check_mutations:${row.id}`,
+    source: "course_check_mutations",
+    domain,
+    type: row.kind,
+    label: mutationActivityLabel(row.kind, row.summary),
+    summary: row.summary || row.kind,
+    actorId: row.actor_id,
+    actorName: row.actor_name,
+    createdAt: row.at,
+    planId: row.plan_id,
+  };
+}
+
+function evaluationActivityLabel(action: string): string {
+  switch (action) {
+    case "evaluation_plan.saved":
+      return "Saved evaluation plan";
+    case "evaluation_plan.enabled":
+      return "Enabled evaluation plan";
+    case "evaluation_plan.disabled":
+      return "Disabled evaluation plan";
+    case "evaluation_assignment.assigned":
+      return "Assigned reviewer";
+    case "evaluation_assignment.unassigned":
+      return "Unassigned reviewer";
+    case "evaluation_assignment.distributed":
+      return "Distributed assignments";
+    default:
+      if (action.startsWith("review_reminder.")) {
+        if (action.includes("retry")) return "Retried review reminder";
+        return "Review reminder";
+      }
+      return action
+        .split(/[._-]+/)
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" ");
+  }
+}
+
+function mapEvaluationAuditToTeamActivity(
+  row: TeamActivityEvaluationRow,
+): OrganizerTeamActivityEntry {
+  return {
+    id: `evaluation_plan_audit_events:${row.id}`,
+    source: "evaluation_plan_audit_events",
+    domain: "evaluation",
+    type: row.action,
+    label: evaluationActivityLabel(row.action),
+    summary: evaluationActivityLabel(row.action),
+    actorId: row.actor_id,
+    actorName: row.actor_name,
+    createdAt: row.created_at,
+    roundId: row.round_id,
+  };
+}
+
+function mapSpeakerImportToTeamActivity(
+  row: TeamActivitySpeakerImportRow,
+): OrganizerTeamActivityEntry {
+  let summary = "Speaker CSV import";
+  try {
+    const parsed = JSON.parse(row.result_json) as {
+      totals?: {
+        created?: number;
+        reused?: number;
+        updated?: number;
+        skipped?: number;
+        invalid?: number;
+      };
+    };
+    const totals = parsed.totals;
+    if (totals) {
+      const parts: string[] = [];
+      if (totals.created) parts.push(`${totals.created} created`);
+      if (totals.reused) parts.push(`${totals.reused} reused`);
+      if (totals.updated) parts.push(`${totals.updated} updated`);
+      if (totals.skipped) parts.push(`${totals.skipped} skipped`);
+      if (totals.invalid) parts.push(`${totals.invalid} invalid`);
+      if (parts.length > 0) summary = parts.join(", ");
+    }
+  } catch {
+    // keep default summary
+  }
+  return {
+    id: `speaker_imports:${row.id}`,
+    source: "speaker_imports",
+    domain: "directory",
+    type: "speaker_import.applied",
+    label: "Imported speakers CSV",
+    summary,
+    actorId: row.actor_id,
+    actorName: row.actor_name,
+    createdAt: row.applied_at,
+  };
+}
+
+function compareTeamActivityDesc(
+  a: OrganizerTeamActivityEntry,
+  b: OrganizerTeamActivityEntry,
+): number {
+  if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
+  return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
 }
 
 function mapProposalReviewRecusal(row: ProposalReviewRecusalRow): ProposalReviewerRecusal {
@@ -1845,6 +2255,11 @@ export class EventStore extends DurableObject<AppBindings> {
       `);
 
       this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS audit_events_actor_created_idx
+        ON audit_events (actor_id, created_at DESC)
+      `);
+
+      this.ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS review_evidence (
           proposal_id TEXT NOT NULL,
           round_id TEXT NOT NULL DEFAULT '',
@@ -1944,6 +2359,10 @@ export class EventStore extends DurableObject<AppBindings> {
       this.ctx.storage.sql.exec(`
         CREATE INDEX IF NOT EXISTS evaluation_plan_audit_event_created_idx
         ON evaluation_plan_audit_events (event_id, created_at DESC)
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS evaluation_plan_audit_events_actor_created_idx
+        ON evaluation_plan_audit_events (actor_id, created_at DESC)
       `);
 
       this.ctx.storage.sql.exec(`
@@ -2258,6 +2677,10 @@ export class EventStore extends DurableObject<AppBindings> {
           summary TEXT NOT NULL
         )
       `);
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS course_check_mutations_actor_at_idx
+        ON course_check_mutations (actor_id, at DESC)
+      `);
 
       this.ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS course_check_ux_events (
@@ -2386,6 +2809,10 @@ export class EventStore extends DurableObject<AppBindings> {
           created_at TEXT NOT NULL
         )
       `);
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS agenda_audit_events_actor_created_idx
+        ON agenda_audit_events (actor_id, created_at DESC)
+      `);
 
       this.ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS onboarding_tasks (
@@ -2498,6 +2925,10 @@ export class EventStore extends DurableObject<AppBindings> {
           at TEXT NOT NULL,
           summary TEXT NOT NULL
         )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS course_check_mutations_actor_at_idx
+        ON course_check_mutations (actor_id, at DESC)
       `);
 
       this.ctx.storage.sql.exec(`
@@ -2778,6 +3209,10 @@ export class EventStore extends DurableObject<AppBindings> {
         CREATE INDEX IF NOT EXISTS onboarding_history_speaker_created_idx
         ON onboarding_history (speaker_id, created_at DESC)
       `);
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS onboarding_history_actor_created_idx
+        ON onboarding_history (actor_id, created_at DESC)
+      `);
       this.ensureColumn("onboarding_history", "asset_id", "TEXT");
       this.ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS public_embed_configs (
@@ -2808,6 +3243,10 @@ export class EventStore extends DurableObject<AppBindings> {
           actor_name TEXT NOT NULL,
           applied_at TEXT NOT NULL
         )
+      `);
+      this.ctx.storage.sql.exec(`
+        CREATE INDEX IF NOT EXISTS speaker_imports_actor_applied_idx
+        ON speaker_imports (actor_id, applied_at DESC)
       `);
       this.ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS public_program_revisions (
@@ -3706,6 +4145,220 @@ export class EventStore extends DurableObject<AppBindings> {
       this.savePublicEmbedConfig(embed);
     }
     this.publishPublicProgramRevisionFromWorking("worlds-fair-program");
+  }
+
+  /** Seed visible team activity for the Worlds Fair demo Activity tab. Idempotent. */
+  seedDemoTeamActivityIfNeeded(): void {
+    const event = this.getEvent();
+    if (!event || event.id !== DEMO_EVENT_ID) return;
+
+    const hasV1 = this.ctx.storage.sql
+      .exec<{ name: string }>(
+        "SELECT name FROM seed_markers WHERE name = 'team-activity-v1'",
+      )
+      .toArray()[0];
+    const hasV2 = this.ctx.storage.sql
+      .exec<{ name: string }>(
+        "SELECT name FROM seed_markers WHERE name = 'team-activity-v2'",
+      )
+      .toArray()[0];
+    if (hasV2) return;
+
+    const proposals = this.ctx.storage.sql
+      .exec<{ id: string; title: string; status: string }>(
+        `SELECT id, title, status FROM proposals
+         ORDER BY submitted_at ASC, id ASC
+         LIMIT 12`,
+      )
+      .toArray();
+    if (proposals.length === 0) return;
+
+    const speakers = this.ctx.storage.sql
+      .exec<{ id: string; name: string }>(
+        `SELECT id, name FROM speakers ORDER BY name COLLATE NOCASE, id LIMIT 6`,
+      )
+      .toArray();
+    const sessions = this.ctx.storage.sql
+      .exec<{ id: string; title: string }>(
+        `SELECT id, title FROM sessions ORDER BY id LIMIT 4`,
+      )
+      .toArray();
+
+    const now = new Date().toISOString();
+    const admin = {
+      id: "demo-admin",
+      name: "Demo Administrator",
+    };
+    const reviewer = {
+      id: "demo-track-reviewer",
+      name: "Agents Track Reviewer",
+    };
+
+    this.ctx.storage.transactionSync(() => {
+      if (!hasV1) {
+        proposals.forEach((proposal, index) => {
+          const day = String((index % 10) + 1).padStart(2, "0");
+          const hour = String(10 + (index % 6)).padStart(2, "0");
+          const sample =
+            index % 2 === 0
+              ? {
+                  id: `demo-activity-admin-${index}`,
+                  proposalId: proposal.id,
+                  type: "proposal.review.changed",
+                  actorId: admin.id,
+                  actorName: admin.name,
+                  fromStatus: "unreviewed",
+                  toStatus: index % 4 === 0 ? "deny" : "approve",
+                  createdAt: `2026-06-${day}T${hour}:12:00.000Z`,
+                  noteChanged: index % 5 === 0 ? 1 : 0,
+                }
+              : {
+                  id: `demo-activity-reviewer-${index}`,
+                  proposalId: proposal.id,
+                  type: "proposal.review.changed",
+                  actorId: reviewer.id,
+                  actorName: reviewer.name,
+                  fromStatus: "unreviewed",
+                  toStatus: index % 3 === 0 ? "deny" : "approve",
+                  createdAt: `2026-06-${day}T${hour}:18:00.000Z`,
+                  noteChanged: 0,
+                };
+          this.ctx.storage.sql.exec(
+            `INSERT INTO audit_events
+              (id, proposal_id, review_round_id, type, actor_id, actor_name,
+               from_status, to_status, committee_note_changed, created_at)
+             VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO NOTHING`,
+            sample.id,
+            sample.proposalId,
+            sample.type,
+            sample.actorId,
+            sample.actorName,
+            sample.fromStatus,
+            sample.toStatus,
+            sample.noteChanged,
+            sample.createdAt,
+          );
+          if (index < 3) {
+            this.ctx.storage.sql.exec(
+              `INSERT INTO audit_events
+                (id, proposal_id, review_round_id, type, actor_id, actor_name,
+                 from_status, to_status, committee_note_changed, created_at)
+               VALUES (?, ?, NULL, 'course_check.decision.applied', ?, ?, 'approve', ?, 0, ?)
+               ON CONFLICT(id) DO NOTHING`,
+              `demo-activity-final-${index}`,
+              proposal.id,
+              admin.id,
+              admin.name,
+              index === 1 ? "declined" : "accepted",
+              `2026-06-${day}T${hour}:45:00.000Z`,
+            );
+          }
+        });
+        this.ctx.storage.sql.exec(
+          `INSERT INTO seed_markers (name, applied_at) VALUES ('team-activity-v1', ?)
+           ON CONFLICT(name) DO NOTHING`,
+          now,
+        );
+      }
+
+      speakers.forEach((speaker, index) => {
+        const types = [
+          "profile_updated",
+          "task_completed",
+          "reminder_queued",
+          "directory_speaker_added",
+        ] as const;
+        const type = types[index % types.length]!;
+        this.ctx.storage.sql.exec(
+          `INSERT INTO onboarding_history
+            (id, speaker_id, task_id, asset_id, type, summary, actor_id, actor_name, created_at)
+           VALUES (?, ?, NULL, NULL, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO NOTHING`,
+          `demo-activity-onboarding-${index}`,
+          speaker.id,
+          type,
+          type === "directory_speaker_added"
+            ? `Added ${speaker.name} to the speaker directory`
+            : type === "reminder_queued"
+              ? `Queued reminder for ${speaker.name}`
+              : type === "task_completed"
+                ? `Completed onboarding task for ${speaker.name}`
+                : `Updated profile for ${speaker.name}`,
+          admin.id,
+          admin.name,
+          `2026-06-${String(12 + index).padStart(2, "0")}T14:${String(10 + index).padStart(2, "0")}:00.000Z`,
+        );
+      });
+
+      if (sessions.length > 0) {
+        this.ctx.storage.sql.exec(
+          `INSERT INTO agenda_audit_events
+            (id, type, actor_id, actor_name, session_ids_json, summary, created_at)
+           VALUES (?, 'manual_placement', ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO NOTHING`,
+          "demo-activity-agenda-1",
+          admin.id,
+          admin.name,
+          JSON.stringify(sessions.slice(0, 2).map((session) => session.id)),
+          `Placed ${sessions[0]!.title} on the agenda`,
+          "2026-06-15T16:20:00.000Z",
+        );
+        this.ctx.storage.sql.exec(
+          `INSERT INTO agenda_audit_events
+            (id, type, actor_id, actor_name, session_ids_json, summary, created_at)
+           VALUES (?, 'auto_place.applied', ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO NOTHING`,
+          "demo-activity-agenda-2",
+          admin.id,
+          admin.name,
+          JSON.stringify(sessions.map((session) => session.id)),
+          `Auto-placed ${sessions.length} sessions`,
+          "2026-06-16T11:05:00.000Z",
+        );
+      }
+
+      this.ctx.storage.sql.exec(
+        `INSERT INTO evaluation_plan_audit_events
+          (id, event_id, round_id, action, actor_id, actor_name, detail_json, created_at)
+         VALUES (?, ?, 'demo-round-1', 'evaluation_assignment.distributed', ?, ?, '{}', ?)
+         ON CONFLICT(id) DO NOTHING`,
+        "demo-activity-eval-1",
+        event.id,
+        admin.id,
+        admin.name,
+        "2026-06-14T09:30:00.000Z",
+      );
+
+      this.ctx.storage.sql.exec(
+        `INSERT INTO speaker_imports
+          (id, idempotency_key, preview_digest, result_json, actor_id, actor_name, applied_at)
+         VALUES (?, 'demo-activity-csv-v2', 'demo-digest', ?, ?, ?, ?)
+         ON CONFLICT(id) DO NOTHING`,
+        "demo-activity-import-1",
+        JSON.stringify({ totals: { created: 4, reused: 2, skipped: 1 } }),
+        admin.id,
+        admin.name,
+        "2026-06-13T18:40:00.000Z",
+      );
+
+      this.ctx.storage.sql.exec(
+        `INSERT INTO course_check_mutations
+          (id, plan_id, from_version, to_version, kind, actor_id, actor_name, actor_json, at, summary)
+         VALUES (?, 'demo-pub-plan', 0, 1, 'apply', ?, ?, '{}', ?, ?)
+         ON CONFLICT(id) DO NOTHING`,
+        "demo-activity-mutation-1",
+        admin.id,
+        admin.name,
+        "2026-06-17T10:00:00.000Z",
+        "Published the public program",
+      );
+
+      this.ctx.storage.sql.exec(
+        `INSERT INTO seed_markers (name, applied_at) VALUES ('team-activity-v2', ?)`,
+        now,
+      );
+    });
   }
 
   seedProposalsIfNeeded(proposals: OrganizerProposal[]): void {
@@ -6239,6 +6892,152 @@ export class EventStore extends DurableObject<AppBindings> {
       )
       .toArray()
       .map(mapAuditEvent);
+  }
+
+  listProposalAuditEventsByActor(
+    actorId: string,
+    options?: { limit?: number },
+  ): OrganizerActorActivityEntry[] {
+    const limit = options?.limit ?? 100;
+    return this.ctx.storage.sql
+      .exec<ActorAuditEventRow>(
+        `SELECT a.id, a.proposal_id, p.title AS proposal_title, a.review_round_id, a.type,
+                a.actor_id, a.actor_name, a.from_status, a.to_status,
+                a.committee_note_changed, a.created_at
+         FROM audit_events AS a
+         JOIN proposals AS p ON p.id = a.proposal_id
+         WHERE a.actor_id = ?
+         ORDER BY a.created_at DESC, a.id DESC
+         LIMIT ?`,
+        actorId,
+        limit,
+      )
+      .toArray()
+      .map(mapActorAuditEvent);
+  }
+
+  listTeamActivityByActor(
+    actorId: string,
+    options?: { limit?: number; before?: string | null },
+  ): { entries: OrganizerTeamActivityEntry[]; hasMore: boolean } {
+    const limit = options?.limit ?? 50;
+    const before =
+      typeof options?.before === "string" && options.before.trim()
+        ? options.before.trim()
+        : null;
+    const fetchLimit = limit + 1;
+    const beforeClauseAliased = (alias: string, column: string) =>
+      before ? `AND ${alias}.${column} < ?` : "";
+    const mutationKinds = [...TEAM_ACTIVITY_MUTATION_KINDS];
+
+    const auditRows = this.ctx.storage.sql
+      .exec<ActorAuditEventRow>(
+        `SELECT a.id, a.proposal_id, p.title AS proposal_title, a.review_round_id, a.type,
+                a.actor_id, a.actor_name, a.from_status, a.to_status,
+                a.committee_note_changed, a.created_at
+         FROM audit_events AS a
+         LEFT JOIN proposals AS p ON p.id = a.proposal_id
+         WHERE a.actor_id = ?
+           ${beforeClauseAliased("a", "created_at")}
+         ORDER BY a.created_at DESC, a.id DESC
+         LIMIT ?`,
+        ...(before
+          ? ([actorId, before, fetchLimit] as const)
+          : ([actorId, fetchLimit] as const)),
+      )
+      .toArray();
+
+    const onboardingRows = this.ctx.storage.sql
+      .exec<TeamActivityOnboardingRow>(
+        `SELECT h.id, h.speaker_id, s.name AS speaker_name, h.type, h.summary,
+                h.actor_id, h.actor_name, h.created_at
+         FROM onboarding_history AS h
+         LEFT JOIN speakers AS s ON s.id = h.speaker_id
+         WHERE h.actor_id = ?
+           ${beforeClauseAliased("h", "created_at")}
+         ORDER BY h.created_at DESC, h.id DESC
+         LIMIT ?`,
+        ...(before
+          ? ([actorId, before, fetchLimit] as const)
+          : ([actorId, fetchLimit] as const)),
+      )
+      .toArray();
+
+    const agendaRows = this.ctx.storage.sql
+      .exec<TeamActivityAgendaRow>(
+        `SELECT id, type, actor_id, actor_name, session_ids_json, summary, created_at
+         FROM agenda_audit_events
+         WHERE actor_id = ?
+           ${before ? "AND created_at < ?" : ""}
+         ORDER BY created_at DESC, id DESC
+         LIMIT ?`,
+        ...(before
+          ? ([actorId, before, fetchLimit] as const)
+          : ([actorId, fetchLimit] as const)),
+      )
+      .toArray();
+
+    const mutationKindPlaceholders = mutationKinds.map(() => "?").join(", ");
+    const mutationRows = this.ctx.storage.sql
+      .exec<TeamActivityMutationRow>(
+        `SELECT id, plan_id, kind, actor_id, actor_name, at, summary
+         FROM course_check_mutations
+         WHERE actor_id = ?
+           AND kind IN (${mutationKindPlaceholders})
+           ${before ? "AND at < ?" : ""}
+         ORDER BY at DESC, id DESC
+         LIMIT ?`,
+        ...(before
+          ? ([actorId, ...mutationKinds, before, fetchLimit] as const)
+          : ([actorId, ...mutationKinds, fetchLimit] as const)),
+      )
+      .toArray();
+
+    const evaluationRows = this.ctx.storage.sql
+      .exec<TeamActivityEvaluationRow>(
+        `SELECT id, round_id, action, actor_id, actor_name, created_at
+         FROM evaluation_plan_audit_events
+         WHERE actor_id = ?
+           ${before ? "AND created_at < ?" : ""}
+         ORDER BY created_at DESC, id DESC
+         LIMIT ?`,
+        ...(before
+          ? ([actorId, before, fetchLimit] as const)
+          : ([actorId, fetchLimit] as const)),
+      )
+      .toArray();
+
+    const importRows = this.ctx.storage.sql
+      .exec<TeamActivitySpeakerImportRow>(
+        `SELECT id, result_json, actor_id, actor_name, applied_at
+         FROM speaker_imports
+         WHERE actor_id = ?
+           ${before ? "AND applied_at < ?" : ""}
+         ORDER BY applied_at DESC, id DESC
+         LIMIT ?`,
+        ...(before
+          ? ([actorId, before, fetchLimit] as const)
+          : ([actorId, fetchLimit] as const)),
+      )
+      .toArray();
+
+    const merged: OrganizerTeamActivityEntry[] = [
+      ...auditRows
+        .map(mapAuditEventToTeamActivity)
+        .filter((entry): entry is OrganizerTeamActivityEntry => entry !== null),
+      ...onboardingRows.map(mapOnboardingHistoryToTeamActivity),
+      ...agendaRows.map(mapAgendaAuditToTeamActivity),
+      ...mutationRows.map(mapMutationToTeamActivity),
+      ...evaluationRows.map(mapEvaluationAuditToTeamActivity),
+      ...importRows.map(mapSpeakerImportToTeamActivity),
+    ];
+
+    merged.sort(compareTeamActivityDesc);
+    const hasMore = merged.length > limit;
+    return {
+      entries: merged.slice(0, limit),
+      hasMore,
+    };
   }
 
   queueOutboxMessage(input: {
