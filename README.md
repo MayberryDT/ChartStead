@@ -6,8 +6,10 @@ Conference programming and speaker management: CFP → shared review → Course 
 
 | Environment | URL | Auth |
 | --- | --- | --- |
-| **Demo (judges)** | https://chartstead-demo.mayberrydt.workers.dev | Isolated demo-admin (no login) |
+| **Demo (judges)** | https://demo.chartstead.com/demo | Isolated demo-admin (no login) |
 | Production | https://chartstead.mayberrydt.workers.dev | Better Auth (Google / magic link) |
+
+The previous demo host `https://chartstead-demo.mayberrydt.workers.dev` permanently redirects (308) to `https://demo.chartstead.com`. Production stays on workers.dev.
 
 **Competition walkthrough:** [docs/competition-walkthrough.md](docs/competition-walkthrough.md)  
 **Submission package (form blurbs):** [docs/competition-submission.md](docs/competition-submission.md)  
@@ -138,13 +140,15 @@ npm run typecheck
 npm run deploy:dry
 
 # Live demo smoke (no secrets required for health)
-curl -sS https://chartstead-demo.mayberrydt.workers.dev/api/health
-curl -sS https://chartstead-demo.mayberrydt.workers.dev/api/v1/health
-curl -sS https://chartstead-demo.mayberrydt.workers.dev/api/events | head -c 200   # demo principal lists events
+curl -sS https://demo.chartstead.com/api/health
+curl -sS https://demo.chartstead.com/api/v1/health
+curl -sS https://demo.chartstead.com/api/events | head -c 200   # demo principal lists events
 curl -sS -o /dev/null -w "%{http_code}\n" \
-  https://chartstead-demo.mayberrydt.workers.dev/e/pacific-open-data-summit-2026/cfp
+  https://demo.chartstead.com/e/pacific-open-data-summit-2026/cfp
 curl -sS -o /dev/null -w "%{http_code}\n" \
-  https://chartstead-demo.mayberrydt.workers.dev/e/pacific-open-data-summit-2026/program
+  https://demo.chartstead.com/e/pacific-open-data-summit-2026/program
+# Legacy workers.dev host should 308 to the first-party origin
+curl -sSI https://chartstead-demo.mayberrydt.workers.dev/demo | head
 
 # Production must not expose organizer data unauthenticated
 curl -sS -o /dev/null -w "%{http_code}\n" https://chartstead.mayberrydt.workers.dev/api/events

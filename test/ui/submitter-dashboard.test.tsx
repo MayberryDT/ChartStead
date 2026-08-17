@@ -12,11 +12,12 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const magicLink = vi.hoisted(() => vi.fn());
+const social = vi.hoisted(() => vi.fn());
 const useSession = vi.hoisted(() => vi.fn());
 
 vi.mock("../../src/auth-client", () => ({
   authClient: {
-    signIn: { magicLink },
+    signIn: { magicLink, social },
     useSession,
   },
 }));

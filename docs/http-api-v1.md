@@ -179,5 +179,5 @@ curl -sS -X PATCH -b cookies.txt -H "Content-Type: application/json" \
 
 `$BASE` examples:
 
-- Demo: `https://chartstead-demo.mayberrydt.workers.dev`
+- Demo: `https://demo.chartstead.com`
 - Local: `http://127.0.0.1:5173`

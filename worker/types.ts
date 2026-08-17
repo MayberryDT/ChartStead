@@ -12,6 +12,7 @@ export interface SecretBindings {
 
 export interface AssetBindings {
   ASSETS?: R2Bucket;
+  STATIC_ASSETS?: Fetcher;
 }
 
 export type AppBindings = CloudflareBindings & SecretBindings & AssetBindings;

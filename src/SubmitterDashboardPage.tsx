@@ -71,6 +71,21 @@ export function SubmitterDashboardPage() {
         {!session.data?.user ? (
           <>
             <p>Sign in with the email used for your proposal to see and claim submissions for this event.</p>
+            <button
+              className="primary-action"
+              type="button"
+              onClick={() =>
+                void authClient.signIn.social({
+                  provider: "google",
+                  callbackURL: `${window.location.pathname}${window.location.search}`,
+                })
+              }
+            >
+              Continue with Google
+            </button>
+            <div className="sign-in-divider">
+              <span>or use a secure email link</span>
+            </div>
             <form className="magic-link-form" onSubmit={requestMagicLink}>
               <label htmlFor="submitter-dashboard-email">Email address</label>
               <div>
