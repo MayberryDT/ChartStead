@@ -679,10 +679,20 @@ function AgendaEmbedView({
   const layoutMotion = useInspectorLayoutMotion("agenda", Boolean(selected));
   const saved = itinerarySessionIds;
   const days = Array.from(new Set(data.sessions.map((session) => session.day).filter(Boolean))) as string[];
-  const visibleSessions = filters.day ? sessions : sessions.filter((session) => session.day === days[0]);
+  const selectedDay = filters.day && days.includes(filters.day) ? filters.day : days[0];
+  const dayIndex = selectedDay ? days.indexOf(selectedDay) : -1;
+  const visibleSessions = selectedDay
+    ? sessions.filter((session) => session.day === selectedDay)
+    : sessions;
+  const selectedDayCount = visibleSessions.length;
   const speakers = data.speakers;
   const formats = Array.from(new Set(data.sessions.map((session) => session.format))).sort();
   const clearFilters = () => onFiltersChange({});
+  const stepDay = (delta: number) => {
+    if (dayIndex < 0) return;
+    const next = days[dayIndex + delta];
+    if (next) onFiltersChange({ ...filters, day: next });
+  };
 
   return (
     <motion.div {...layoutMotion} className={`agenda-embed program-renderer widget-agenda${selected ? " has-session-inspector" : ""}`} data-testid="public-program-renderer">
@@ -695,8 +705,35 @@ function AgendaEmbedView({
         <Button className="agenda-itinerary-action" aria-label="Save to itinerary"><AgendaIcon name="bookmark" />My itinerary ({saved.size})</Button>
       </header>
       <section className="agenda-controls" aria-label="Agenda filters">
-        <div className="agenda-day-tabs" role="group" aria-label="Event day">
-          {days.map((day, index) => <Button key={day} className={filters.day === day || (!filters.day && day === days[0]) ? "is-active" : ""} onClick={() => onFiltersChange({ ...filters, day })}>{data.event.id === "agenda-fixture" ? `${index === 0 ? "Tue" : "Wed"}, Oct ${7 + index}` : dayLabel(day)}</Button>)}
+        <div className="agenda-day-nav" role="group" aria-label="Event day" data-day-count={days.length}>
+          <Button
+            type="button"
+            className="btn btn-secondary btn-sm agenda-day-step"
+            aria-label="Previous day"
+            disabled={dayIndex <= 0}
+            onClick={() => stepDay(-1)}
+          >
+            ‹
+          </Button>
+          <div className="agenda-day-current" data-day={selectedDay}>
+            <span className="agenda-day-label">
+              {data.event.id === "agenda-fixture" && selectedDay
+                ? `${days.indexOf(selectedDay) === 0 ? "Tue" : "Wed"}, Oct ${7 + days.indexOf(selectedDay)}`
+                : selectedDay
+                  ? dayLabel(selectedDay)
+                  : "No day"}
+            </span>
+            <span className="agenda-day-count">{selectedDayCount}</span>
+          </div>
+          <Button
+            type="button"
+            className="btn btn-secondary btn-sm agenda-day-step"
+            aria-label="Next day"
+            disabled={dayIndex < 0 || dayIndex >= days.length - 1}
+            onClick={() => stepDay(1)}
+          >
+            ›
+          </Button>
         </div>
         <AgendaSelect label="Track" value={filters.trackId ?? ""} onChange={(value) => onFiltersChange({ ...filters, trackId: value || undefined })} options={data.event.tracks.map((track) => [track.id, track.name])} all="All" />
         <AgendaSelect label="Room" value={filters.roomId ?? ""} onChange={(value) => onFiltersChange({ ...filters, roomId: value || undefined })} options={data.event.rooms.map((room) => [room.id, room.name])} all="All" />
@@ -744,9 +781,19 @@ function SignalRailGallery({ data, mode, theme, fields, filters, speakers, selec
   onSelectSpeaker: (id: string | null) => void; onSelectSession: (id: string) => void;
 }) {
   const reduceMotion = useReducedMotion();
-  const active = selectedSpeaker ?? speakers[0] ?? null;
+  const [isNarrow, setIsNarrow] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(max-width: 1000px)");
+    const sync = () => setIsNarrow(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  // Desktop keeps a persistent detail rail; mobile only opens details after a tap.
+  const active = selectedSpeaker ?? (isNarrow ? null : speakers[0] ?? null);
   const linked = active ? data.sessions.filter((session) => active.sessionIds.includes(session.id)) : [];
-  return <div className={`program-renderer signal-rail-gallery mode-${mode} widget-speaker-gallery theme-${theme}`} style={{ ["--program-accent" as string]: data.event.themeAccent }} data-testid="public-program-renderer" data-discovery-mode="gallery">
+  return <div className={`program-renderer signal-rail-gallery mode-${mode} widget-speaker-gallery theme-${theme}${active && isNarrow ? " has-speaker-sheet" : ""}`} style={{ ["--program-accent" as string]: data.event.themeAccent }} data-testid="public-program-renderer" data-discovery-mode="gallery">
     <main className="signal-gallery-main">
       <section className="signal-gallery-index" aria-labelledby="program-title" data-testid="speaker-gallery-layout" data-discovery-mode="gallery">
         <header className="signal-gallery-heading">
@@ -763,7 +810,7 @@ function SignalRailGallery({ data, mode, theme, fields, filters, speakers, selec
         <p className="signal-gallery-count" role="status" aria-live="polite">{speakers.length} {countNoun(speakers.length, "speaker")}</p>
         {speakers.length ? <ul className="signal-gallery-grid">{speakers.map((speaker) => <li key={speaker.id}><SpeakerGalleryButton speaker={speaker} selected={active?.id === speaker.id} fields={fields} onSelect={() => onSelectSpeaker(speaker.id)} /></li>)}</ul> : <div className="signal-gallery-empty"><h2>No speakers found</h2><p>Try clearing or changing the current filters.</p><button type="button" onClick={() => onSetFilters(() => ({}))}>Clear filters</button></div>}
       </section>
-      {active ? <motion.aside className="signal-speaker-panel" data-open="true" aria-label={`Selected speaker: ${active.name}`} aria-live="polite">
+      {active ? <motion.aside className="signal-speaker-panel" data-open="true" data-sheet={isNarrow ? "true" : undefined} aria-label={`Selected speaker: ${active.name}`} aria-live="polite">
         <AnimatePresence initial={false} mode="wait">
           <motion.div
             key={active.id}
@@ -773,6 +820,10 @@ function SignalRailGallery({ data, mode, theme, fields, filters, speakers, selec
             exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -8, filter: "blur(1px)" }}
             transition={reduceMotion ? { duration: 0.08 } : premiumSpring}
           >
+            <header className="signal-speaker-sheet-header">
+              <p>Speaker details</p>
+              <Button type="button" className="signal-speaker-sheet-close" aria-label="Close speaker details" onClick={() => onSelectSpeaker(null)}>×</Button>
+            </header>
             <div className="signal-speaker-intro">{fields.headshots ? <SpeakerAvatar speaker={active} large /> : null}<div><h2>{active.name}</h2><p>{active.title || "Professional details pending"}</p><p>{active.company || ""}</p><strong>{data.event.tracks.find((track) => linked.some((session) => session.trackId === track.id))?.name ?? "Data Leadership"}</strong><span>⌖ Wellington, New Zealand</span></div></div>
             <section><h3>About {active.name.split(" ")[0]}</h3><p>{fields.biography && active.biography ? active.biography : "Biography pending."}</p></section>
             <section><h3>Expertise</h3><ul className="signal-expertise"><li>◇ Data Governance</li><li>♙ Privacy &amp; Ethics</li><li>△ Public Policy</li><li>▥ Data Strategy</li></ul></section>
@@ -851,13 +902,27 @@ function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, 
   theme: PublicEmbedTheme; accentStyle: Record<string, string>;
 }) {
   const savedIds = itinerarySessionIds;
-  const scheduled = sessions.filter((session) => session.startsAt && session.day);
-  const pending = sessions.filter((session) => !session.startsAt || !session.day);
+  const eventDays = days.filter((day) => day !== "tbd");
+  const activeDay =
+    filters.day && filters.day !== "tbd" && eventDays.includes(filters.day)
+      ? filters.day
+      : eventDays[0];
+  const dayIndex = activeDay ? eventDays.indexOf(activeDay) : -1;
+  const daySessions = activeDay
+    ? sessions.filter((session) => session.day === activeDay)
+    : sessions;
+  const scheduled = daySessions.filter((session) => session.startsAt && session.day);
+  const pending = daySessions.filter((session) => !session.startsAt || !session.day);
   const roomIds = data.event.rooms.map((room) => room.id);
   const times = Array.from(new Set(scheduled.map((session) => session.startsAt!.slice(11, 16)))).sort();
-  const activeDay = filters.day && filters.day !== "tbd" ? filters.day : days.find((day) => day !== "tbd");
+  const activeDayCount = daySessions.length;
   const clearFilters = () => setFilters(() => ({}));
   const update = (key: keyof PublicProgramFilters, value: string) => setFilters((current) => ({ ...current, [key]: value || undefined }));
+  const stepDay = (delta: number) => {
+    if (dayIndex < 0) return;
+    const next = eventDays[dayIndex + delta];
+    if (next) update("day", next);
+  };
   const toggleSaved = (sessionId: string) => {
     const next = new Set(savedIds);
     if (next.has(sessionId)) next.delete(sessionId); else next.add(sessionId);
@@ -895,7 +960,30 @@ function IndexedItinerary({ data, sessions, filters, setFilters, days, formats, 
     <main className="itinerary-main">
       <header className="itinerary-heading"><h1>{data.event.name}</h1><p>{dateRange}</p></header>
       <section className="itinerary-controls" aria-label="Program filters">
-        <div className="itinerary-days" role="tablist" aria-label="Event day">{days.filter((day) => day !== "tbd").map((day) => <Button role="tab" aria-selected={activeDay === day} key={day} className={activeDay === day ? "is-active" : ""} onClick={() => update("day", day)}>{dayLabel(day)}</Button>)}</div>
+        <div className="agenda-day-nav itinerary-day-nav" role="group" aria-label="Event day" data-day-count={eventDays.length}>
+          <Button
+            type="button"
+            className="btn btn-secondary btn-sm agenda-day-step"
+            aria-label="Previous day"
+            disabled={dayIndex <= 0}
+            onClick={() => stepDay(-1)}
+          >
+            ‹
+          </Button>
+          <div className="agenda-day-current" data-day={activeDay ?? undefined}>
+            <span className="agenda-day-label">{activeDay ? dayLabel(activeDay) : "No day"}</span>
+            <span className="agenda-day-count">{activeDayCount}</span>
+          </div>
+          <Button
+            type="button"
+            className="btn btn-secondary btn-sm agenda-day-step"
+            aria-label="Next day"
+            disabled={dayIndex < 0 || dayIndex >= eventDays.length - 1}
+            onClick={() => stepDay(1)}
+          >
+            ›
+          </Button>
+        </div>
         <label className="itinerary-search"><span aria-hidden="true"><Search /></span><span className="sr-only">Search sessions or speakers</span><input type="search" value={filters.query ?? ""} placeholder="Search sessions, speakers, topics..." onChange={(event) => update("query", event.target.value)} /></label>
         <AppSelect label="Track" value={filters.trackId ?? ""} options={[{ value: "", label: "Track" }, ...data.event.tracks.map((track) => ({ value: track.id, label: track.name }))]} onValueChange={(value) => update("trackId", value)} hideLabel />
         <AppSelect label="Location" value={filters.roomId ?? ""} options={[{ value: "", label: "Room" }, ...data.event.rooms.map((room) => ({ value: room.id, label: room.name })), { value: "tbd", label: "Location pending" }]} onValueChange={(value) => update("roomId", value)} hideLabel />

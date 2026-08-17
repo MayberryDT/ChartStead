@@ -11,6 +11,7 @@ Conference programming and speaker management: CFP → shared review → Course 
 
 The previous demo host `https://chartstead-demo.mayberrydt.workers.dev` permanently redirects (308) to `https://demo.chartstead.com`. The previous production host `https://chartstead.mayberrydt.workers.dev` permanently redirects (308) to `https://app.chartstead.com`.
 
+**Public docs:** https://chartstead.com/docs/ (docmd, in the marketing site repo)  
 **Competition walkthrough:** [docs/competition-walkthrough.md](docs/competition-walkthrough.md)  
 **Submission package (form blurbs):** [docs/competition-submission.md](docs/competition-submission.md)  
 **Course Check deep dive:** [docs/course-check-killer-walkthrough.md](docs/course-check-killer-walkthrough.md)

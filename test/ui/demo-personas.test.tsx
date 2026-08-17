@@ -65,6 +65,8 @@ describe("demo persona entry", () => {
     expect(screen.getByText(/shared review queue/i)).toBeVisible();
     expect(screen.getByText(/private signed portal/i)).toBeVisible();
     expect(screen.getByText(/isolated demo data/i)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Copy AI-guided tour" })).toBeVisible();
+    expect(screen.getByText(/Prefer an agent/i)).toBeVisible();
 
     await userEvent.click(screen.getByRole("button", { name: "Enter as track reviewer" }));
     expect(fetch).toHaveBeenCalledWith(
@@ -101,6 +103,42 @@ describe("demo persona entry", () => {
     await userEvent.click(screen.getByRole("button", { name: "Reset evaluator data" }));
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Reviewer and speaker demo data restored.",
+    );
+  });
+
+  it("copies the AI tour prompt and shows a toast with the next step", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input) === "/api/demo/personas") {
+        return Response.json({
+          event: { id: "event", name: "Demo event" },
+          personas: [],
+        });
+      }
+      throw new Error(`Unexpected request: ${String(input)}`);
+    });
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <DemoPersonasPage navigateTo={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByRole("heading", { name: "Choose an evaluator journey" });
+    await userEvent.click(screen.getByRole("button", { name: "Copy AI-guided tour" }));
+
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const copied = writeText.mock.calls[0]?.[0] as string;
+    expect(copied).toContain("ChartStead demo — AI-guided tour");
+    expect(copied).toContain("How do you want to do this?");
+    expect(copied).not.toMatch(/guide-only|guide \+ hands/i);
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Prompt copied. Paste it into your AI agent — it'll walk you through the demo from there.",
     );
   });
 });

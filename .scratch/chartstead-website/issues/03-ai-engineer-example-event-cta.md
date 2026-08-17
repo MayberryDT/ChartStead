@@ -1,6 +1,6 @@
 # 03 — Publish the AI Engineer example event as the second CTA
 
-**Status:** in-review
+**Status:** done
 
 **Blocked by:** Competition 47; Competition 61
 
@@ -39,3 +39,5 @@ Create the public example event that looks like a real AI Engineer World's Fair 
     5. Speaker Gallery — `/e/ai-engineer-worlds-fair-2026/embed/aewf-embed-speaker-gallery`
   - **QA note:** production `demo.chartstead.com` still serves the thin AEWF stub (June 25–27). Local Competition 61 on `:5824` is the correct program (June 29–July 2). Redeploy demo before treating the live CTA destination as final.
 - 2026-08-17 — QA feedback: second CTA now opens `/live-program` with a Base UI toolbar (Program + five embeds). Demo note trimmed to “Explore the full app.” Background rasters restored; product-proof UI stills use object-fit contain and full-viewport captures.
+
+- 2026-08-17 — Tyler: complete → done. Live program CTA + embeds surface shipped.

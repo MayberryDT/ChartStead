@@ -1,6 +1,6 @@
 # 01 — Replace every marketing image with real product UI
 
-**Status:** in-review
+**Status:** done
 
 **Blocked by:** Competition 61
 
@@ -35,3 +35,5 @@ Retire every conceptual, stock, or fictional-sample marketing image on the Chart
   - Before/after: hero `/marketing/chartstead-ui-concept-v1.webp` → `/product-proof/overview.webp`; workflow/proposal/schedule/portal/course-check concept rasters → matching product-proof stills; Product/Open Source concept backgrounds → submissions/embeds/overview crops.
 
 - 2026-08-17 — Follow-up: homepage/product section proofs now use 8–10s real-UI HyperFrames-packaged videos (speakers directory is the dense 100+ list; Course Check shows submissions finalize + agenda publish plan).
+
+- 2026-08-17 — Tyler: complete → done. Real product-proof videos shipped on chartstead.com.

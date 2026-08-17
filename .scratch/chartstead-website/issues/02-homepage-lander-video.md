@@ -1,6 +1,6 @@
 # 02 — Create the homepage lander video from real UI
 
-**Status:** in-review
+**Status:** done
 
 **Blocked by:** Website 01; Website 03; Competition 61
 
@@ -39,3 +39,5 @@ Produce the main homepage lander video with Hyperframes from real ChartStead UI,
   - Section proofs are video-only (no stacked fallback `<img>`).
   - Preview: `http://100.105.117.93:4321/`
   - HyperFrames project: `chartstead-web/videos/chartstead-ui-motion/`
+
+- 2026-08-17 — Tyler: complete → done. Hero montage + section UI clips live on chartstead.com.

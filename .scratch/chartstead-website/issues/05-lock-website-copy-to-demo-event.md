@@ -1,6 +1,6 @@
 # 05 — Lock website copy and sample data to the live demo event
 
-**Status:** in-review
+**Status:** done
 
 **Blocked by:** Competition 61
 
@@ -43,3 +43,5 @@ Make the marketing site and the demo app tell the same story. Every named event,
     | coSpeaker | Priya Raman | Priya Raman |
     | talkTitle | Shipping reliable agent workflows in production | Shipping reliable agent workflows in production |
   - Homepage/Product captions and CTA notes now name AEWF; no Harborline / Pacific Open / Civic Tech launch-sample leftovers in shipped pages.
+
+- 2026-08-17 — Tyler: complete → done. Sample event / copy locked to AEWF demo.

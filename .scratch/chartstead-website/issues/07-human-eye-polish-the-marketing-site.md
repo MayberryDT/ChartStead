@@ -1,8 +1,8 @@
 # 07 — Human-eye polish the marketing website
 
-**Status:** blocked — human-tandem only (not agent-ready)
+**Status:** in-progress
 
-**Blocked by:** Website 01; Website 02; Website 03; Website 04; Website 05
+**Blocked by:** None — Website 01–05 done; marketing site live on chartstead.com.
 
 ## What to build
 
@@ -23,3 +23,9 @@ Tyler reviews every marketing route with his own eyes after the real images, vid
 
 - 2026-08-17 — frontier-reconcile: Still blocked on: Website 01 (ready-for-agent); Website 02 (blocked); Website 03 (ready-for-agent); Website 04 (blocked); Website 05 (ready-for-agent).
 - 2026-08-17 — frontier-reconcile: Website 04 done. Still blocked on: Website 01 (in-review); Website 02 (blocked); Website 03 (in-review); Website 05 (in-review). Remains human-tandem.
+
+- 2026-08-17 — Tyler claimed and started human-eye polish (Website 01/02/03/05 done; blockers cleared). Agent tandem begins on https://chartstead.com/.
+
+- 2026-08-17 — Tyler polish dump in progress: hero spacing + “Product tour” caption only; marketing videos at 1.5×; live program without site header + mobile bottom surface bar; public agenda/itinerary day tabs → Agenda-style ‹ day › stepper; embed mobile overflow/layout pass.
+
+- 2026-08-17 — Follow-up from screenshots: enforce 1.5× on play events; strip sample-event caption chrome everywhere and center stage labels; more space under “Explore the full app”; live bar is Back to ChartStead + surface control only; hide empty itinerary rail on mobile; speaker gallery cards/overflow + mobile detail sheet.

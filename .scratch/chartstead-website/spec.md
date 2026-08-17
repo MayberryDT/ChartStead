@@ -16,6 +16,9 @@ The launch loop is:
 2. Put the demo app on `https://demo.chartstead.com` (Competition 60). Production stays on workers.dev. The marketing site is already on `https://chartstead.com` (Website 06 done).
 3. Replace every site image, publish the example-event CTA, shoot the lander video, lock site copy, and point CTAs at the ChartStead-domain demo (Website 01–05).
 4. Tyler reviews the site with his own eyes (Website 07).
+5. Publish product docs at `/docs` (Website 08).
+6. Add a YouTube guided-demo PIP on `/demo` (Website 09) and an AI copy-paste agent tour prompt (Website 10).
+7. Add a marketing **Log in** link to `https://app.chartstead.com` (Website 11). Demo remains the public try path; login is not free self-service signup.
 
 ## Authority
 

@@ -1,8 +1,12 @@
 import { Button } from "@base-ui/react/button";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import markOnLightUrl from "../design/assets/brand/chartstead-mark-on-light.png";
+import {
+  DEMO_AI_TOUR_TOAST,
+  buildDemoAiTourPrompt,
+} from "../shared/demo-ai-tour-prompt";
 
 interface DemoPersona {
   id: "organizer" | "track-reviewer" | "accepted-speaker";
@@ -42,12 +46,33 @@ async function resetDemoPersonas(): Promise<void> {
   );
 }
 
+async function copyText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.left = "-9999px";
+  document.body.appendChild(area);
+  area.select();
+  const ok = document.execCommand("copy");
+  document.body.removeChild(area);
+  if (!ok) {
+    throw new Error("Could not copy the tour prompt.");
+  }
+}
+
 export function DemoPersonasPage({
   navigateTo = (path) => window.location.assign(path),
 }: {
   navigateTo?: (path: string) => void;
 }) {
   const [entering, setEntering] = useState<DemoPersona["id"] | null>(null);
+  const [tourToast, setTourToast] = useState<string | null>(null);
+  const [tourCopyError, setTourCopyError] = useState<string | null>(null);
   const directory = useQuery({
     queryKey: ["demo-personas"],
     queryFn: fetchDemoPersonas,
@@ -59,6 +84,26 @@ export function DemoPersonasPage({
     onSettled: () => setEntering(null),
   });
   const reset = useMutation({ mutationFn: resetDemoPersonas });
+
+  useEffect(() => {
+    if (!tourToast) return;
+    const timer = window.setTimeout(() => setTourToast(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [tourToast]);
+
+  async function copyAiTourPrompt() {
+    setTourCopyError(null);
+    try {
+      const origin =
+        typeof window !== "undefined" ? window.location.origin : undefined;
+      await copyText(buildDemoAiTourPrompt(origin));
+      setTourToast(DEMO_AI_TOUR_TOAST);
+    } catch (error) {
+      setTourCopyError(
+        error instanceof Error ? error.message : "Could not copy the tour prompt.",
+      );
+    }
+  }
 
   return (
     <main className="sign-in-shell demo-persona-shell">
@@ -72,6 +117,16 @@ export function DemoPersonasPage({
         </header>
         <p className="demo-persona-intro">
           Explore the same role boundaries used by the product with isolated demo data. No inbox or account setup is required.
+        </p>
+        <p className="demo-persona-ai-tour">
+          Prefer an agent?{" "}
+          <button
+            type="button"
+            className="demo-persona-ai-tour-link"
+            onClick={() => void copyAiTourPrompt()}
+          >
+            Copy AI-guided tour
+          </button>
         </p>
 
         {directory.isPending ? <p role="status">Preparing evaluator journeys…</p> : null}
@@ -121,12 +176,17 @@ export function DemoPersonasPage({
           </Button>
         </footer>
         {reset.isSuccess ? <p role="status">Reviewer and speaker demo data restored.</p> : null}
-        {enter.isError || reset.isError ? (
+        {enter.isError || reset.isError || tourCopyError ? (
           <p className="form-message" data-tone="error" role="alert">
-            {(enter.error ?? reset.error)?.message}
+            {tourCopyError ?? (enter.error ?? reset.error)?.message}
           </p>
         ) : null}
       </section>
+      {tourToast ? (
+        <p className="demo-persona-toast" role="status" data-tone="success">
+          {tourToast}
+        </p>
+      ) : null}
     </main>
   );
 }

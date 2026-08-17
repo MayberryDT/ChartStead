@@ -54,6 +54,11 @@ Use the five canonical Matt skill labels. See [docs/agents/triage-labels.md](doc
 
 Use the single-context domain-doc layout. See [docs/agents/domain.md](docs/agents/domain.md).
 
+## Public documentation
+
+- Marketing docs (docmd): `/home/halla/chartstead-web/documentation/` → live at https://chartstead.com/docs/
+- Internal handoffs stay in this repo’s [`docs/`](docs/)
+
 ## App code
 
 - React application: [`src/`](src/)

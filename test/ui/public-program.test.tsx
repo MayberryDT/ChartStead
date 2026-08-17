@@ -96,6 +96,31 @@ function programResponse(
            },
          ],
       },
+      {
+        id: "ses-3",
+        title: "Closing Remarks",
+        description: "Wrap-up for day two.",
+        format: "keynote",
+        trackId: "platform",
+        trackName: "Platform",
+        roomId: "harbor-hall",
+        roomName: "Harbor Hall",
+        roomPending: false,
+        startsAt: "2026-10-08T16:00:00.000Z",
+        endsAt: "2026-10-08T16:30:00.000Z",
+        day: "2026-10-08",
+        calendarUid: "cal_ses-3",
+        calendarSequence: 0,
+        speakers: [
+          {
+            id: "sp-1",
+            name: "Ada Lovelace",
+            title: "Program Director",
+            company: "Analytical Engines",
+            role: "primary",
+          },
+        ],
+      },
     ],
     speakers: [
       {
@@ -106,7 +131,7 @@ function programResponse(
         company: "Analytical Engines",
         socialLinks: { linkedin: "", x: "", github: "", website: "https://ada.example.test" },
         headshotAssetId: null,
-        sessionIds: ["ses-1"],
+        sessionIds: ["ses-1", "ses-3"],
       },
       {
         id: "sp-2",
@@ -378,8 +403,19 @@ describe("PublicProgramRenderer", () => {
     expect(screen.queryByText("ChartStead Agenda")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save to itinerary" })).toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: "Search agenda" })).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Event day" })).toBeInTheDocument();
+    const dayNav = screen.getByRole("group", { name: "Event day" });
+    expect(dayNav).toBeInTheDocument();
+    expect(within(dayNav).getByLabelText("Previous day")).toBeDisabled();
+    expect(within(dayNav).getByLabelText("Next day")).toBeEnabled();
     expect(screen.getByRole("button", { name: /Save Opening Keynote to itinerary/ })).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(within(dayNav).getByLabelText("Next day"));
+    expect(within(dayNav).getByLabelText("Previous day")).toBeEnabled();
+    expect(screen.queryByText("Opening Keynote")).not.toBeInTheDocument();
+    expect(screen.getByText("Closing Remarks")).toBeInTheDocument();
+
+    await user.click(within(dayNav).getByLabelText("Previous day"));
+    expect(screen.getByText("Opening Keynote")).toBeInTheDocument();
 
     await chooseOption(user, "Track", "Platform");
     expect(screen.getByText("Opening Keynote")).toBeInTheDocument();
@@ -502,17 +538,17 @@ describe("PublicProgramRenderer", () => {
     await user.type(search, "Grace Hopper");
     expect(screen.getByTestId("public-session-card-ses-2")).toBeInTheDocument();
     expect(screen.queryByTestId("public-session-card-ses-1")).not.toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("1 of 2 sessions");
+    expect(screen.getByRole("status")).toHaveTextContent("1 of 3 sessions");
 
     await chooseOption(user, "Track", "Community");
     await chooseOption(user, "Format", "talk");
     await chooseOption(user, "Location", "Location pending");
     expect(screen.getByTestId("public-session-card-ses-2")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("1 of 2 sessions");
+    expect(screen.getByRole("status")).toHaveTextContent("1 of 3 sessions");
 
     await chooseOption(user, "Track", "Platform");
     expect(screen.getByText("No sessions match these filters.")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("0 of 2 sessions");
+    expect(screen.getByRole("status")).toHaveTextContent("0 of 3 sessions");
   });
 
   it("orders speaker directory and gallery by surname and opens public-safe speaker details", async () => {
