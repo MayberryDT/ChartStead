@@ -33,3 +33,5 @@ Retire every conceptual, stock, or fictional-sample marketing image on the Chart
   - **Replace → `public/product-proof/`:** overview, submissions, speakers, agenda, speaker-portal, course-check, public-program (+ mobile crops), embeds, social-card.png from overview.
   - **Removed from `public/marketing/`:** all concept-v1 UI stills, stock conference-desk / outcomes / scope photos, proposal-foundation-concept, course-check-concept, speaker-readiness chart-paper rasters, etc.
   - Before/after: hero `/marketing/chartstead-ui-concept-v1.webp` → `/product-proof/overview.webp`; workflow/proposal/schedule/portal/course-check concept rasters → matching product-proof stills; Product/Open Source concept backgrounds → submissions/embeds/overview crops.
+
+- 2026-08-17 — Follow-up: homepage/product section proofs now use 8–10s real-UI HyperFrames-packaged videos (speakers directory is the dense 100+ list; Course Check shows submissions finalize + agenda publish plan).
