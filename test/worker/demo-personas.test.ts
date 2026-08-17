@@ -73,8 +73,8 @@ describe("evaluation-ready demo personas", () => {
       }>;
     }>();
     expect(body.event).toEqual({
-      id: "pacific-open-data-summit-2026",
-      name: "Pacific Open Data Summit 2026",
+      id: "ai-engineer-worlds-fair-2026",
+      name: "AI Engineer World's Fair 2026",
     });
     expect(body.personas.map((persona) => persona.id)).toEqual([
       "organizer",
@@ -105,8 +105,8 @@ describe("evaluation-ready demo personas", () => {
     expect(entered.status).toBe(200);
     const entry = await entered.json<{ path: string; persona: { role: string; trackIds: string[] } }>();
     expect(entry).toEqual({
-      path: "/e/pacific-open-data-summit-2026/submissions?track=platform",
-      persona: { role: "reviewer", trackIds: ["platform"] },
+      path: "/e/ai-engineer-worlds-fair-2026/submissions?track=agents",
+      persona: { role: "reviewer", trackIds: ["agents"] },
     });
     const cookie = entered.headers.get("set-cookie");
     expect(cookie).toMatch(/chartstead_demo_persona=track-reviewer/);
@@ -127,23 +127,23 @@ describe("evaluation-ready demo personas", () => {
       principal: {
         id: "demo-track-reviewer",
         role: "reviewer",
-        rolesByEvent: { "pacific-open-data-summit-2026": "reviewer" },
-        trackIdsByEvent: { "pacific-open-data-summit-2026": ["platform"] },
+        rolesByEvent: { "ai-engineer-worlds-fair-2026": "reviewer" },
+        trackIdsByEvent: { "ai-engineer-worlds-fair-2026": ["agents"] },
       },
     });
 
     const queue = await requestAsReviewer(
-      "/api/events/pacific-open-data-summit-2026/proposals",
+      "/api/events/ai-engineer-worlds-fair-2026/proposals",
     );
     expect(queue.status).toBe(200);
     const queueBody = await queue.json<{ proposals: Array<{ id: string; trackId: string }> }>();
     expect(queueBody.proposals.length).toBeGreaterThan(0);
     expect(new Set(queueBody.proposals.map((proposal) => proposal.trackId))).toEqual(
-      new Set(["platform"]),
+      new Set(["agents"]),
     );
 
     const detailPath =
-      "/api/events/pacific-open-data-summit-2026/organizer/proposals/SUB-PODS0001";
+      "/api/events/ai-engineer-worlds-fair-2026/organizer/proposals/SUB-AEWF0001";
     const before = await (await requestAsReviewer(detailPath)).json<{
       proposal: { reviewVersion: number };
     }>();
@@ -152,7 +152,7 @@ describe("evaluation-ready demo personas", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         status: "approve",
-        committeeNote: "Strong evidence for the platform track.",
+        committeeNote: "Strong evidence for the agents track.",
         expectedVersion: before.proposal.reviewVersion,
       }),
     });
@@ -162,7 +162,7 @@ describe("evaluation-ready demo personas", () => {
     await expect(reloaded.json()).resolves.toMatchObject({
       proposal: {
         status: "approve",
-        committeeNote: "Strong evidence for the platform track.",
+        committeeNote: "Strong evidence for the agents track.",
       },
     });
 
@@ -170,7 +170,7 @@ describe("evaluation-ready demo personas", () => {
       `SELECT COUNT(*) AS total FROM reviewer_invitations
        WHERE event_id = ? AND accepted_by_user_id = ?`,
     )
-      .bind("pacific-open-data-summit-2026", "demo-track-reviewer")
+      .bind("ai-engineer-worlds-fair-2026", "demo-track-reviewer")
       .first<{ total: number }>();
     expect(acceptedInvitations?.total).toBe(1);
 
@@ -183,14 +183,14 @@ describe("evaluation-ready demo personas", () => {
     );
     const changedTracks = await demoWorker.fetch(
       new Request(
-        "https://chartstead.test/api/events/pacific-open-data-summit-2026/reviewers/demo-track-reviewer",
+        "https://chartstead.test/api/events/ai-engineer-worlds-fair-2026/reviewers/demo-track-reviewer",
         {
           method: "PATCH",
           headers: {
             "content-type": "application/json",
             cookie: organizerEntry.headers.get("set-cookie")!,
           },
-          body: JSON.stringify({ trackIds: ["community"] }),
+          body: JSON.stringify({ trackIds: ["models"] }),
         },
       ),
       env,
@@ -215,7 +215,7 @@ describe("evaluation-ready demo personas", () => {
     await expect(restoredEvents.json()).resolves.toMatchObject({
       principal: {
         role: "reviewer",
-        trackIdsByEvent: { "pacific-open-data-summit-2026": ["platform"] },
+        trackIdsByEvent: { "ai-engineer-worlds-fair-2026": ["agents"] },
       },
     });
   });
@@ -235,7 +235,7 @@ describe("evaluation-ready demo personas", () => {
     const entry = await entered.json<{ path: string; persona: { role: string } }>();
     expect(entry.persona).toEqual({ role: "speaker" });
     expect(entry.path).toMatch(
-      /^\/e\/pacific-open-data-summit-2026\/portal\/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/,
+      /^\/e\/ai-engineer-worlds-fair-2026\/portal\/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/,
     );
     expect(entered.headers.get("set-cookie")).toMatch(
       /chartstead_demo_persona=accepted-speaker/,
@@ -244,7 +244,7 @@ describe("evaluation-ready demo personas", () => {
     const token = entry.path.split("/").at(-1)!;
     const portal = await demoWorker.fetch(
       new Request(
-        `https://chartstead.test/api/events/pacific-open-data-summit-2026/portal?token=${encodeURIComponent(token)}`,
+        `https://chartstead.test/api/events/ai-engineer-worlds-fair-2026/portal?token=${encodeURIComponent(token)}`,
       ),
       env,
       {} as ExecutionContext,
@@ -260,12 +260,12 @@ describe("evaluation-ready demo personas", () => {
     expect(session).toMatchObject({
       acceptanceState: "accepted",
       profile: {
-        name: "Maya Chen",
-        email: "maya.chen@chartstead-demo.invalid",
+        name: "Nora Ellison",
+        email: "nora.ellison@example.test",
       },
       session: {
-        title: "Building trustworthy public-data platforms",
-        trackId: "platform",
+        title: "Shipping reliable agent workflows in production",
+        trackId: "agents",
       },
     });
     expect(session.tasks.length).toBeGreaterThanOrEqual(3);
@@ -279,7 +279,7 @@ describe("evaluation-ready demo personas", () => {
 
     const edited = await demoWorker.fetch(
       new Request(
-        `https://chartstead.test/api/events/pacific-open-data-summit-2026/portal/profile?token=${encodeURIComponent(token)}`,
+        `https://chartstead.test/api/events/ai-engineer-worlds-fair-2026/portal/profile?token=${encodeURIComponent(token)}`,
         {
           method: "PATCH",
           headers: { "content-type": "application/json" },
@@ -307,16 +307,16 @@ describe("evaluation-ready demo personas", () => {
 
     const speakerAfterReset = await demoWorker.fetch(
       new Request(
-        `https://chartstead.test/api/events/pacific-open-data-summit-2026/portal?token=${encodeURIComponent(token)}`,
+        `https://chartstead.test/api/events/ai-engineer-worlds-fair-2026/portal?token=${encodeURIComponent(token)}`,
       ),
       env,
       {} as ExecutionContext,
     );
     await expect(speakerAfterReset.json()).resolves.toMatchObject({
       profile: {
-        name: "Maya Chen",
+        name: "Nora Ellison",
         biography:
-          "Maya leads public-data platform programs and helps teams make trustworthy delivery decisions.",
+          "Nora builds production agent systems and helps teams keep tool use, evaluation, and rollback boringly reliable.",
       },
       tasks: expect.arrayContaining([expect.objectContaining({ status: "open" })]),
     });
@@ -330,7 +330,7 @@ describe("evaluation-ready demo personas", () => {
     );
     const reviewerDetail = await demoWorker.fetch(
       new Request(
-        "https://chartstead.test/api/events/pacific-open-data-summit-2026/organizer/proposals/SUB-PODS0001",
+        "https://chartstead.test/api/events/ai-engineer-worlds-fair-2026/organizer/proposals/SUB-AEWF0001",
         { headers: { cookie: reviewerEntry.headers.get("set-cookie")! } },
       ),
       env,

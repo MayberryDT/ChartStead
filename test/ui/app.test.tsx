@@ -239,13 +239,13 @@ const eventsPayload = {
     {
       id: "ai-engineer-worlds-fair-2026",
       name: "AI Engineer World's Fair 2026",
-      startsOn: "2026-06-25",
-      endsOn: "2026-06-27",
+      startsOn: "2026-06-29",
+      endsOn: "2026-07-02",
       timezone: "America/Los_Angeles",
-      submissionCount: 32,
-      unreviewedCount: 9,
-      tracks: [{ id: "agents", name: "Agents", proposalCount: 12 }],
-      rooms: [{ id: "main-stage", name: "Main Stage", readiness: "ready" }],
+      submissionCount: 100,
+      unreviewedCount: 28,
+      tracks: [{ id: "agents", name: "Agents", proposalCount: 16 }],
+      rooms: [{ id: "keynote-hall", name: "Keynote Hall", readiness: "ready" }],
     },
   ],
   principal: {
@@ -302,7 +302,7 @@ describe("organizer application", () => {
     expect(
       await screen.findByRole("heading", { name: "AI Engineer World's Fair 2026" }),
     ).toBeVisible();
-    expect(screen.getByLabelText("32 submissions")).toBeVisible();
+    expect(screen.getByLabelText("100 submissions")).toBeVisible();
 
     await userEvent.click(screen.getByRole("link", { name: "Agenda" }));
     expect(await screen.findByRole("link", { name: "Agenda" })).toHaveAttribute(
@@ -378,6 +378,7 @@ describe("organizer application", () => {
     expect(screen.queryByRole("heading", { name: "Settings", level: 2 })).not.toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Settings section" })).toBeVisible();
     expect(await screen.findByLabelText("Name")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Course Check" })).not.toBeInTheDocument();
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Reviewers" }));
     expect(await screen.findByLabelText("Reviewer email")).toBeVisible();

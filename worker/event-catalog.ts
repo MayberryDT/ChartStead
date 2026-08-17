@@ -1,7 +1,9 @@
+import { DEMO_EVENT_ID } from "../shared/demo-event";
 import type { EventRecord, OrganizerPrincipal } from "../shared/events";
 import { createSeedCfp } from "./seed-cfp";
 import { seedEvents } from "./seed-events";
 import { createSeedProposals } from "./seed-proposals";
+import { seedWorldsFairHeadshotObjects } from "./seed-worlds-fair";
 import type { AppBindings } from "./types";
 
 const operationalEvents = new Map<string, EventRecord>();
@@ -34,6 +36,10 @@ export async function loadEventWorkspace(
     await store.seedShowcaseFormsIfEmpty();
     await store.seedProposalsIfNeeded(createSeedProposals(seed));
     await store.seedCourseCheckDemoIfNeeded();
+    await store.seedWorldsFairProgramIfNeeded();
+    if (eventId === DEMO_EVENT_ID) {
+      await seedWorldsFairHeadshotObjects(env.ASSETS);
+    }
   }
   const event = await store.getEvent();
   return event ? rememberEvent(event) : null;

@@ -71,12 +71,21 @@ import type {
   CourseCheckUxEventRecord,
 } from "../shared/course-check-ux";
 import { applyPullWinsToLocalRecord } from "../shared/airtable-field-map";
+import { DEMO_EVENT_ID } from "../shared/demo-event";
 import {
   buildCourseCheckDemoProposals,
   COURSE_CHECK_DEMO_EVENT_ID,
   COURSE_CHECK_DEMO_IDENTITY,
   COURSE_CHECK_DEMO_PRIOR_OUTBOX,
 } from "./seed-course-check-demo";
+import {
+  buildWorldsFairProgramSessions,
+  worldsFairEmbedInputs,
+  worldsFairEventRecord,
+  worldsFairHeadshotAsset,
+  worldsFairShowcasePlacement,
+  worldsFairTaskDueAt,
+} from "./seed-worlds-fair";
 import type {
   AgendaAuditEvent,
   AgendaAutoPlaceApplyResponse,
@@ -2981,6 +2990,33 @@ export class EventStore extends DurableObject<AppBindings> {
       themeAccent,
       event.id,
     );
+    if (event.id === DEMO_EVENT_ID) {
+      this.alignWorldsFairIdentity(event);
+    }
+  }
+
+  alignWorldsFairIdentity(event: EventRecord): void {
+    const seed = worldsFairEventRecord();
+    const current = this.getEvent();
+    const countByTrack = new Map(
+      (current?.tracks ?? []).map((track) => [track.id, track.proposalCount]),
+    );
+    const tracks = seed.tracks.map((track) => ({
+      ...track,
+      proposalCount: countByTrack.get(track.id) ?? track.proposalCount,
+    }));
+    this.ctx.storage.sql.exec(
+      `UPDATE events
+       SET name = ?, starts_on = ?, ends_on = ?, timezone = ?, rooms_json = ?, tracks_json = ?
+       WHERE id = ?`,
+      seed.name,
+      seed.startsOn,
+      seed.endsOn,
+      seed.timezone,
+      JSON.stringify(seed.rooms),
+      JSON.stringify(tracks),
+      event.id,
+    );
   }
 
   seedPublishedFormIfEmpty(form: PublishedCfpForm): void {
@@ -3279,8 +3315,15 @@ export class EventStore extends DurableObject<AppBindings> {
         const objectKey = `demo/headshots/${String((eventIndex * 14 + index) % 42 + 1).padStart(3, "0")}.jpg`;
         const planId = `demo-accepted-plan-${eventIndex}-${index}`;
         const sessionId = `demo-session-${eventIndex}-${index}`;
-        const startsAt = `${event.startsOn}T${String(9 + (index % 7)).padStart(2, "0")}:00:00.000Z`;
-        const endsAt = `${event.startsOn}T${String(10 + (index % 7)).padStart(2, "0")}:00:00.000Z`;
+        const worldsFairPlacement =
+          event.id === DEMO_EVENT_ID ? worldsFairShowcasePlacement(index) : null;
+        const startsAt = worldsFairPlacement?.startsAt
+          ?? `${event.startsOn}T${String(9 + (index % 7)).padStart(2, "0")}:00:00.000Z`;
+        const endsAt = worldsFairPlacement?.endsAt
+          ?? `${event.startsOn}T${String(10 + (index % 7)).padStart(2, "0")}:00:00.000Z`;
+        const roomId = worldsFairPlacement?.roomId
+          ?? event.rooms[index % event.rooms.length]?.id
+          ?? null;
         this.ctx.storage.sql.exec(
           `UPDATE proposals SET program_outcome = 'accepted', speaker_name = ?, speaker_email = ? WHERE id = ?`,
           speakerName,
@@ -3336,7 +3379,7 @@ export class EventStore extends DurableObject<AppBindings> {
            ON CONFLICT(id) DO NOTHING`,
           sessionId,
           planId,
-          event.rooms[index % event.rooms.length]?.id ?? null,
+          roomId,
           startsAt,
           endsAt,
           now,
@@ -3362,7 +3405,7 @@ export class EventStore extends DurableObject<AppBindings> {
             taskTitle,
             taskKind,
             taskIndex === 0 && index % 3 === 0 ? "completed" : "open",
-            `${event.startsOn}T00:00:00.000Z`,
+            event.id === DEMO_EVENT_ID ? worldsFairTaskDueAt(index, taskIndex) : `${event.startsOn}T00:00:00.000Z`,
             now,
             `Demo task for ${speakerName}.`,
             taskKind === "headshot" ? "file" : taskKind === "profile" ? "profile" : "manual",
@@ -3447,6 +3490,223 @@ export class EventStore extends DurableObject<AppBindings> {
     this.publishPublicProgramRevisionFromWorking("demo-showcase");
   }
 
+  seedWorldsFairProgramIfNeeded(): void {
+    const event = this.getEvent();
+    if (!event || event.id !== DEMO_EVENT_ID) return;
+    const marker = this.ctx.storage.sql
+      .exec<{ name: string }>(
+        "SELECT name FROM seed_markers WHERE name = 'worlds-fair-program-v3'",
+      )
+      .toArray()[0];
+    if (marker) return;
+
+    const now = new Date().toISOString();
+    const sessions = buildWorldsFairProgramSessions();
+    this.ctx.storage.transactionSync(() => {
+      for (const [sessionIndex, session] of sessions.entries()) {
+        const headshot = worldsFairHeadshotAsset(sessionIndex);
+        const coSpeakers = session.coSpeakerName
+          ? [{ name: session.coSpeakerName, email: "priya.raman@example.test", biography: `${session.coSpeakerName} partners on production agent evaluation.` }]
+          : [];
+        this.ctx.storage.sql.exec(
+          `INSERT INTO proposals
+            (id, form_id, form_definition_version, answers_json, title, abstract,
+             track_id, track_name, speaker_name, speaker_email, biography,
+             supporting_link, session_format, workshop_duration, co_speakers_json,
+             supporting_file_json, status, program_outcome, committee_note, private_note,
+             review_version, submitted_at, confirmation_email_status)
+           VALUES (?, 'main-cfp', 1, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, '', ?, '', 'approve', 'accepted', '', '', 0, ?, 'sent')
+           ON CONFLICT(id) DO UPDATE SET
+             title = excluded.title,
+             abstract = excluded.abstract,
+             speaker_name = excluded.speaker_name,
+             speaker_email = excluded.speaker_email,
+             biography = excluded.biography,
+             track_id = excluded.track_id,
+             track_name = excluded.track_name,
+             program_outcome = 'accepted',
+             status = 'approve'`,
+          session.proposalId,
+          JSON.stringify({
+            title: session.title,
+            abstract: session.abstract,
+            trackId: session.trackId,
+            speakers: [{ name: session.speakerName, email: session.speakerEmail, biography: session.biography }, ...coSpeakers],
+          }),
+          session.title,
+          session.abstract,
+          session.trackId,
+          session.trackName,
+          session.speakerName,
+          session.speakerEmail,
+          session.biography,
+          session.format,
+          JSON.stringify(coSpeakers),
+          now,
+        );
+        this.ctx.storage.sql.exec(
+          `INSERT INTO assets
+            (asset_id, object_key, file_name, mime, size_bytes, status, created_at,
+             form_id, form_definition_version, question_name, max_bytes,
+             claimed_proposal_id, completed_at, owner_speaker_id, purpose)
+           VALUES (?, ?, ?, 'image/jpeg', 19000, 'complete', ?, 'portal', 0, 'headshot', 5242880, ?, ?, ?, 'portal_headshot')
+           ON CONFLICT(asset_id) DO UPDATE SET
+             object_key = excluded.object_key,
+             file_name = excluded.file_name,
+             owner_speaker_id = excluded.owner_speaker_id,
+             status = 'complete'`,
+          headshot.assetId,
+          headshot.objectKey,
+          headshot.fileName,
+          now,
+          session.proposalId,
+          now,
+          session.speakerId,
+        );
+        this.ctx.storage.sql.exec(
+          `INSERT INTO speakers (id, name, email, biography, social_links_json, headshot_asset_id, created_at)
+           VALUES (?, ?, ?, ?, '{}', ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             name = excluded.name,
+             email = excluded.email,
+             biography = excluded.biography,
+             headshot_asset_id = excluded.headshot_asset_id`,
+          session.speakerId,
+          session.speakerName,
+          session.speakerEmail,
+          session.biography,
+          headshot.assetId,
+          now,
+        );
+        this.ctx.storage.sql.exec(
+          `INSERT INTO event_participations
+            (id, speaker_id, proposal_id, course_check_plan_id, title_snapshot,
+             organization_snapshot, role, workflow_status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'speaker', 'confirmed', ?)
+           ON CONFLICT(id) DO NOTHING`,
+          `aewf-participation-${session.sessionId}`,
+          session.speakerId,
+          session.proposalId,
+          `aewf-plan-${session.sessionId}`,
+          session.title,
+          "Independent",
+          now,
+        );
+        this.ctx.storage.sql.exec(
+          `INSERT INTO sessions
+            (id, proposal_id, course_check_plan_id, title, content_abstract, public_content,
+             content_status, content_version, format, track_id, room_id, starts_at, ends_at, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'approved', 1, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             title = excluded.title,
+             content_abstract = excluded.content_abstract,
+             public_content = excluded.public_content,
+             format = excluded.format,
+             track_id = excluded.track_id,
+             room_id = excluded.room_id,
+             starts_at = excluded.starts_at,
+             ends_at = excluded.ends_at`,
+          session.sessionId,
+          session.proposalId,
+          `aewf-plan-${session.sessionId}`,
+          session.title,
+          session.abstract,
+          session.abstract,
+          session.format,
+          session.trackId,
+          session.roomId,
+          session.startsAt,
+          session.endsAt,
+          now,
+        );
+        const tasks = [
+          ["profile", "Confirm your speaker profile", "profile"],
+          ["headshot", "Upload a recent headshot", "file"],
+          ["session_details", "Review your session details", "manual"],
+        ] as const;
+        tasks.forEach(([kind, title, requirement], taskIndex) => {
+          this.ctx.storage.sql.exec(
+            `INSERT INTO onboarding_tasks
+              (id, speaker_id, session_id, proposal_id, course_check_plan_id, title, kind,
+               status, due_at, created_at, instructions, completion_requirement, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, 'demo-seed')
+             ON CONFLICT(id) DO UPDATE SET
+               due_at = excluded.due_at`,
+            `aewf-task-${session.sessionId}-${taskIndex}`,
+            session.speakerId,
+            session.sessionId,
+            session.proposalId,
+            `aewf-plan-${session.sessionId}`,
+            title,
+            kind,
+            worldsFairTaskDueAt(sessionIndex, taskIndex),
+            now,
+            `Onboarding task for ${session.speakerName}.`,
+            requirement,
+          );
+        });
+      }
+
+      const showcase = this.ctx.storage.sql
+        .exec<{ id: string }>(
+          `SELECT id FROM sessions WHERE id LIKE 'demo-session-1-%' ORDER BY id ASC`,
+        )
+        .toArray();
+      showcase.forEach((row, index) => {
+        const placement = worldsFairShowcasePlacement(index);
+        this.ctx.storage.sql.exec(
+          `UPDATE sessions SET room_id = ?, starts_at = ?, ends_at = ? WHERE id = ?`,
+          placement.roomId,
+          placement.startsAt,
+          placement.endsAt,
+          row.id,
+        );
+      });
+      this.ctx.storage.sql.exec(
+        `UPDATE onboarding_tasks
+         SET due_at = ?
+         WHERE id LIKE 'demo-task-1-%' AND status != 'completed'`,
+        worldsFairTaskDueAt(0),
+      );
+
+      const trackCounts = event.tracks.map((track) => ({
+        ...track,
+        proposalCount:
+          this.ctx.storage.sql
+            .exec<{ total: number }>(
+              `SELECT COUNT(*) AS total FROM proposals WHERE track_id = ?`,
+              track.id,
+            )
+            .toArray()[0]?.total ?? 0,
+      }));
+      this.ctx.storage.sql.exec(
+        `UPDATE events
+         SET submission_count = (SELECT COUNT(*) FROM proposals),
+             unreviewed_count = (SELECT COUNT(*) FROM proposals WHERE status = 'unreviewed'),
+             tracks_json = ?
+         WHERE id = ?`,
+        JSON.stringify(trackCounts),
+        event.id,
+      );
+      this.ctx.storage.sql.exec(
+        `INSERT INTO seed_markers (name, applied_at) VALUES ('worlds-fair-program-v3', ?)
+         ON CONFLICT(name) DO UPDATE SET applied_at = excluded.applied_at`,
+        now,
+      );
+    });
+    const wantedEmbeds = worldsFairEmbedInputs();
+    const wantedIds = new Set(wantedEmbeds.map((embed) => embed.id));
+    for (const config of this.listPublicEmbedConfigs()) {
+      if (wantedIds.has(config.id)) continue;
+      if (wantedEmbeds.some((embed) => embed.widget === config.widget && config.id.startsWith("embed_"))) {
+        this.ctx.storage.sql.exec(`DELETE FROM public_embed_configs WHERE id = ?`, config.id);
+      }
+    }
+    for (const embed of wantedEmbeds) {
+      this.savePublicEmbedConfig(embed);
+    }
+    this.publishPublicProgramRevisionFromWorking("worlds-fair-program");
+  }
 
   seedProposalsIfNeeded(proposals: OrganizerProposal[]): void {
     const marker = this.ctx.storage.sql
@@ -10677,7 +10937,12 @@ export class EventStore extends DurableObject<AppBindings> {
 
     const now = new Date().toISOString();
     const existing = input.id ? this.getPublicEmbedConfig(input.id, { includeDisabled: true }) : null;
-    const id = existing?.id ?? `embed_${crypto.randomUUID().replaceAll("-", "").slice(0, 18)}`;
+    const requestedId = input.id?.trim() ?? "";
+    const id =
+      existing?.id ??
+      (/^[a-z][a-z0-9-]{2,80}$/.test(requestedId)
+        ? requestedId
+        : `embed_${crypto.randomUUID().replaceAll("-", "").slice(0, 18)}`);
     const createdAt = existing?.createdAt ?? now;
     const filters = normalizePublicProgramFilters(input.filters);
     const fields = normalizePublicEmbedFields(input.fields);
