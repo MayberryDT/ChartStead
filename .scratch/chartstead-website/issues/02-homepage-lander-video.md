@@ -22,3 +22,5 @@ Produce the main homepage lander video with Hyperframes from real ChartStead UI,
 - 2026-08-16 — Tyler: use real UI with Hyperframes; someone quickly going through everything in the app and on the website.
 
 - 2026-08-17 — frontier-reconcile: Still blocked on: Website 01 (ready-for-agent); Website 03 (ready-for-agent).
+- 2026-08-17 — Website 01 and Website 03 moved to in-progress. Still blocked until both are done.
+- 2026-08-17 — Website 01 and Website 03 moved to in-review. Still blocked until both are done.

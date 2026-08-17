@@ -24,3 +24,5 @@ The marketing site already lives on `https://chartstead.com`. Stop sending visit
 - 2026-08-16 — Tyler locked the demo host to `https://demo.chartstead.com`. Production stays on workers.dev.
 
 - 2026-08-17 — frontier-reconcile: Still blocked on: Website 03 (ready-for-agent).
+- 2026-08-17 — Competition 60 is done (`demo.chartstead.com` live). Still blocked only on Website 03 (now in-progress).
+- 2026-08-17 — Website 03 moved to in-review. Still blocked until Website 03 is done (Competition 60 already done).
