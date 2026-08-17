@@ -7,6 +7,10 @@ import { createResendCommunicationSender, createResendSender } from "./email";
 import { flushCommunicationEffects } from "./course-check/communication-delivery";
 import { flushEventOutbox } from "./outbox";
 import { listAllEventWorkspaceIds } from "./event-catalog";
+import {
+  isProductionWorkerPath,
+  redirectLegacyProductionHost,
+} from "./production-host";
 import type { AppBindings } from "./types";
 
 export { EventStore } from "./event-store";
@@ -14,7 +18,19 @@ export { EventStore } from "./event-store";
 const app = createApp();
 
 export default {
-  fetch: (request, env, ctx) => app.fetch(request, env, ctx),
+  fetch: async (request, env, ctx) => {
+    const redirected = redirectLegacyProductionHost(request);
+    if (redirected) {
+      return redirected;
+    }
+    if (isProductionWorkerPath(new URL(request.url).pathname)) {
+      return app.fetch(request, env, ctx);
+    }
+    if (env.STATIC_ASSETS) {
+      return env.STATIC_ASSETS.fetch(request);
+    }
+    return app.fetch(request, env, ctx);
+  },
   async scheduled(_controller, env) {
     const sender = createResendSender(env);
     const communicationSender = createResendCommunicationSender(env);

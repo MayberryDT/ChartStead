@@ -1,12 +1,11 @@
 import { Button } from "@base-ui/react/button";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
-import { FormEvent, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
-import markOnLightUrl from "../design/assets/brand/chartstead-mark-on-light.png";
 import type { EventListResponse, EventRecord } from "../shared/events";
 import { ApiError, createOrganizerForm, fetchEvents } from "./api";
-import { authClient } from "./auth-client";
+import { NoAccessPanel, SignIn, signOutAndReturn } from "./SignIn";
 import { AgendaWorkspace, type AgendaChrome } from "./AgendaWorkspace";
 import { OnboardingWorkspace } from "./OnboardingWorkspace";
 import {
@@ -75,76 +74,6 @@ function LoadingShell() {
         </div>
       </main>
     </div>
-  );
-}
-
-function SignIn() {
-  const [email, setEmail] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
-  const [tone, setTone] = useState<"success" | "error">("success");
-  const [sending, setSending] = useState(false);
-
-  async function requestMagicLink(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSending(true);
-    const result = await authClient.signIn.magicLink({ email, callbackURL: "/" });
-    setSending(false);
-    if (result.error) {
-      setTone("error");
-      setMessage(result.error.message ?? "Unable to send sign-in link.");
-      return;
-    }
-    setTone("success");
-    setMessage("Check your email for a secure sign-in link.");
-  }
-
-  return (
-    <main className="sign-in-shell">
-      <section className="sign-in-panel" aria-labelledby="sign-in-title">
-        <img src={markOnLightUrl} width="48" height="48" alt="" />
-        <p className="eyebrow">ChartStead</p>
-        <h1 id="sign-in-title">Conference programming and speaker management.</h1>
-        <p>Sign in to open your event desk. Production access is granted per event.</p>
-        <Button
-          className="primary-action"
-          onClick={() =>
-            void authClient.signIn.social({ provider: "google", callbackURL: "/" })
-          }
-        >
-          Continue with Google
-        </Button>
-        <div className="sign-in-divider">
-          <span>or use a secure email link</span>
-        </div>
-        <form className="magic-link-form" onSubmit={requestMagicLink}>
-          <label htmlFor="email">Work email</label>
-          <div>
-            <input
-              id="email"
-              name="email"
-              type="email"
-              required
-              autoComplete="email"
-              value={email}
-              onChange={(change) => setEmail(change.target.value)}
-            />
-            <Button
-              className="secondary-action"
-              type="submit"
-              disabled={sending}
-              focusableWhenDisabled
-            >
-              {sending ? "Sending…" : "Email sign-in link"}
-            </Button>
-          </div>
-        </form>
-        {message ? (
-          <p className="form-message" data-tone={tone} role="status">
-            {message}
-          </p>
-        ) : null}
-      </section>
-    </main>
   );
 }
 
@@ -248,13 +177,7 @@ function EventDesk({
   }, [initialFormId]);
 
   if (!event) {
-    return (
-      <main className="sign-in-shell">
-        <section className="error-panel" role="alert">
-          <h1>No events are assigned to this account.</h1>
-        </section>
-      </main>
-    );
+    return <NoAccessPanel displayName={data.principal.displayName} />;
   }
 
   function selectEvent(eventId: string) {
@@ -512,6 +435,7 @@ function EventDesk({
         onNavigate={selectNav}
         onEventChange={selectEvent}
         onCreateEvent={() => setCreateEventOpen(true)}
+        onSignOut={signOutAndReturn}
         identity={
           activeNav === "Submissions" ||
           activeNav === "Overview" ||

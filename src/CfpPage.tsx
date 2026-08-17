@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { type FormEvent, useState } from "react";
+import { useState } from "react";
 
 import markOnLightUrl from "../design/assets/brand/chartstead-mark-on-light.png";
 import { formatCfpInstant } from "../shared/cfp-timezone";
 import { ApiError, fetchCfp, fetchSubmitterDraft, saveProposalDraft, submitProposal } from "./api";
 import { authClient } from "./auth-client";
 import { CfpRuntime } from "./CfpRuntime";
+import { AuthMethodButtons } from "./SignIn";
 
 export function CfpPage() {
   const { eventId } = useParams({ from: "/e/$eventId/cfp" });
@@ -15,9 +16,6 @@ export function CfpPage() {
   const searchDraftId = typeof search.draftId === "string" ? search.draftId : undefined;
   const navigate = useNavigate();
   const session = authClient.useSession();
-  const [email, setEmail] = useState("");
-  const [accountMessage, setAccountMessage] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
   const [activeDraftId, setActiveDraftId] = useState<string | undefined>(searchDraftId);
   const [activeDraftUpdatedAt, setActiveDraftUpdatedAt] = useState<string | null>(null);
   const cfp = useQuery({
@@ -104,22 +102,6 @@ export function CfpPage() {
     );
   }
 
-  async function requestMagicLink(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSending(true);
-    const result = await authClient.signIn.magicLink({
-      email,
-      name: "CFP submitter",
-      callbackURL: `${window.location.pathname}${window.location.search}`,
-    });
-    setSending(false);
-    setAccountMessage(
-      result.error
-        ? result.error.message ?? "Unable to send an account link."
-        : "Check your email to sign in or create your submitter account.",
-    );
-  }
-
   const data = activeDraftId ? draft.data! : cfp.data!;
   const draftMeta = activeDraftId ? draft.data!.draft : null;
   const lifecycle = data.lifecycle;
@@ -158,38 +140,13 @@ export function CfpPage() {
               <p>
                 Want to save and resume a draft? Sign in or create an optional submitter account. It only gives access to your own proposals.
               </p>
-              <button
-                className="primary-action"
-                type="button"
-                onClick={() =>
-                  void authClient.signIn.social({
-                    provider: "google",
-                    callbackURL: `${window.location.pathname}${window.location.search}`,
-                  })
-                }
-              >
-                Continue with Google
-              </button>
-              <div className="sign-in-divider">
-                <span>or use a secure email link</span>
-              </div>
-              <form className="magic-link-form" onSubmit={requestMagicLink}>
-                <label htmlFor="cfp-account-email">Email address</label>
-                <div>
-                  <input
-                    id="cfp-account-email"
-                    type="email"
-                    required
-                    autoComplete="email"
-                    value={email}
-                    onChange={(change) => setEmail(change.target.value)}
-                  />
-                  <button className="secondary-action" type="submit" disabled={sending}>
-                    {sending ? "Sending..." : "Email account link"}
-                  </button>
-                </div>
-              </form>
-              {accountMessage ? <p className="form-message" role="status">{accountMessage}</p> : null}
+              <AuthMethodButtons
+                callbackURL={`${window.location.pathname}${window.location.search}`}
+                name="CFP submitter"
+                emailInputId="cfp-account-email"
+                emailLabel="Email address"
+                emailButtonLabel="Email account link"
+              />
             </>
           )}
         </section>

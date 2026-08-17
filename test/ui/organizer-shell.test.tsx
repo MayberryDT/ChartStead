@@ -193,4 +193,32 @@ describe("OrganizerShell", () => {
     expect(container.querySelector(".shell-toolbar")).toBeNull();
     expect(screen.getByRole("heading", { name: "Event One" })).toHaveClass("sr-only");
   });
+
+  it("keeps sign-out inside the account dropdown", async () => {
+    const user = userEvent.setup();
+    const onSignOut = vi.fn();
+
+    render(
+      <OrganizerShell
+        data={data}
+        event={data.events[0]!}
+        activeNav="Overview"
+        title="Event One"
+        meta="October 7-8, 2026"
+        currentRole="admin"
+        onNavigate={vi.fn()}
+        onEventChange={vi.fn()}
+        onCreateEvent={vi.fn()}
+        onSignOut={onSignOut}
+        identity={null}
+      >
+        <section aria-label="Work surface">Work surface</section>
+      </OrganizerShell>,
+    );
+
+    expect(screen.queryByRole("menuitem", { name: "Sign out" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Account" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Sign out" }));
+    expect(onSignOut).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { type FormEvent, useState } from "react";
 
 import markOnLightUrl from "../design/assets/brand/chartstead-mark-on-light.png";
 import type { SubmitterProposalDraft, SubmitterProposalStatus } from "../shared/events";
@@ -10,6 +9,7 @@ import {
   fetchSubmitterDashboard,
 } from "./api";
 import { authClient } from "./auth-client";
+import { AuthMethodButtons } from "./SignIn";
 
 const statusLabel: Record<SubmitterProposalStatus, string> = {
   submitted: "Submitted",
@@ -33,9 +33,6 @@ export function SubmitterDashboardPage() {
   const { eventId } = useParams({ from: "/e/$eventId/my-proposals" });
   const session = authClient.useSession();
   const queryClient = useQueryClient();
-  const [email, setEmail] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
   const dashboard = useQuery({
     queryKey: ["submitter-dashboard", eventId],
     queryFn: () => fetchSubmitterDashboard(eventId),
@@ -46,22 +43,6 @@ export function SubmitterDashboardPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["submitter-dashboard", eventId] }),
   });
 
-  async function requestMagicLink(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSending(true);
-    const result = await authClient.signIn.magicLink({
-      email,
-      name: "CFP submitter",
-      callbackURL: `${window.location.pathname}${window.location.search}`,
-    });
-    setSending(false);
-    setMessage(
-      result.error
-        ? result.error.message ?? "Unable to send an account link."
-        : "Check your email to sign in or create your submitter account.",
-    );
-  }
-
   return (
     <main className="cfp-shell">
       <section className="cfp-panel submitter-dashboard" aria-labelledby="submitter-dashboard-title">
@@ -71,38 +52,13 @@ export function SubmitterDashboardPage() {
         {!session.data?.user ? (
           <>
             <p>Sign in with the email used for your proposal to see and claim submissions for this event.</p>
-            <button
-              className="primary-action"
-              type="button"
-              onClick={() =>
-                void authClient.signIn.social({
-                  provider: "google",
-                  callbackURL: `${window.location.pathname}${window.location.search}`,
-                })
-              }
-            >
-              Continue with Google
-            </button>
-            <div className="sign-in-divider">
-              <span>or use a secure email link</span>
-            </div>
-            <form className="magic-link-form" onSubmit={requestMagicLink}>
-              <label htmlFor="submitter-dashboard-email">Email address</label>
-              <div>
-                <input
-                  id="submitter-dashboard-email"
-                  type="email"
-                  required
-                  autoComplete="email"
-                  value={email}
-                  onChange={(change) => setEmail(change.target.value)}
-                />
-                <button className="secondary-action" type="submit" disabled={sending}>
-                  {sending ? "Sending..." : "Email account link"}
-                </button>
-              </div>
-            </form>
-            {message ? <p className="form-message" role="status">{message}</p> : null}
+            <AuthMethodButtons
+              callbackURL={`${window.location.pathname}${window.location.search}`}
+              name="CFP submitter"
+              emailInputId="submitter-dashboard-email"
+              emailLabel="Email address"
+              emailButtonLabel="Email account link"
+            />
           </>
         ) : dashboard.isPending ? (
           <p aria-busy="true">Loading your proposals...</p>

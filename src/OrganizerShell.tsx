@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Menu } from "@base-ui/react/menu";
 
 import markOnDarkUrl from "../design/assets/brand/chartstead-mark-on-dark.png";
 import type {
@@ -126,6 +127,7 @@ export function OrganizerShell({
   onNavigate,
   onEventChange,
   onCreateEvent,
+  onSignOut,
   identity,
   tools,
   actions,
@@ -140,6 +142,7 @@ export function OrganizerShell({
   onNavigate: (item: NavItem) => void;
   onEventChange: (eventId: string) => void;
   onCreateEvent: () => void;
+  onSignOut?: () => void | Promise<void>;
   identity: ReactNode;
   tools?: ReactNode;
   actions?: ReactNode;
@@ -174,9 +177,39 @@ export function OrganizerShell({
             </a>
           ))}
         </nav>
-        <div className="sidebar-session" aria-label="Signed-in account">
-          <strong>{data.principal.displayName}</strong>
-          <small>{currentRole === "admin" ? "Event administrator" : "Track reviewer"}</small>
+        <div className="event-switcher sidebar-account">
+          {onSignOut ? (
+            <Menu.Root>
+              <Menu.Trigger className="sidebar-account-trigger" aria-label="Account">
+                <span className="sidebar-account-copy">
+                  <strong>{data.principal.displayName}</strong>
+                  <small>{currentRole === "admin" ? "Event administrator" : "Track reviewer"}</small>
+                </span>
+                <span className="app-select-icon" aria-hidden="true">
+                  <svg viewBox="0 0 16 16">
+                    <path d="m4 6 4 4 4-4" />
+                  </svg>
+                </span>
+              </Menu.Trigger>
+              <Menu.Portal>
+                <Menu.Positioner className="app-select-positioner" sideOffset={6} align="start">
+                  <Menu.Popup className="app-select-popup app-select-popup-sidebar">
+                    <Menu.Item
+                      className="sidebar-account-item"
+                      onClick={() => void onSignOut()}
+                    >
+                      Sign out
+                    </Menu.Item>
+                  </Menu.Popup>
+                </Menu.Positioner>
+              </Menu.Portal>
+            </Menu.Root>
+          ) : (
+            <div className="sidebar-account-static" aria-label="Signed-in account">
+              <strong>{data.principal.displayName}</strong>
+              <small>{currentRole === "admin" ? "Event administrator" : "Track reviewer"}</small>
+            </div>
+          )}
         </div>
         <div className="sidebar-event-window" aria-label="Event dates">
           <strong>{formatEventWindow(event)}</strong>

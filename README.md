@@ -7,9 +7,9 @@ Conference programming and speaker management: CFP → shared review → Course 
 | Environment | URL | Auth |
 | --- | --- | --- |
 | **Demo (judges)** | https://demo.chartstead.com/demo | Isolated demo-admin (no login) |
-| Production | https://chartstead.mayberrydt.workers.dev | Better Auth (Google / magic link) |
+| Production | https://app.chartstead.com | Better Auth (Google / magic link) |
 
-The previous demo host `https://chartstead-demo.mayberrydt.workers.dev` permanently redirects (308) to `https://demo.chartstead.com`. Production stays on workers.dev.
+The previous demo host `https://chartstead-demo.mayberrydt.workers.dev` permanently redirects (308) to `https://demo.chartstead.com`. The previous production host `https://chartstead.mayberrydt.workers.dev` permanently redirects (308) to `https://app.chartstead.com`.
 
 **Competition walkthrough:** [docs/competition-walkthrough.md](docs/competition-walkthrough.md)  
 **Submission package (form blurbs):** [docs/competition-submission.md](docs/competition-submission.md)  
@@ -80,7 +80,8 @@ npm run dev
 Production auth requires the variables above. Register Google callbacks for:
 
 - `http://localhost:5173/api/auth/callback/google`
-- `https://chartstead.mayberrydt.workers.dev/api/auth/callback/google`
+- `http://localhost:5858/api/auth/callback/google`
+- `https://app.chartstead.com/api/auth/callback/google`
 
 After first sign-in, grant organizer access by inserting the Better Auth user id into `event_memberships` on the production D1 database.
 
@@ -151,8 +152,10 @@ curl -sS -o /dev/null -w "%{http_code}\n" \
 curl -sSI https://chartstead-demo.mayberrydt.workers.dev/demo | head
 
 # Production must not expose organizer data unauthenticated
-curl -sS -o /dev/null -w "%{http_code}\n" https://chartstead.mayberrydt.workers.dev/api/events
+curl -sS -o /dev/null -w "%{http_code}\n" https://app.chartstead.com/api/events
 # expect 401
+# Legacy production host should 308 to the first-party origin
+curl -sSI https://chartstead.mayberrydt.workers.dev/api/events | head
 ```
 
 Manual UI path: [docs/competition-walkthrough.md](docs/competition-walkthrough.md).
