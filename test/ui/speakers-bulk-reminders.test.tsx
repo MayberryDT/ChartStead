@@ -39,7 +39,7 @@ function speaker(partial: Partial<OnboardingBoard["speakers"][number]> & { speak
     lastContactAt: null,
     lastContactStatus: null,
     history: [],
-    socialLinks: {},
+    socialLinks: { linkedin: "", x: "", github: "", website: "" },
     headshotAssetId: null,
     headshotFileName: null,
     ...partial,

@@ -251,6 +251,10 @@ describe("Course Check 24 — activity by actor and onboarding attribution", () 
       mode: "draft",
       dueWindowDays: 0,
       suppressWithinHours: 72,
+      unattendedSendAuthorized: false,
+      updatedAt: null,
+      updatedById: null,
+      updatedByName: null,
     });
 
     const client = new QueryClient({
