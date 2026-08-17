@@ -30,6 +30,7 @@ Competition 58 stays login (Google, Resend, membership) on whatever production h
 
 ## Comments
 
+- 2026-08-17 — Merged to main as `36e0763` / `3ad7091`. Production host `https://app.chartstead.com` is on `main`. No secrets committed.
 - 2026-08-17 — Tyler: login works on this host; asked why still in-review. Host QA passed. Not merged and not committed. Live `https://app.chartstead.com` stays the production app.
 - 2026-08-17 — Tyler confirmed live login. Follow-up on this host: account dropdown + HTML magic-link email. 68 still in-review for host QA.
 - 2026-08-17 — Production login Worker now lives on this host. Deployed version `d5101589-b00a-464e-b669-b1fdf736de7f` from `.worktrees/competition-68-production-domain`. Live `https://app.chartstead.com/api/auth-status` is configured/google/magicLink all true. Ticket 58 still owns the human Google + magic-link click. 68 stays in-review pending Tyler QA of the host.

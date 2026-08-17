@@ -21,6 +21,7 @@ Make real organizer login work on the production app. The sign-in surface alread
 
 ## Comments
 
+- 2026-08-17 — Merged to main as `36e0763` / `3ad7091`. Source is on `main`. Live host remains `https://app.chartstead.com`. No secrets committed.
 - 2026-08-17 — Tyler: login works; asked why still in-review. QA passed. Not merged and not committed — live Worker on `https://app.chartstead.com` has the login, account dropdown, and HTML magic-link mail. Source remains uncommitted in `.worktrees/competition-68-production-domain`.
 - 2026-08-17 — Tyler: live login works. Account/sign-out is now a sidebar dropdown like the event picker; magic-link mail uses the same HTML card as proposal confirmation (button + plaintext fallback). Ticket stays in-review for the dropdown/email look. No commit.
 - 2026-08-17 — Tyler: official live site cannot log in; also wire CFP and every other login button. Ported 58 login onto `.worktrees/competition-68-production-domain` and deployed production Worker `chartstead` version `d5101589-b00a-464e-b669-b1fdf736de7f`. Cloudflare secrets put (names only). Remote D1 migrations 0002–0004 applied. Live `https://app.chartstead.com/api/auth-status` is `{"configured":true,"google":true,"magicLink":true}`. `/api/auth/ok` 200. `/api/events` still 401 until a session exists. Shared `AuthMethodButtons` now drives home, CFP, My proposals, and reviewer invitation. Demo Worker unchanged (no production secrets). No commit. Live Google + email click still Tyler.
