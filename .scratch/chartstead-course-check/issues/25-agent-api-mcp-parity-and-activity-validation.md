@@ -4,7 +4,7 @@
 
 **Blocked by:** Course Check 24 — Organizer activity by actor (per-user history).
 
-**Status:** in-review
+**Status:** done
 
 ## Problem
 
@@ -63,6 +63,8 @@ Treat this as a **parity matrix + live agent suite + activity attribution**, not
 Tyler (2026-08-17): thorough testing of MCP and API agent integration; agents must be able to do everything a human can in the UI; changes must attribute as agent on behalf of the person; blocked on Course Check 24 because activity logging / activity-by-actor is the accountability surface for that attribution.
 
 ## Comments
+
+- 2026-08-17 — Tyler QA approved (“looks good”); closed to `done`. Commits already on `main` (`325169e`, `7798763`); pushed to `github` remote. Forge `origin` push blocked on auth (`sf auth login`).
 
 - 2026-08-17 — Ready for human QA (`in-review`).
   - Demo: http://100.105.117.93:5825/
