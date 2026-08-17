@@ -24,13 +24,15 @@ export function rememberEvent(event: EventRecord): EventRecord {
   return event;
 }
 
+const seededEvents = new Set<string>();
+
 export async function loadEventWorkspace(
   env: AppBindings,
   eventId: string,
 ): Promise<EventRecord | null> {
   const seed = seedEvents.find((event) => event.id === eventId);
   const store = env.EVENT_STORE.getByName(eventId);
-  if (seed) {
+  if (seed && !seededEvents.has(eventId)) {
     await store.seedIfEmpty(seed);
     await store.seedPublishedFormIfEmpty(createSeedCfp(seed));
     await store.seedShowcaseFormsIfEmpty();
@@ -40,6 +42,7 @@ export async function loadEventWorkspace(
     if (eventId === DEMO_EVENT_ID) {
       await seedWorldsFairHeadshotObjects(env.ASSETS);
     }
+    seededEvents.add(eventId);
   }
   const event = await store.getEvent();
   return event ? rememberEvent(event) : null;
