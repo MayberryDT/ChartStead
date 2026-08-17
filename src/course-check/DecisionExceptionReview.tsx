@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   DecisionReviewIssue,
@@ -7,8 +7,15 @@ import type {
   DecisionReviewProjection,
 } from "../../shared/course-check";
 import type { CourseCheckIssueAction } from "../../shared/course-check-actions";
-import { IssueActions } from "./IssueActions";
-import type { CourseCheckReturnContext } from "./useCourseCheckReturnContext";
+import { IssueActions, shortIssueActionLabel } from "./IssueActions";
+import { CourseCheckRepairLink } from "./CourseCheckRepairLink";
+import {
+  repairHref,
+  saveCourseCheckReturnContext,
+  type CourseCheckReturnContext,
+} from "./useCourseCheckReturnContext";
+
+const GENERIC_NON_BLOCKING_SCOPE = "This does not block the decision commit.";
 
 type IssueActionProps = {
   planId: string;
@@ -16,6 +23,7 @@ type IssueActionProps = {
   acknowledgedActionIds: Set<string>;
   onAcknowledgeIssue: (action: CourseCheckIssueAction) => void;
   onExcludeIssueItems: (itemIds: string[]) => void;
+  onBeforeFix?: () => void;
 };
 
 const ISSUE_ORDER: Array<{
@@ -43,26 +51,167 @@ const CLASSIFICATION_ICON: Record<DecisionReviewIssueClass, string> = {
   details: "i",
 };
 
+/** Short topic title for compact inspector cards. */
+export function compactIssueTitle(issue: DecisionReviewIssue): string {
+  const text = `${issue.summary} ${issue.consequence}`.toLowerCase();
+  if (/unplaced|no room|placement|place the session/.test(text)) {
+    return "Session placement";
+  }
+  if (/\btbd\b|session time|set times|time remains/.test(text)) {
+    return "Session time";
+  }
+  if (/email|draft|notification|recipient/.test(text)) {
+    return "Notification draft";
+  }
+  if (/speaker|identity|duplicate/.test(text)) {
+    return "Speaker identity";
+  }
+  if (/conflict|overlap/.test(text)) {
+    return "Schedule conflict";
+  }
+  const first = issue.summary.split(/[.!?]/)[0]?.trim();
+  return first && first.length <= 40 ? first : "Needs a decision";
+}
+
+function compactIssueDescription(issue: DecisionReviewIssue): string {
+  // One concrete line — prefer the factual summary, strip ceremony.
+  return issue.summary
+    .replace(/\s+/g, " ")
+    .replace(/\bthis does not block[^.]*\.?/gi, "")
+    .trim();
+}
+
 function IssueCard({
   issue,
+  compact,
+  hideObjectLabel,
   onChooseAlternative,
   planId,
   issueActionContext,
   acknowledgedActionIds,
   onAcknowledgeIssue,
   onExcludeIssueItems,
+  onBeforeFix,
 }: {
   issue: DecisionReviewIssue;
+  compact: boolean;
+  hideObjectLabel?: boolean;
   onChooseAlternative: (issue: DecisionReviewIssue) => void;
 } & IssueActionProps) {
+  if (compact) {
+    const fixAction = issue.actions.find(
+      (action) =>
+        action.kind === "deep_repair" && action.target.type === "route",
+    );
+    const acceptAck = issue.actions.find(
+      (action) =>
+        action.kind === "acknowledge" &&
+        action.target.type === "command" &&
+        action.target.command === "acknowledge_warning",
+    );
+    const acceptDefer = issue.actions.find(
+      (action) =>
+        action.kind === "exclude" &&
+        action.target.type === "command" &&
+        action.target.command === "defer_items",
+    );
+    // Warnings: Accept = acknowledge. Blockers: Accept = leave this item unchanged.
+    const acceptAction =
+      acceptAck ??
+      (issue.classification === "needs_action" ? acceptDefer : null);
+    const isAccepted = Boolean(
+      acceptAck && acknowledgedActionIds.has(acceptAck.id),
+    );
+
+    return (
+      <article
+        className="decision-exception decision-exception-compact-card"
+        data-classification={issue.classification}
+        data-accepted={isAccepted ? "true" : undefined}
+      >
+        <h3>{compactIssueTitle(issue)}</h3>
+        <p className="decision-exception-desc">{compactIssueDescription(issue)}</p>
+        <div className="decision-exception-actions-row">
+          {isAccepted ? (
+            <p className="course-check-action-result" role="status">
+              Accepted
+            </p>
+          ) : (
+            <>
+              {acceptAction ? (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  data-issue-action-id={acceptAction.id}
+                  onClick={() => {
+                    if (
+                      acceptAction.target.type === "command" &&
+                      acceptAction.target.command === "acknowledge_warning"
+                    ) {
+                      onAcknowledgeIssue(acceptAction);
+                      return;
+                    }
+                    if (
+                      acceptAction.target.type === "command" &&
+                      acceptAction.target.command === "defer_items"
+                    ) {
+                      onExcludeIssueItems(acceptAction.target.itemIds);
+                      return;
+                    }
+                    onChooseAlternative(issue);
+                  }}
+                >
+                  Accept
+                </button>
+              ) : null}
+              {fixAction && fixAction.target.type === "route" ? (
+                <CourseCheckRepairLink
+                  className="btn btn-secondary btn-sm"
+                  href={repairHref(
+                    fixAction.target.href,
+                    issueActionContext.returnPath,
+                  )}
+                  data-issue-action-id={fixAction.id}
+                  onNavigate={() => {
+                    onBeforeFix?.();
+                    saveCourseCheckReturnContext(planId, {
+                      ...issueActionContext,
+                      focusActionId: fixAction.id,
+                      acknowledgedIssueIds: [...acknowledgedActionIds],
+                    });
+                  }}
+                >
+                  Fix
+                </CourseCheckRepairLink>
+              ) : null}
+            </>
+          )}
+        </div>
+      </article>
+    );
+  }
+
+  const showConsequence = issue.consequence !== issue.summary;
+  const showNextStep =
+    Boolean(issue.nextStep) &&
+    issue.nextStep !== issue.summary &&
+    issue.nextStep !== issue.consequence;
+  const proceedAlreadySaid = /does not block|can proceed/i.test(
+    `${issue.consequence}${issue.nextStep ?? ""}`,
+  );
+  const showScope =
+    issue.scope !== issue.summary &&
+    issue.scope !== issue.consequence &&
+    !(issue.scope === GENERIC_NON_BLOCKING_SCOPE && proceedAlreadySaid);
+
   return (
     <article className="decision-exception" data-classification={issue.classification}>
-      <h3>{issue.affectedObjectLabel}</h3>
+      {hideObjectLabel ? null : <h3>{issue.affectedObjectLabel}</h3>}
       <p>{issue.summary}</p>
-      {issue.consequence !== issue.summary ? (
+      {showConsequence ? (
         <p className="decision-exception-consequence">{issue.consequence}</p>
       ) : null}
-      <p className="decision-exception-scope">{issue.scope}</p>
+      {showScope ? <p className="decision-exception-scope">{issue.scope}</p> : null}
       {issue.affectedItems.length > 1 ? (
         <ul className="decision-exception-objects" aria-label="Affected submissions">
           {issue.affectedItems.map((item) => (
@@ -70,7 +219,7 @@ function IssueCard({
           ))}
         </ul>
       ) : null}
-      {issue.nextStep ? <p className="muted">{issue.nextStep}</p> : null}
+      {showNextStep ? <p className="muted">{issue.nextStep}</p> : null}
       <IssueActions
         planId={planId}
         actions={issue.actions}
@@ -85,14 +234,14 @@ function IssueCard({
           className="btn btn-secondary btn-sm"
           onClick={() => onChooseAlternative(issue)}
         >
-          {issue.safeAlternativeLabel}
+          {shortIssueActionLabel(issue.safeAlternativeLabel)}
         </button>
       ) : null}
     </article>
   );
 }
 
-function ProposedReview({
+function CompactProposedReview({
   review,
   onChooseAlternative,
   planId,
@@ -100,8 +249,70 @@ function ProposedReview({
   acknowledgedActionIds,
   onAcknowledgeIssue,
   onExcludeIssueItems,
+  onBeforeFix,
 }: {
   review: DecisionReviewProjection;
+  onChooseAlternative: (issue: DecisionReviewIssue) => void;
+} & IssueActionProps) {
+  const groups = useMemo(() => {
+    const visible = review.issues.filter(
+      (issue) => issue.classification !== "details",
+    );
+    const map = new Map<string, DecisionReviewIssue[]>();
+    for (const issue of visible) {
+      const key = issue.affectedObjectLabel || "Submission";
+      const list = map.get(key) ?? [];
+      list.push(issue);
+      map.set(key, list);
+    }
+    return [...map.entries()];
+  }, [review.issues]);
+
+  return (
+    <div className="course-check-sections course-check-review decision-exception-review decision-exception-compact">
+      {groups.map(([objectLabel, issues]) => (
+        <section
+          key={objectLabel}
+          className="decision-exception-group"
+          aria-label={objectLabel}
+        >
+          <h2 className="decision-exception-submission-title">{objectLabel}</h2>
+          <div className="decision-exception-list">
+            {issues.map((issue) => (
+              <IssueCard
+                key={`${issue.classification}-${issue.summary}`}
+                issue={issue}
+                compact
+                hideObjectLabel
+                onChooseAlternative={onChooseAlternative}
+                planId={planId}
+                issueActionContext={issueActionContext}
+                acknowledgedActionIds={acknowledgedActionIds}
+                onAcknowledgeIssue={onAcknowledgeIssue}
+                onExcludeIssueItems={onExcludeIssueItems}
+                onBeforeFix={onBeforeFix}
+              />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function ProposedReview({
+  review,
+  compact,
+  onChooseAlternative,
+  planId,
+  issueActionContext,
+  acknowledgedActionIds,
+  onAcknowledgeIssue,
+  onExcludeIssueItems,
+  onBeforeFix,
+}: {
+  review: DecisionReviewProjection;
+  compact: boolean;
   onChooseAlternative: (issue: DecisionReviewIssue) => void;
 } & IssueActionProps) {
   const [filter, setFilter] = useState<DecisionReviewItemFilter | "all">("all");
@@ -109,6 +320,21 @@ function ProposedReview({
   const visibleItems = review.items.filter(
     (item) => filter === "all" || item.filter === filter,
   );
+
+  if (compact) {
+    return (
+      <CompactProposedReview
+        review={review}
+        onChooseAlternative={onChooseAlternative}
+        planId={planId}
+        issueActionContext={issueActionContext}
+        acknowledgedActionIds={acknowledgedActionIds}
+        onAcknowledgeIssue={onAcknowledgeIssue}
+        onExcludeIssueItems={onExcludeIssueItems}
+        onBeforeFix={onBeforeFix}
+      />
+    );
+  }
 
   return (
     <div className="course-check-sections course-check-review decision-exception-review">
@@ -124,46 +350,50 @@ function ProposedReview({
         </p>
       </section>
 
-      {ISSUE_ORDER.filter(({ classification }) => classification !== "details").map(({ classification, title }) => {
-        const matching = review.issues.filter(
-          (issue) => issue.classification === classification,
-        );
-        if (matching.length === 0) return null;
-        return (
-          <section
-            className="panel decision-exception-section"
-            aria-labelledby={`decision-${classification}-title`}
-            key={classification}
-          >
-            <h2 id={`decision-${classification}-title`}>
-              <span
-                className="course-check-classification-icon"
-                aria-hidden="true"
-              >
-                {CLASSIFICATION_ICON[classification]}
-              </span>{" "}
-              {title}
-            </h2>
-            <div className="decision-exception-list">
-              {matching.map((issue) => (
-                <IssueCard
-                  key={`${issue.classification}-${issue.summary}`}
-                  issue={issue}
-                  onChooseAlternative={onChooseAlternative}
-                  planId={planId}
-                  issueActionContext={issueActionContext}
-                  acknowledgedActionIds={acknowledgedActionIds}
-                  onAcknowledgeIssue={onAcknowledgeIssue}
-                  onExcludeIssueItems={(itemIds) => {
-                    setSelectedItemIds(new Set(itemIds));
-                    onExcludeIssueItems(itemIds);
-                  }}
-                />
-              ))}
-            </div>
-          </section>
-        );
-      })}
+      {ISSUE_ORDER.filter(({ classification }) => classification !== "details").map(
+        ({ classification, title }) => {
+          const matching = review.issues.filter(
+            (issue) => issue.classification === classification,
+          );
+          if (matching.length === 0) return null;
+          return (
+            <section
+              className="panel decision-exception-section"
+              aria-labelledby={`decision-${classification}-title`}
+              key={classification}
+            >
+              <h2 id={`decision-${classification}-title`}>
+                <span
+                  className="course-check-classification-icon"
+                  aria-hidden="true"
+                >
+                  {CLASSIFICATION_ICON[classification]}
+                </span>{" "}
+                {title}
+              </h2>
+              <div className="decision-exception-list">
+                {matching.map((issue) => (
+                  <IssueCard
+                    key={`${issue.classification}-${issue.summary}`}
+                    issue={issue}
+                    compact={false}
+                    onChooseAlternative={onChooseAlternative}
+                    planId={planId}
+                    issueActionContext={issueActionContext}
+                    acknowledgedActionIds={acknowledgedActionIds}
+                    onAcknowledgeIssue={onAcknowledgeIssue}
+                    onExcludeIssueItems={(itemIds) => {
+                      setSelectedItemIds(new Set(itemIds));
+                      onExcludeIssueItems(itemIds);
+                    }}
+                    onBeforeFix={onBeforeFix}
+                  />
+                ))}
+              </div>
+            </section>
+          );
+        },
+      )}
 
       <section className="panel" aria-labelledby="decision-review-effects-title">
         <h2 id="decision-review-effects-title">What will happen</h2>
@@ -198,6 +428,7 @@ function ProposedReview({
                 <IssueCard
                   key={`${issue.classification}-${issue.summary}`}
                   issue={issue}
+                  compact={false}
                   onChooseAlternative={onChooseAlternative}
                   planId={planId}
                   issueActionContext={issueActionContext}
@@ -207,6 +438,7 @@ function ProposedReview({
                     setSelectedItemIds(new Set(itemIds));
                     onExcludeIssueItems(itemIds);
                   }}
+                  onBeforeFix={onBeforeFix}
                 />
               ))}
           </div>
@@ -301,7 +533,9 @@ function AppliedResult({ review }: { review: DecisionReviewProjection }) {
         role="region"
         aria-label="Decision results"
       >
-        <h2 ref={titleRef} tabIndex={-1}>Results</h2>
+        <h2 ref={titleRef} tabIndex={-1}>
+          Results
+        </h2>
         <p className="lede">{result.summary}</p>
         <div className="decision-result-counts" aria-label="Exact result counts">
           <strong>{counts.processed} processed</strong>
@@ -311,12 +545,28 @@ function AppliedResult({ review }: { review: DecisionReviewProjection }) {
           <span>{counts.unchanged} unchanged</span>
         </div>
         <div className="course-check-result-groups">
-          <section><h3>Decisions</h3><p>{result.decisions.accepted} accepted · {result.decisions.declined} declined</p></section>
-          <section><h3>Generated records</h3><p>{result.generatedRecords.totalCreated} created</p></section>
-          <section><h3>Drafts</h3><p>{result.drafts.label}</p></section>
-          <section><h3>External communication</h3><p>{result.externalCommunication.label}</p></section>
+          <section>
+            <h3>Decisions</h3>
+            <p>
+              {result.decisions.accepted} accepted · {result.decisions.declined} denied
+            </p>
+          </section>
+          <section>
+            <h3>Generated records</h3>
+            <p>{result.generatedRecords.totalCreated} created</p>
+          </section>
+          <section>
+            <h3>Drafts</h3>
+            <p>{result.drafts.label}</p>
+          </section>
+          <section>
+            <h3>External communication</h3>
+            <p>{result.externalCommunication.label}</p>
+          </section>
         </div>
-        <p className="muted">Applied {result.appliedAt} by {result.appliedBy}.</p>
+        <p className="muted">
+          Applied {result.appliedAt} by {result.appliedBy}.
+        </p>
       </section>
     </div>
   );
@@ -330,21 +580,26 @@ export function DecisionExceptionReview({
   acknowledgedActionIds,
   onAcknowledgeIssue,
   onExcludeIssueItems,
+  onBeforeFix,
+  compact = false,
 }: {
   review: DecisionReviewProjection;
   onChooseAlternative: (issue: DecisionReviewIssue) => void;
+  compact?: boolean;
 } & IssueActionProps) {
   return review.result ? (
     <AppliedResult review={review} />
   ) : (
     <ProposedReview
       review={review}
+      compact={compact}
       onChooseAlternative={onChooseAlternative}
       planId={planId}
       issueActionContext={issueActionContext}
       acknowledgedActionIds={acknowledgedActionIds}
       onAcknowledgeIssue={onAcknowledgeIssue}
       onExcludeIssueItems={onExcludeIssueItems}
+      onBeforeFix={onBeforeFix}
     />
   );
 }

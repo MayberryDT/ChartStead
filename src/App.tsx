@@ -7,6 +7,7 @@ import type { EventListResponse, EventRecord } from "../shared/events";
 import { ApiError, createOrganizerForm, fetchEvents } from "./api";
 import { NoAccessPanel, SignIn, signOutAndReturn } from "./SignIn";
 import { AgendaWorkspace, type AgendaChrome } from "./AgendaWorkspace";
+import { CourseCheckRepairLink } from "./course-check/CourseCheckRepairLink";
 import { OnboardingWorkspace } from "./OnboardingWorkspace";
 import {
   MessagesCommandBar,
@@ -546,13 +547,18 @@ function EventDesk({
         {repairReturnTo ? (
           <aside className="repair-return" aria-label="Course Check repair">
             <p>
-              {repairField === "sessionPlacement"
-                ? "Review the submission source for session placement changes."
-                : "Review the affected source record."}
+              {repairField === "placement"
+                ? "Place or schedule the session, then return to finish the decision."
+                : repairField === "sessionPlacement"
+                  ? "Review the submission source for session placement changes."
+                  : "Review the affected source record."}
             </p>
-            <a className="btn btn-secondary btn-sm" href={repairReturnTo}>
+            <CourseCheckRepairLink
+              className="btn btn-secondary btn-sm"
+              href={repairReturnTo}
+            >
               Return to decision review
-            </a>
+            </CourseCheckRepairLink>
           </aside>
         ) : null}
 
@@ -643,10 +649,15 @@ function EventDesk({
 
 function safeCourseCheckReturnPath(value: unknown, eventId: string | undefined): string | null {
   if (typeof value !== "string" || !eventId) return null;
-  const prefix = `/e/${encodeURIComponent(eventId)}/course-checks/`;
-  if (!value.startsWith(prefix)) return null;
-  const planId = value.slice(prefix.length);
-  return planId.length > 0 && !/[/?#]/.test(planId) ? value : null;
+  const encoded = encodeURIComponent(eventId);
+  const coursePrefix = `/e/${encoded}/course-checks/`;
+  if (value.startsWith(coursePrefix)) {
+    const planId = value.slice(coursePrefix.length);
+    return planId.length > 0 && !/[/?#]/.test(planId) ? value : null;
+  }
+  const submissions = `/e/${encoded}/submissions`;
+  if (value === submissions) return value;
+  return null;
 }
 
 function useOrganizerData() {
@@ -770,6 +781,12 @@ export function AgendaPage() {
           : typeof search.session === "string"
             ? [search.session]
             : []
+      }
+      repairReturnTo={safeCourseCheckReturnPath(search.returnTo, params.eventId)}
+      repairField={
+        typeof search.session === "string" || typeof search.sessionIds === "string"
+          ? "placement"
+          : null
       }
     />
   );
@@ -952,11 +969,14 @@ const PROPOSAL_SORTS: ProposalSort[] = [
 ];
 
 function parseQueueSearch(search: Record<string, unknown>): ProposalQueueState {
-  const status = ["unreviewed", "approve", "maybe", "deny", "locked", "all"].includes(
-    String(search.status ?? ""),
-  )
-    ? (search.status as ProposalQueueState["status"])
-    : "all";
+  const rawStatus = String(search.status ?? "");
+  // Legacy: maybe → unreviewed; locked is no longer a queue status.
+  const status: ProposalQueueState["status"] =
+    rawStatus === "maybe"
+      ? "unreviewed"
+      : ["unreviewed", "approve", "deny", "all"].includes(rawStatus)
+        ? (rawStatus as ProposalQueueState["status"])
+        : "all";
   const sort = PROPOSAL_SORTS.includes(String(search.sort ?? "") as ProposalSort)
     ? (search.sort as ProposalSort)
     : "newest";

@@ -227,7 +227,7 @@ export function SpeakerDirectoryAddPanel({
           <h3>Add event speaker</h3>
           <p>
             This creates an identity and event participation only. Link a direct or
-            guaranteed-speaker session through Course Check.
+            guaranteed-speaker session when you schedule it.
           </p>
         </div>
       </div>

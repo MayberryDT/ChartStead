@@ -166,10 +166,11 @@ const agendaRoute = createRoute({
   component: AgendaPage,
   validateSearch: (
     search: Record<string, unknown>,
-  ): { day?: string; session?: string; sessionIds?: string } => ({
+  ): { day?: string; session?: string; sessionIds?: string; returnTo?: string } => ({
     day: typeof search.day === "string" ? search.day : undefined,
     session: typeof search.session === "string" ? search.session : undefined,
     sessionIds: typeof search.sessionIds === "string" ? search.sessionIds : undefined,
+    returnTo: typeof search.returnTo === "string" ? search.returnTo : undefined,
   }),
 });
 

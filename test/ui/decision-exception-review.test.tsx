@@ -175,22 +175,22 @@ const proposed = {
     items: [
       { itemId: "item-blocked", proposalId: "SUB-BLOCKED", proposalLabel: "Building Reliable Agents", proposedDecision: "Will accept", speakerContext: "Jordan Lee", decisionReadiness: "Needs action", draftReadiness: "Check", batchOutcome: "Will stay unchanged", filter: "needs_action" },
       { itemId: "item-warning", proposalId: "SUB-WARNING", proposalLabel: "Safer Data Imports", proposedDecision: "Will accept", speakerContext: "Sam Rivera", decisionReadiness: "Ready", draftReadiness: "Could not check", batchOutcome: "Will process", filter: "check" },
-      { itemId: "item-ready", proposalId: "SUB-READY", proposalLabel: "Community Mapping", proposedDecision: "Will decline", speakerContext: "No speaker records will be created", decisionReadiness: "Ready", draftReadiness: "Not prepared", batchOutcome: "Will process", filter: "ready" },
-      { itemId: "item-skipped", proposalId: "SUB-SKIPPED", proposalLabel: "Archive Formats", proposedDecision: "Will decline", speakerContext: "No speaker records will be created", decisionReadiness: "Skipped", draftReadiness: "Skipped", batchOutcome: "Will stay unchanged", filter: "skipped" },
+      { itemId: "item-ready", proposalId: "SUB-READY", proposalLabel: "Community Mapping", proposedDecision: "Will deny", speakerContext: "No speaker records will be created", decisionReadiness: "Ready", draftReadiness: "Not prepared", batchOutcome: "Will process", filter: "ready" },
+      { itemId: "item-skipped", proposalId: "SUB-SKIPPED", proposalLabel: "Archive Formats", proposedDecision: "Will deny", speakerContext: "No speaker records will be created", decisionReadiness: "Skipped", draftReadiness: "Skipped", batchOutcome: "Will stay unchanged", filter: "skipped" },
     ],
     effectGroups: [
-      { key: "decisions", title: "Decisions", state: "pending", count: 2, summary: "1 submission will be accepted and 1 submission will be declined." },
+      { key: "decisions", title: "Decisions", state: "pending", count: 2, summary: "1 submission will be accepted and 1 submission will be denied." },
       { key: "unchanged", title: "Unchanged", state: "unchanged", count: 2, summary: "2 submissions will stay unchanged." },
       { key: "drafts", title: "Drafts", state: "unchanged", count: 0, summary: "No drafts will be prepared." },
       { key: "external_communication", title: "External communication", state: "unchanged", count: 0, summary: "No emails will be sent." },
     ],
-    permittedCommits: [{ stageId: "apply-decision", label: "Accept 1 submission and decline 1 submission; leave 2 unchanged", effectSummary: "Two decisions will be applied.", requiresDeferredItemIds: ["item-blocked"] }],
-    partialExecution: { eligibleCount: 2, skippedCount: 2, canExecute: true, requiredDeferredItemIds: ["item-blocked"], primaryActionLabel: "Accept 1 submission and decline 1 submission; leave 2 unchanged", skippedOutcomeLabel: "Leave decision unchanged" },
+    permittedCommits: [{ stageId: "apply-decision", label: "Accept 1 submission and deny 1 submission; leave 2 unchanged", effectSummary: "Two decisions will be applied.", requiresDeferredItemIds: ["item-blocked"] }],
+    partialExecution: { eligibleCount: 2, skippedCount: 2, canExecute: true, requiredDeferredItemIds: ["item-blocked"], primaryActionLabel: "Accept 1 submission and deny 1 submission; leave 2 unchanged", skippedOutcomeLabel: "Leave decision unchanged" },
     canDeferItems: true,
     canStartDraftPreparation: true,
     freshness: { state: "current", label: "Checked against current proposal information.", checkedAt: "2026-08-12T10:00:00.000Z" },
     preCommitBoundary: "Nothing has changed. No external communication has been sent.",
-    primaryActionLabel: "Accept 1 submission and decline 1 submission; leave 2 unchanged",
+    primaryActionLabel: "Accept 1 submission and deny 1 submission; leave 2 unchanged",
     result: null,
   },
 } as unknown as CourseCheckPlan;
@@ -229,7 +229,7 @@ describe("decision exception review", () => {
     expect(screen.getByText("Building Reliable Agents — Jordan Lee")).toBeVisible();
     expect(screen.getByText("The acceptance decision will stay unchanged until the identity is resolved.")).toBeVisible();
     expect(screen.getByText("Blocks SUB-BLOCKED only; 2 other submissions can proceed.")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Leave decision unchanged" })).toBeEnabled();
+    expect(screen.getAllByRole("button", { name: "Accept" }).length).toBeGreaterThan(0);
     expect(screen.getByRole("heading", { name: "Check" }).querySelector("[aria-hidden='true']"))
       .toHaveClass("course-check-classification-icon");
     expect(screen.getByRole("heading", { name: "Could not check" }).querySelector("[aria-hidden='true']"))
@@ -255,7 +255,7 @@ describe("decision exception review", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(proposed));
     renderReview();
 
-    expect(await screen.findByRole("button", { name: "Accept 1 submission and decline 1 submission; leave 2 unchanged" })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "Accept 1 submission and deny 1 submission; leave 2 unchanged" })).toBeEnabled();
     expect(screen.getByText("2 eligible · 2 will stay unchanged")).toBeVisible();
 
     const applied = structuredClone(proposed) as unknown as CourseCheckPlan & { decisionReview: NonNullable<CourseCheckPlan["decisionReview"]> };

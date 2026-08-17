@@ -537,7 +537,9 @@ describe("organizer application", () => {
     expect(speakerControls.closest(".operations-panel")).toBeNull();
     expect(document.querySelectorAll(".shell-toolbar")).toHaveLength(1);
     expect(await screen.findByText("No event speakers yet.")).toBeVisible();
-    expect(screen.getByText("No onboarding tasks yet.")).toBeVisible();
+    expect(
+      screen.getByText("Select a speaker to inspect profile, tasks, and files."),
+    ).toBeVisible();
     await user.click(screen.getByRole("link", { name: "Agenda" }));
     expect(await screen.findByText("No sessions yet.")).toBeVisible();
 
@@ -690,8 +692,12 @@ describe("organizer application", () => {
     expect(
       await screen.findByRole("heading", { name: "Speaker messages" }),
     ).toBeVisible();
-    expect(screen.getByText("1 missing address")).toBeVisible();
-    expect(screen.getByRole("link", { name: "Earlier announcement" })).toBeVisible();
+    expect(screen.getByLabelText("Audience counts")).toHaveTextContent(
+      "1 missing address",
+    );
+    expect(
+      screen.getByRole("button", { name: /Earlier announcement/ }),
+    ).toBeVisible();
     expect(screen.getByText("Delivered")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Overdue" }));
@@ -1103,9 +1109,13 @@ describe("organizer application", () => {
 
     renderAt("/e/pacific-open-data-summit-2026/submissions");
 
-    expect(await screen.findByRole("heading", { name: "Submissions" })).toBeVisible();
-    expect(await screen.findByText("Open charts for harbor operations")).toBeVisible();
-    expect(screen.getByLabelText("Proposal detail")).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: "Submissions", level: 1 }),
+    ).toBeVisible();
+    expect(
+      await screen.findByRole("row", { name: /Open charts for harbor operations/ }),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Review results")).toBeVisible();
     expect(
       screen.getByLabelText("Search title, speaker, or ID"),
     ).toBeVisible();
@@ -1136,6 +1146,7 @@ describe("organizer application", () => {
     expect(defaultPreventedByComponent).toBe(false);
     await userEvent.click(proposalLinks[0]!);
     expect(await screen.findByText("Committee only")).toBeVisible();
+    expect(screen.getByLabelText("Proposal detail")).toBeVisible();
     expect(screen.getByText("SUB-ABCD12")).toBeVisible();
   });
 
@@ -1188,10 +1199,10 @@ describe("organizer application", () => {
     renderAt("/e/pacific-open-data-summit-2026/submissions");
 
     expect(await screen.findByRole("region", { name: "Batch final decisions" })).toHaveTextContent("1 selected");
-    expect(await screen.findByRole("checkbox", { name: `Select ${proposal.id} for batch decision` })).toBeChecked();
+    expect(await screen.findByRole("checkbox", { name: `Select ${proposal.id} for Accept or Deny` })).toBeChecked();
   });
 
-  it("shows Locked status in-row and filters locked outcomes without extra row height or grayed checkboxes", async () => {
+  it("shows Accepted/Denied as final status and excludes finalized rows from soft filters", async () => {
     const user = userEvent.setup();
     const openProposal = {
       id: "SUB-OPEN01",
@@ -1219,7 +1230,7 @@ describe("organizer application", () => {
       submittedAt: "2026-08-10T12:00:00.000Z",
       programOutcome: null,
     };
-    const lockedProposal = {
+    const finalizedProposal = {
       ...openProposal,
       id: "SUB-LOCK99",
       title: "Accepted harbor keynote",
@@ -1236,15 +1247,15 @@ describe("organizer application", () => {
           headers: { "content-type": "application/json" },
         });
       }
-      if (url.includes(`/organizer/proposals/${lockedProposal.id}`)) {
+      if (url.includes(`/organizer/proposals/${finalizedProposal.id}`)) {
         return new Response(
-          JSON.stringify({ proposal: lockedProposal, auditEvents: [] }),
+          JSON.stringify({ proposal: finalizedProposal, auditEvents: [] }),
           { headers: { "content-type": "application/json" } },
         );
       }
       if (url.includes("/proposals")) {
         return new Response(
-          JSON.stringify({ proposals: [openProposal, lockedProposal] }),
+          JSON.stringify({ proposals: [openProposal, finalizedProposal] }),
           { headers: { "content-type": "application/json" } },
         );
       }
@@ -1256,23 +1267,29 @@ describe("organizer application", () => {
     const openRow = await screen.findByRole("row", {
       name: /Open charts for harbor operations/,
     });
-    const lockedRow = screen.getByRole("row", {
+    const finalizedRow = screen.getByRole("row", {
       name: /Accepted harbor keynote/,
     });
+    const statusFilter = screen.getByRole("group", { name: "Status filter" });
 
     expect(within(openRow).getByText("Unreviewed")).toBeVisible();
     expect(
       within(openRow).getByRole("checkbox", {
-        name: `Select ${openProposal.id} for batch decision`,
+        name: `Select ${openProposal.id} for Accept or Deny`,
       }),
     ).toBeEnabled();
-    expect(within(lockedRow).getByText("Locked")).toBeVisible();
-    expect(within(lockedRow).queryByText(/Outcome locked/)).not.toBeInTheDocument();
-    expect(within(lockedRow).queryByRole("checkbox")).not.toBeInTheDocument();
-    expect(lockedRow).not.toHaveClass("proposal-row-locked");
+    expect(within(finalizedRow).getByText("Accepted")).toBeVisible();
+    expect(within(finalizedRow).queryByText(/Outcome locked/)).not.toBeInTheDocument();
+    expect(within(finalizedRow).queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(finalizedRow).not.toHaveClass("proposal-row-locked");
+    expect(within(statusFilter).queryByRole("button", { name: "Locked" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Locked", pressed: false }));
-    expect(screen.queryByRole("row", { name: /Open charts for harbor operations/ })).not.toBeInTheDocument();
+    await user.click(within(statusFilter).getByRole("button", { name: "Unreviewed" }));
+    expect(screen.queryByRole("row", { name: /Accepted harbor keynote/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /Open charts for harbor operations/ })).toBeVisible();
+
+    await user.click(within(statusFilter).getByRole("button", { name: "All" }));
+    expect(screen.getByRole("row", { name: /Open charts for harbor operations/ })).toBeVisible();
     expect(screen.getByRole("row", { name: /Accepted harbor keynote/ })).toBeVisible();
 
     await user.click(within(screen.getByRole("row", { name: /Accepted harbor keynote/ })).getByRole("link"));
@@ -1394,7 +1411,7 @@ describe("organizer application", () => {
       await screen.findByRole("heading", { name: "Open charts for harbor operations" }),
     ).toBeVisible();
     expect(proposalsRequest).toBe(
-      "/api/events/pacific-open-data-summit-2026/proposals?sort=title-asc",
+      "/api/events/pacific-open-data-summit-2026/proposals",
     );
     expect(screen.getByLabelText("Search title, speaker, or ID")).toHaveValue(
       "harbor",
@@ -1415,7 +1432,6 @@ describe("organizer application", () => {
     expect(screen.getByText("A repeatable harbor data checklist.")).toBeVisible();
     expect(screen.getByText("ada-headshot.jpg")).toBeVisible();
     expect(screen.getByText("she/her")).toBeVisible();
-    expect(screen.getByText(/No speaker email is sent/i)).toBeVisible();
     const stableLink = within(
       screen.getByRole("row", { name: /Open charts for harbor operations/ }),
     ).getByRole("link");
@@ -1431,22 +1447,21 @@ describe("organizer application", () => {
     expect(await screen.findByText("Committee note saved.")).toBeVisible();
 
     await user.click(
-      within(screen.getByLabelText("Internal decision")).getByRole("button", {
-        name: "Maybe",
+      within(screen.getByLabelText("Committee leaning")).getByRole("button", {
+        name: "Recommend",
       }),
     );
-    expect(await screen.findByText("Internal decision changed to Maybe.")).toBeVisible();
     expect(reviewWrites).toEqual([
       {
         committeeNote: "Compare against the second platform slot.",
         expectedVersion: 2,
       },
-      { status: "maybe", expectedVersion: 3 },
+      { status: "approve", expectedVersion: 3 },
     ]);
     const history = screen.getByText("Review history").closest(".panel");
     expect(history).toBeTruthy();
     expect(history?.querySelector("summary")).toHaveTextContent(
-      /Demo Administrator.*Maybe/,
+      /Demo Administrator.*Recommend/,
     );
   });
 

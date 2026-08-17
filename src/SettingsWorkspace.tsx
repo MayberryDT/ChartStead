@@ -161,20 +161,20 @@ function CourseCheckPolicyCard({ eventId }: { eventId: string }) {
     onSuccess: (policy) => {
       setDraft(policy);
       setTone("success");
-      setMessage("Course Check policy saved. Baseline protections remain in force.");
+      setMessage("Decision safeguards saved. Baseline protections remain in force.");
       void queryClient.invalidateQueries({ queryKey: ["course-check-policy", eventId] });
     },
     onError: (error) => {
       setTone("error");
       setMessage(
-        error instanceof ApiError ? error.message : "Unable to save Course Check policy.",
+        error instanceof ApiError ? error.message : "Unable to save decision safeguards.",
       );
     },
   });
 
   if (!draft) {
     return (
-      <section className="settings-card" aria-label="Course Check">
+      <section className="settings-card" aria-label="Decision safeguards">
         <p className="empty-state padded">
           {policyQuery.isError ? "Unable to load policy." : "Loading…"}
         </p>
@@ -183,8 +183,8 @@ function CourseCheckPolicyCard({ eventId }: { eventId: string }) {
   }
 
   return (
-    <section className="settings-card settings-card-compact" aria-label="Course Check">
-      <h2>Course Check safeguards</h2>
+    <section className="settings-card settings-card-compact" aria-label="Decision safeguards">
+      <h2>Decision safeguards</h2>
       <form
         id="course-check-policy-form"
         className="settings-form"

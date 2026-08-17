@@ -50,6 +50,34 @@ function proposalRoute(
   };
 }
 
+function agendaRoute(
+  eventId: string,
+  sessionId: string | null,
+): Extract<CourseCheckIssueActionTarget, { type: "route" }> {
+  const query = sessionId ? `?session=${encodeURIComponent(sessionId)}` : "";
+  return {
+    type: "route",
+    href: `/e/${encodeURIComponent(eventId)}/agenda${query}`,
+    objectType: "session",
+    objectId: sessionId ?? "agenda",
+    field: "placement",
+  };
+}
+
+function deepRepairTarget(
+  eventId: string,
+  finding: CourseCheckFinding,
+  items: DecisionItem[],
+  firstProposal: string,
+): Extract<CourseCheckIssueActionTarget, { type: "route" }> {
+  if (finding.code === "session_unplaced" || finding.code === "session_tbd") {
+    const sessionId =
+      items.find((item) => item.session?.plannedId)?.session?.plannedId ?? null;
+    return agendaRoute(eventId, sessionId);
+  }
+  return proposalRoute(eventId, firstProposal, fieldForFinding(finding));
+}
+
 function stableActionId(finding: CourseCheckFinding, suffix: string): string {
   let hash = 2166136261;
   for (let index = 0; index < finding.id.length; index += 1) {
@@ -78,20 +106,8 @@ function fieldForFinding(finding: CourseCheckFinding): string {
   }
 }
 
-function deepRepairLabel(finding: CourseCheckFinding): string {
-  switch (finding.code) {
-    case "session_unplaced":
-    case "session_tbd":
-      return "Change session placement";
-    case "identity_ambiguity":
-      return "Resolve speaker identity";
-    case "durable_integrity":
-      return "Correct speaker details";
-    case "relevant_input_changed":
-      return "Review current submission";
-    default:
-      return "Open affected submission";
-  }
+function deepRepairLabel(_finding: CourseCheckFinding): string {
+  return "Fix";
 }
 
 export function declareDecisionIssueActions(input: {
@@ -142,22 +158,21 @@ export function declareDecisionIssueActions(input: {
       id: stableActionId(finding, "deep-repair"),
       label: deepRepairLabel(finding),
       kind: "deep_repair",
-      target: proposalRoute(eventId, firstProposal, fieldForFinding(finding)),
+      target: deepRepairTarget(eventId, finding, items, firstProposal),
       affectedEntityIds,
       resultingEffectSummary:
-        items.length > 1
-          ? `Course Check will recheck all ${items.length} submissions that share this dependency.`
-          : "Course Check will recheck this submission and its dependent effects.",
+        finding.code === "session_unplaced" || finding.code === "session_tbd"
+          ? "Open Agenda to place or schedule this session."
+          : items.length > 1
+            ? `Course Check will recheck all ${items.length} submissions that share this dependency.`
+            : "Course Check will recheck this submission and its dependent effects.",
     });
   }
 
   if (informational) {
     actions.push({
       id: stableActionId(finding, "acknowledge"),
-      label:
-        finding.code === "session_unplaced" || finding.code === "session_tbd"
-          ? "Keep session unplaced"
-          : "Acknowledge this note",
+      label: "Accept",
       kind: "acknowledge",
       target: { type: "command", command: "acknowledge_warning", itemIds },
       affectedEntityIds,

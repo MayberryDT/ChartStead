@@ -42,7 +42,7 @@ import {
   DecisionFastPath,
   isDecisionFastPathEligible,
 } from "./course-check/DecisionFastPath";
-import { IssueActions } from "./course-check/IssueActions";
+import { IssueActions, shortIssueActionLabel } from "./course-check/IssueActions";
 import { CommunicationResultPanel } from "./course-check/CommunicationResultPanel";
 import {
   repairHref,
@@ -548,9 +548,9 @@ function DecisionReviewBody({
   const itemState = (item: DecisionPlanBody["items"][number]) => {
     if (item.status === "deferred") return "Unchanged";
     if (item.status === "applied") {
-      return item.outcome === "accepted" ? "Accepted" : "Declined";
+      return item.outcome === "accepted" ? "Accepted" : "Denied";
     }
-    return item.outcome === "accepted" ? "Will accept" : "Will decline";
+    return item.outcome === "accepted" ? "Will accept" : "Will deny";
   };
 
   return (
@@ -563,7 +563,7 @@ function DecisionReviewBody({
             <section>
               <h3>Decisions</h3>
               <p>
-                {result.decisions.accepted} accepted · {result.decisions.declined} declined
+                {result.decisions.accepted} accepted · {result.decisions.declined} denied
               </p>
             </section>
             <section>
@@ -2219,8 +2219,14 @@ export function CourseCheckPage() {
               setSelectedItemIds(
                 new Set(issue.affectedItems.map((item) => item.itemId)),
               );
+              const alternative =
+                issue.safeAlternativeLabel != null
+                  ? shortIssueActionLabel(issue.safeAlternativeLabel)
+                  : null;
               setMessage(
-                `${issue.safeAlternativeLabel}: ${issue.affectedObjectLabel}.`,
+                alternative
+                  ? `${alternative}: ${issue.affectedObjectLabel}.`
+                  : `${issue.affectedObjectLabel}.`,
               );
             }}
             issueActionContext={issueActionContext}

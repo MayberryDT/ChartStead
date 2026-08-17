@@ -677,7 +677,7 @@ export interface DecisionReviewItemProjection {
   itemId: string;
   proposalId: string;
   proposalLabel: string;
-  proposedDecision: "Will accept" | "Will decline" | "Accepted" | "Declined";
+  proposedDecision: "Will accept" | "Will deny" | "Accepted" | "Denied";
   speakerContext: string;
   decisionReadiness: "Needs action" | "Ready" | "Applied" | "Skipped";
   draftReadiness: "Not prepared" | "Check" | "Could not check" | "Skipped";

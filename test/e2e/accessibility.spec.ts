@@ -106,7 +106,7 @@ test.describe("automated accessibility smoke", () => {
     await allFilter.focus();
     await page.keyboard.press("Space");
     await expect(selectedRegion.getByRole("row")).toHaveCount(26);
-    const acknowledgement = page.getByRole("button", { name: "Acknowledge this note" });
+    const acknowledgement = page.getByRole("button", { name: "Acknowledge" });
     await acknowledgement.focus();
     await page.keyboard.press("Enter");
     await expect(page.locator(".course-check-action-result", { hasText: /^Acknowledged:/ })).toBeFocused();

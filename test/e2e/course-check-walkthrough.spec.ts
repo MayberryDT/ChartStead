@@ -65,20 +65,20 @@ test("decision review stays truthful before and after commit", async ({ page }) 
     `/e/pacific-open-data-summit-2026/course-checks/${plan.id}`,
   );
   await expect(
-    page.getByRole("heading", { name: "Review 1 decline decision" }),
+    page.getByRole("heading", { name: "Review 1 denial decision" }),
   ).toBeVisible();
-  await expect(page.getByRole("checkbox", { name: /Will decline/ })).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: /Will deny/ })).toBeVisible();
   await expect(
     page.getByText("Nothing has changed. No external communication has been sent."),
   ).toBeVisible();
   await expect(page.getByText(/plan reference|mutation history/i)).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Decline 1 submission" }).click();
+  await page.getByRole("button", { name: "Deny 1 submission" }).click();
 
   await expect(
-    page.getByRole("heading", { name: "Decline decision applied" }),
+    page.getByRole("heading", { name: "Denial decision applied" }),
   ).toBeVisible();
-  await expect(page.getByText("1 submission was declined.")).toBeVisible();
+  await expect(page.getByText("1 submission was denied.")).toBeVisible();
   await expect(page.getByText("No drafts were prepared.")).toBeVisible();
   await expect(page.getByText("No emails were sent.")).toBeVisible();
   await expect(page).toHaveURL(
@@ -154,7 +154,7 @@ test("shared approval explains policy authority and resumable stage state", asyn
     await expect(approval.getByText(`version ${plan.version}`, { exact: false })).toBeVisible();
     await expect(approval.getByRole("status")).toHaveAttribute("aria-live", "polite");
     await expect(page.getByPlaceholder("Why approve this exact stage?")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Decline 1 submission" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Deny 1 submission" })).toBeDisabled();
   } finally {
     expect((await page.request.put(policyUrl, { data: { policy: resetPolicy } })).ok()).toBe(true);
   }
@@ -186,8 +186,8 @@ test("decision result advances to draft preparation without leaving the workspac
   const plan = (await createResponse.json()) as { id: string };
 
   await page.goto(`/e/pacific-open-data-summit-2026/course-checks/${plan.id}`);
-  await page.getByRole("button", { name: "Decline 1 submission" }).click();
-  await expect(page.getByRole("heading", { name: "Decline decision applied" })).toBeVisible();
+  await page.getByRole("button", { name: "Deny 1 submission" }).click();
+  await expect(page.getByRole("heading", { name: "Denial decision applied" })).toBeVisible();
   await page.getByRole("button", { name: "Prepare communication drafts" }).click();
 
   await expect(page.getByRole("heading", { name: "Prepare decline messages" })).toBeVisible();
@@ -450,15 +450,15 @@ test("batch decision review reports exact scope before and after commit", async 
     `/e/pacific-open-data-summit-2026/course-checks/${plan.id}`,
   );
   await expect(
-    page.getByRole("heading", { name: "Review 2 decline decisions" }),
+    page.getByRole("heading", { name: "Review 2 denial decisions" }),
   ).toBeVisible();
-  await expect(page.getByText("2 submissions will be declined.")).toBeVisible();
-  await page.getByRole("button", { name: "Decline 2 submissions" }).click();
+  await expect(page.getByText("2 submissions will be denied.")).toBeVisible();
+  await page.getByRole("button", { name: "Deny 2 submissions" }).click();
 
   await expect(
-    page.getByRole("heading", { name: "Decline decisions applied" }),
+    page.getByRole("heading", { name: "Denial decisions applied" }),
   ).toBeVisible();
-  await expect(page.getByText("2 submissions were declined.")).toBeVisible();
+  await expect(page.getByText("2 submissions were denied.")).toBeVisible();
   await expect(page.getByText("No drafts were prepared.")).toBeVisible();
   await expect(page.getByText("No emails were sent.")).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`/course-checks/${plan.id}$`));
@@ -562,14 +562,14 @@ test("clean decision fast path preserves keyboard focus, history, and batch sele
     `/e/pacific-open-data-summit-2026/course-checks/${durablePlan.id}?q=${proposal!.id}&sort=oldest`,
   );
 
-  const dialog = page.getByRole("dialog", { name: "Review 1 decline decision" });
+  const dialog = page.getByRole("dialog", { name: "Review 1 denial decision" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("heading", { name: "Review 1 decline decision" })).toBeFocused();
+  await expect(dialog.getByRole("heading", { name: "Review 1 denial decision" })).toBeFocused();
   await expect(dialog.getByText("Course Check found no issues.")).toHaveCount(1);
   await expect(dialog.locator("details")).toHaveCount(0);
   await expect(dialog.getByText("0 communication drafts")).toBeVisible();
   await expect(dialog.getByText("0 external effects")).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Decline 1 submission" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Deny 1 submission" })).toBeVisible();
 
   await dialog.getByRole("button", { name: "Cancel" }).click();
 
@@ -623,14 +623,14 @@ test("exception-first batch processes eligible decisions and leaves blocked work
   await expect(page.getByText("SUB-PODS0050", { exact: true }).first()).toBeVisible();
   await expect(
     page.getByRole("button", {
-      name: "Decline 1 submission; leave 1 unchanged",
+      name: "Deny 1 submission; leave 1 unchanged",
     }),
   ).toBeEnabled();
   await expect(page.getByText("1 eligible · 1 will stay unchanged")).toBeVisible();
   await expect(page.getByText(/defer/i)).toHaveCount(0);
 
   await page
-    .getByRole("button", { name: "Decline 1 submission; leave 1 unchanged" })
+    .getByRole("button", { name: "Deny 1 submission; leave 1 unchanged" })
     .click();
 
   const results = page.getByRole("region", { name: "Decision results" });
@@ -675,14 +675,12 @@ test("issue repair returns to the same decision review with context and focus", 
   const plan = (await createResponse.json()) as { id: string };
 
   await page.goto(`/e/pacific-open-data-summit-2026/course-checks/${plan.id}`);
-  const action = page.getByRole("link", { name: "Change session placement" }).first();
+  const action = page.getByRole("link", { name: "Fix" }).first();
   await expect(action).toBeVisible();
   await action.click();
-  await expect(page).toHaveURL(
-    new RegExp(`/submissions/${proposal!.id}\\?field=sessionPlacement`),
-  );
-  await expect(page.locator(".inspector-header h2")).toBeFocused();
+  await expect(page).toHaveURL(/\/agenda(\?|$)/);
+  await expect(page.getByRole("link", { name: "Return to decision review" })).toBeVisible();
   await page.getByRole("link", { name: "Return to decision review" }).click();
   await expect(page).toHaveURL(new RegExp(`/course-checks/${plan.id}$`));
-  await expect(page.getByRole("link", { name: "Change session placement" }).first()).toBeFocused();
+  await expect(page.getByRole("link", { name: "Fix" }).first()).toBeFocused();
 });

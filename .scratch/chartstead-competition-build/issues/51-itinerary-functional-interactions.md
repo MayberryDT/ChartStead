@@ -1,6 +1,6 @@
 # 51 — Make the Schedule Itinerary fully functional
 
-**Status:** in-review
+**Status:** done
 
 **Blocked by:** Competition 45
 
@@ -25,10 +25,15 @@ Complete the Indexed Folio itinerary behavior. Base UI and TanStack must own app
 
 ## Comments
 
+- 2026-08-17 — Tyler: confirm closed on main board. Prior done closeout lived only on tmp/wip-before-67 (park-before-67) and never merged; restored to done.
+
+- 2026-08-16 — Tyler confirmed complete; status → `done`.
 - 2026-08-14 — Functional slice ready for QA: URL/local saved itinerary persistence, optimistic TanStack Query mutation with rollback, Base UI actions/day tabs, Router filters, and cumulative focused tests.
 - 2026-08-14 — QA demo: `http://100.105.117.93:5456/fixtures/itinerary-embed`. Test save/remove and reload persistence, URL-backed filters/saved IDs, day changes, clear, disabled/pending states, keyboard focus, TBD and narrow horizontal navigation.
 
 - 2026-08-14 — Continued in isolated branch `ticket-51-56-itinerary-functional-polish` from embed integration HEAD `1135b15`; functional behavior is being implemented test-first before Competition 56 begins.
+
 - 2026-08-14 — Started on integration branch `orchestrate/embed-polish-42-46` in `/home/halla/ChartStead/.worktrees/embed-polish-integration` after Tyler authorized the complete follow-up wave.
 - 2026-08-14 — Created from Tyler's functional embed sweep. Visual refinement is Competition 56.
+
 - 2026-08-14 — frontier-reconcile: Still blocked on: Competition 45 (in-review).

@@ -6,8 +6,6 @@ import type {
   ReactNode,
 } from "react";
 
-import { useNavigate } from "@tanstack/react-router";
-
 import type { ProgramOutcome } from "../shared/course-check";
 import type {
   EventRecord,
@@ -26,7 +24,6 @@ import type {
 } from "../shared/events";
 import { auditEventLabel } from "../shared/portal-lifecycle";
 import {
-  createDecisionCourseCheck,
   distributeEvaluationRoundAssignments,
   fetchEvaluationPlan,
   fetchEvaluationRoundAssignments,
@@ -50,6 +47,20 @@ import {
   reviewResultsCsvUrl,
 } from "./api";
 import { AppSelect } from "./AppSelect";
+import {
+  DecisionFinalizeInspector,
+  useDecisionFinalize,
+} from "./course-check/DecisionFinalizeOverlay";
+import {
+  auditFinalOutcomeLabel,
+  auditSoftStatusLabel,
+  programOutcomeLabel,
+  proposalDecisionFlagClass,
+  proposalDecisionLabel,
+  softDecisionForControls,
+  softDecisionLabel,
+  SOFT_DECISION_STATUSES,
+} from "./decision-language";
 import { createClientId } from "./id";
 import { ReviewSetupDialog } from "./ReviewSetupDialog";
 import { SettingsCheckbox, SettingsTextField } from "./SettingsFields";
@@ -67,7 +78,7 @@ export type ProposalSort =
   | "aggregate-asc"
   | "aggregate-desc";
 
-export type ProposalQueueStatus = ProposalStatus | "all" | "locked";
+export type ProposalQueueStatus = Exclude<ProposalStatus, "maybe"> | "all";
 
 export interface ProposalQueueState {
   query: string;
@@ -84,7 +95,7 @@ export type BatchChrome = {
   batchMessage: string | null;
   isPending: boolean;
   onAccept: () => void;
-  onDecline: () => void;
+  onDeny: () => void;
   onClear: () => void;
 };
 
@@ -120,38 +131,12 @@ function formatSubmittedAt(value: string) {
   }).format(new Date(value));
 }
 
-function statusLabel(status: ProposalStatus | "locked") {
-  switch (status) {
-    case "approve":
-      return "Approve";
-    case "maybe":
-      return "Maybe";
-    case "deny":
-      return "Deny";
-    case "locked":
-      return "Locked";
-    default:
-      return "Unreviewed";
-  }
-}
-
-function programOutcomeLabel(outcome: ProgramOutcome) {
-  switch (outcome) {
-    case "accepted":
-      return "Accepted";
-    case "declined":
-      return "Declined";
-  }
-}
-
 function rowStatusLabel(proposal: OrganizerProposal): string {
-  if (proposal.programOutcome) return statusLabel("locked");
-  return statusLabel(proposal.status);
+  return proposalDecisionLabel(proposal);
 }
 
 function rowStatusClass(proposal: OrganizerProposal): string {
-  if (proposal.programOutcome) return "flag flag-locked";
-  return `flag flag-${proposal.status}`;
+  return proposalDecisionFlagClass(proposal);
 }
 
 function proposalHref(
@@ -290,14 +275,14 @@ export function SubmissionsCommandBar({
         />
       </label>
       <div className="seg" role="group" aria-label="Status filter">
-        {(["all", "unreviewed", "approve", "maybe", "deny", "locked"] as const).map((status) => (
+        {(["all", "unreviewed", "approve", "deny"] as const).map((status) => (
           <button
             key={status}
             type="button"
             aria-pressed={queue.status === status}
             onClick={() => setQueue({ status })}
           >
-            {status === "all" ? "All" : statusLabel(status)}
+            {status === "all" ? "All" : softDecisionLabel(status)}
           </button>
         ))}
       </div>
@@ -363,15 +348,15 @@ export function SubmissionsCommandBar({
               disabled={batchDisabled}
               onClick={() => batch.onAccept()}
             >
-              Accept batch
+              Accept
             </button>
             <button
               type="button"
               className="btn btn-secondary btn-sm"
               disabled={batchDisabled}
-              onClick={() => batch.onDecline()}
+              onClick={() => batch.onDeny()}
             >
-              Decline batch
+              Deny
             </button>
             <button
               type="button"
@@ -431,12 +416,14 @@ function filterAndSortProposals(
 ): OrganizerProposal[] {
   const needle = queue.query.trim().toLowerCase();
   let next = rows;
-  if (queue.status === "locked") {
-    next = next.filter((row) => Boolean(row.programOutcome));
-  } else if (queue.status !== "all") {
-    next = next.filter(
-      (row) => row.status === queue.status && !row.programOutcome,
-    );
+  if (queue.status !== "all") {
+    next = next.filter((row) => {
+      if (row.programOutcome) return false;
+      if (queue.status === "unreviewed") {
+        return softDecisionForControls(row.status) === "unreviewed";
+      }
+      return row.status === queue.status;
+    });
   }
   if (queue.track) {
     next = next.filter((row) => row.trackId === queue.track);
@@ -540,7 +527,6 @@ export function SubmissionsWorkspace({
   onReviewChromeChange?: (review: ReviewChrome | null) => void;
   focusSelectedRecord?: boolean;
 }) {
-  const navigate = useNavigate();
   const [inspectorWidth, setInspectorWidth] = useState(560);
   const [queuePaneWidth, setQueuePaneWidth] = useState(0);
   const inspectorWidthRef = useRef(inspectorWidth);
@@ -556,6 +542,19 @@ export function SubmissionsWorkspace({
   const tableRef = useRef<HTMLTableElement>(null);
   const splitRef = useRef<HTMLDivElement>(null);
   colWidthsRef.current = colWidths;
+
+  const finalize = useDecisionFinalize(event.id);
+  const finalizeActive = finalize.mode !== "idle";
+
+  useEffect(() => {
+    void finalize.resumeIfAny();
+  }, [event.id]); // eslint-disable-line react-hooks/exhaustive-deps -- resume once per event mount
+
+  useEffect(() => {
+    if (!finalize.toast) return;
+    const timer = window.setTimeout(() => finalize.dismissToast(), 4200);
+    return () => window.clearTimeout(timer);
+  }, [finalize.toast, finalize.dismissToast]);
 
   useEffect(() => {
     localStorage.setItem(QUEUE_COL_STORAGE, JSON.stringify(colWidths));
@@ -626,33 +625,23 @@ export function SubmissionsWorkspace({
     .map((proposal) => proposal.id);
   const allVisibleSelected =
     selectableIds.length > 0 && selectableIds.every((id) => batchIds.has(id));
+  const finalizeBusy =
+    finalize.mode === "loading" || finalize.mode === "applying";
 
-  const batchMutation = useMutation({
-    mutationFn: (outcome: ProgramOutcome) =>
-      createDecisionCourseCheck(event.id, {
-        items: [...batchIds].map((proposalId) => ({
-          proposalId,
-          outcome,
-        })),
-        idempotencyKey: `ui-batch-${[...batchIds].sort().join("-")}-${outcome}-${createClientId()}`,
-      }),
-    onSuccess: (plan) => {
-      setBatchMessage(null);
-      void navigate({
-        to: "/e/$eventId/course-checks/$planId",
-        params: { eventId: event.id, planId: plan.id },
-        search: {
-          q: queue.query || undefined,
-          status: queue.status === "all" ? undefined : queue.status,
-          track: queue.track || undefined,
-          sort: queue.sort === "newest" ? undefined : queue.sort,
-        },
+  function startBatchFinalize(outcome: ProgramOutcome) {
+    setBatchMessage(null);
+    void finalize
+      .start({
+        kind: "batch",
+        outcome,
+        items: [...batchIds].map((proposalId) => ({ proposalId, outcome })),
+      })
+      .catch((error) => {
+        setBatchMessage(
+          error instanceof Error ? error.message : "Unable to start decision review.",
+        );
       });
-    },
-    onError: (error) => {
-      setBatchMessage(error instanceof Error ? error.message : "Unable to open batch Course Check.");
-    },
-  });
+  }
 
   useEffect(() => {
     if (!onBatchChromeChange) return;
@@ -664,24 +653,19 @@ export function SubmissionsWorkspace({
       selectedCount: batchIds.size,
       selectableCount: selectableIds.length,
       allVisibleSelected,
-      batchMessage,
-      isPending: batchMutation.isPending,
-      onAccept: () => {
-        setBatchMessage(null);
-        batchMutation.mutate("accepted");
-      },
-      onDecline: () => {
-        setBatchMessage(null);
-        batchMutation.mutate("declined");
-      },
+      batchMessage: batchMessage ?? finalize.error,
+      isPending: finalizeBusy,
+      onAccept: () => startBatchFinalize("accepted"),
+      onDeny: () => startBatchFinalize("declined"),
       onClear: () => setBatchIds(new Set()),
     });
   }, [
     allVisibleSelected,
     batchIds.size,
     batchMessage,
-    batchMutation.isPending,
     currentRole,
+    finalize.error,
+    finalizeBusy,
     onBatchChromeChange,
     selectableIds.length,
   ]);
@@ -986,27 +970,31 @@ export function SubmissionsWorkspace({
               <tbody>
                 {proposals.map((proposal) => {
                   const href = proposalHref(event.id, proposal.id, queue);
-                  const locked = Boolean(proposal.programOutcome);
+                  const finalized = Boolean(proposal.programOutcome);
                   return (
                     <tr
                       key={proposal.id}
                       className="proposal-row"
                       data-id={proposal.id}
-                      data-locked={locked ? "true" : undefined}
+                      data-locked={finalized ? "true" : undefined}
                       data-polish-id="S-2-row"
                       aria-selected={selectedProposalId === proposal.id}
                     >
                       {currentRole === "admin" ? (
                         <td className="col-batch">
-                          {locked ? (
-                            <span className="batch-check-slot" aria-hidden="true" />
+                          {finalized ? (
+                            <span
+                              className="batch-check-slot"
+                              title={`Already ${programOutcomeLabel(proposal.programOutcome!)}. Not selectable for another final decision.`}
+                              aria-label={`Already ${programOutcomeLabel(proposal.programOutcome!)}`}
+                            />
                           ) : (
                             <input
                               className="batch-check"
                               type="checkbox"
-                              aria-label={`Select ${proposal.id} for batch decision`}
+                              aria-label={`Select ${proposal.id} for Accept or Deny`}
                               checked={batchIds.has(proposal.id)}
-                              title="Select for batch decision"
+                              title="Select for Accept or Deny"
                               onClick={(click) => click.stopPropagation()}
                               onChange={() => {
                                 setBatchIds((current) => {
@@ -1104,10 +1092,45 @@ export function SubmissionsWorkspace({
         />
 
         <aside
-          className={`inspector${selectedProposalId || resultsOpen ? " has-selection" : ""}`}
-          aria-label={resultsOpen || (!selectedProposalId && currentRole === "admin") ? "Review results" : "Proposal detail"}
+          className={`inspector${selectedProposalId || resultsOpen || finalizeActive ? " has-selection" : ""}`}
+          aria-label={
+            finalizeActive
+              ? "Final decision review"
+              : resultsOpen || (!selectedProposalId && currentRole === "admin")
+                ? "Review results"
+                : "Proposal detail"
+          }
         >
-          {currentRole === "admin" && (resultsOpen || !selectedProposalId) ? (
+          {finalizeActive ? (
+            <DecisionFinalizeInspector
+              eventId={event.id}
+              mode={finalize.mode}
+              plan={finalize.plan}
+              review={finalize.review}
+              error={finalize.error}
+              busy={finalizeBusy}
+              acknowledgedActionIds={finalize.acknowledgedActionIds}
+              onAcknowledgeIssue={(actionId) => {
+                finalize.setAcknowledgedActionIds((current) =>
+                  new Set(current).add(actionId),
+                );
+              }}
+              onExcludeIssueItems={(itemIds) => {
+                void finalize.excludeItems(itemIds);
+              }}
+              onCancel={() => finalize.cancel()}
+              onConfirm={() => {
+                void finalize.applyDecision().then(() => {
+                  setBatchIds(new Set());
+                });
+              }}
+              onChooseAlternative={(issue) => {
+                const itemIds = issue.affectedItems.map((item) => item.itemId);
+                void finalize.excludeItems(itemIds);
+              }}
+              onBeforeFix={() => finalize.persistFixResume()}
+            />
+          ) : currentRole === "admin" && (resultsOpen || !selectedProposalId) ? (
             <ReviewResultsPanel
               eventId={event.id}
               results={resultsQuery.data ?? null}
@@ -1135,6 +1158,15 @@ export function SubmissionsWorkspace({
               isAdmin={currentRole === "admin"}
               focusRecord={focusSelectedRecord}
               onClose={onCloseProposal}
+              finalizeBusy={finalizeBusy}
+              onFinalize={(outcome) => {
+                void finalize.start({
+                  kind: "single",
+                  proposalId: selected.id,
+                  outcome,
+                });
+              }}
+              finalizeError={finalize.error}
             />
           ) : (
             <div className="inspector-body">
@@ -1148,6 +1180,11 @@ export function SubmissionsWorkspace({
         open={setupOpen}
         onClose={() => setSetupOpen(false)}
       />
+      {finalize.toast ? (
+        <div className="submissions-toast" role="status" aria-live="polite">
+          {finalize.toast}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1236,7 +1273,9 @@ function ReviewResultsPanel({
     if (ledgerSort === "status") {
       const byCompletion = left.completionStatus.localeCompare(right.completionStatus);
       if (byCompletion !== 0) return byCompletion;
-      return statusLabel(left.recommendation).localeCompare(statusLabel(right.recommendation));
+      return softDecisionLabel(left.recommendation).localeCompare(
+        softDecisionLabel(right.recommendation),
+      );
     }
     const leftScore = left.aggregateScore;
     const rightScore = right.aggregateScore;
@@ -1323,7 +1362,7 @@ function ReviewResultsPanel({
                         {" · "}
                         {row.completionStatus === "complete" ? "Complete" : "Incomplete"}
                         {" · "}
-                        {statusLabel(row.recommendation)}
+                        {softDecisionLabel(row.recommendation)}
                       </span>
                     </button>
                   </li>
@@ -2158,6 +2197,9 @@ function ProposalInspector({
   isAdmin,
   focusRecord,
   onClose,
+  onFinalize,
+  finalizeBusy,
+  finalizeError,
 }: {
   eventId: string;
   roundId: string;
@@ -2167,9 +2209,11 @@ function ProposalInspector({
   isAdmin: boolean;
   focusRecord: boolean;
   onClose?: () => void;
+  onFinalize: (outcome: ProgramOutcome) => void;
+  finalizeBusy: boolean;
+  finalizeError: string | null;
 }) {
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const closeRef = useRef<HTMLButtonElement>(null);
   const recordTitleRef = useRef<HTMLHeadingElement>(null);
   const [committeeNote, setCommitteeNote] = useState(proposal.committeeNote);
@@ -2185,6 +2229,8 @@ function ProposalInspector({
     ([name]) => !STANDARD_ANSWER_NAMES.has(name),
   );
   const speakerAnswers = speakerAnswerGroups(proposal.answers ?? {});
+  const finalized = Boolean(proposal.programOutcome);
+  const softStatus = softDecisionForControls(proposal.status);
 
   useEffect(() => {
     setCommitteeNote(proposal.committeeNote);
@@ -2228,13 +2274,11 @@ function ProposalInspector({
       void queryClient.invalidateQueries({ queryKey: ["proposals", eventId] });
       void queryClient.invalidateQueries({ queryKey: ["events"] });
       void queryClient.invalidateQueries({ queryKey: ["review-results", eventId] });
-      setMessage(
-        variables.status
-          ? `Internal decision changed to ${statusLabel(variables.status)}.`
-          : variables.scorecardValues
-            ? "Scorecard saved."
-            : "Committee note saved.",
-      );
+      if (variables.scorecardValues) {
+        setMessage("Scorecard saved.");
+      } else if (variables.committeeNote !== undefined) {
+        setMessage("Committee note saved.");
+      }
     },
   });
 
@@ -2278,22 +2322,6 @@ function ProposalInspector({
     recusalMutation.mutate(reason);
   }
 
-
-  const outcomeMutation = useMutation({
-    mutationFn: (outcome: ProgramOutcome) =>
-      createDecisionCourseCheck(eventId, {
-        proposalId: proposal.id,
-        outcome,
-        idempotencyKey: `ui-decision-${proposal.id}-${outcome}-${createClientId()}`,
-      }),
-    onSuccess: (plan) => {
-      void navigate({
-        to: "/e/$eventId/course-checks/$planId",
-        params: { eventId, planId: plan.id },
-      });
-    },
-  });
-
   return (
     <div
       className="inspector-content"
@@ -2321,8 +2349,8 @@ function ProposalInspector({
               {proposal.speakerName}
               <span className="talk-sub"> · {proposal.speakerEmail}</span>
             </span>
-            <span className={`flag flag-box flag-${proposal.status}`}>
-              {statusLabel(proposal.status)}
+            <span className={`flag flag-box ${proposalDecisionFlagClass(proposal)}`}>
+              {proposalDecisionLabel(proposal)}
             </span>
           </div>
         </div>
@@ -2587,8 +2615,10 @@ function ProposalInspector({
               <summary>
                 <strong>{auditEvents[0]!.actorName}</strong>{" "}
                 {auditEvents[0]!.type === "proposal.review.changed"
-                  ? `set ${statusLabel(auditEvents[0]!.toStatus as ProposalStatus)}`
-                  : auditEventLabel(
+                  ? `set ${auditSoftStatusLabel(String(auditEvents[0]!.toStatus))}`
+                  : auditEvents[0]!.type === "course_check.decision.applied"
+                    ? `applied final outcome ${auditFinalOutcomeLabel(String(auditEvents[0]!.toStatus))}`
+                    : auditEventLabel(
                       auditEvents[0]!.type,
                       String(auditEvents[0]!.toStatus),
                     )}
@@ -2599,12 +2629,17 @@ function ProposalInspector({
                   <li key={audit.id}>
                     {audit.type === "proposal.review.changed" ? (
                       <>
-                        <strong>{audit.actorName}</strong> set{" "}
-                        {statusLabel(audit.toStatus as ProposalStatus)}
+                        <strong>{audit.actorName}</strong> set committee leaning to{" "}
+                        {auditSoftStatusLabel(String(audit.toStatus))}
                         {audit.committeeNoteChanged
                           ? " and updated the committee note"
                           : ""}
                         .
+                      </>
+                    ) : audit.type === "course_check.decision.applied" ? (
+                      <>
+                        <strong>{audit.actorName}</strong> applied final outcome{" "}
+                        {auditFinalOutcomeLabel(String(audit.toStatus))}.
                       </>
                     ) : (
                       <>
@@ -2619,41 +2654,37 @@ function ProposalInspector({
             </details>
           )}
         </section>
-        <p className="internal-only-note">Internal only. No speaker email is sent when this decision changes.</p>
         {isAdmin ? (
           <section className="panel final-outcome-panel" aria-label="Final program outcome">
             <h3>Final program outcome</h3>
-            <p className="internal-only-note">
-              Accepted or declined opens Course Check. This is separate from Approve / Maybe /
-              Deny above and does not send speaker email.
-            </p>
             {proposal.programOutcome ? (
               <p role="status">
-                Final outcome: <strong>{proposal.programOutcome}</strong>
+                Final outcome:{" "}
+                <strong>{programOutcomeLabel(proposal.programOutcome)}</strong>
               </p>
             ) : (
               <div className="final-outcome-actions">
                 <button
                   type="button"
                   className="btn btn-primary btn-sm"
-                  disabled={outcomeMutation.isPending}
-                  onClick={() => outcomeMutation.mutate("accepted")}
+                  disabled={finalizeBusy}
+                  onClick={() => onFinalize("accepted")}
                 >
-                  Accept via Course Check
+                  Accept
                 </button>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
-                  disabled={outcomeMutation.isPending}
-                  onClick={() => outcomeMutation.mutate("declined")}
+                  disabled={finalizeBusy}
+                  onClick={() => onFinalize("declined")}
                 >
-                  Decline via Course Check
+                  Deny
                 </button>
               </div>
             )}
-            {outcomeMutation.isError ? (
+            {finalizeError ? (
               <p className="form-message" data-tone="error" role="alert">
-                {outcomeMutation.error.message}
+                {finalizeError}
               </p>
             ) : null}
           </section>
@@ -2667,20 +2698,22 @@ function ProposalInspector({
         ) : null}
       </div>
       <div>
-        <div className="inspector-footer" aria-label="Internal decision">
-          {(["unreviewed", "approve", "maybe", "deny"] as const).map((status) => (
-            <button
-              key={status}
-              type="button"
-              className={`btn btn-${status} btn-sm`}
-              aria-pressed={proposal.status === status}
-              disabled={mutation.isPending || isRecused || proposal.status === status}
-              onClick={() => decide(status)}
-            >
-              {statusLabel(status)}
-            </button>
-          ))}
-        </div>
+        {!finalized ? (
+          <div className="inspector-footer" aria-label="Committee leaning">
+            {SOFT_DECISION_STATUSES.map((status) => (
+              <button
+                key={status}
+                type="button"
+                className={`btn btn-${status} btn-sm`}
+                aria-pressed={softStatus === status}
+                disabled={mutation.isPending || isRecused || softStatus === status}
+                onClick={() => decide(status)}
+              >
+                {softDecisionLabel(status)}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
   );

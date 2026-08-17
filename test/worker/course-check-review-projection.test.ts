@@ -168,14 +168,14 @@ describe("Course Check 14 decision review projection", () => {
     expect(created.decisionReview).toMatchObject({
       kind: "decision_review",
       phase: "proposed",
-      title: "Review 1 decline decision",
+      title: "Review 1 denial decision",
       counts: { selected: 1, ready: 1, needsAction: 0, skipped: 0 },
-      primaryActionLabel: "Decline 1 submission",
+      primaryActionLabel: "Deny 1 submission",
       preCommitBoundary: "Nothing has changed. No external communication has been sent.",
       permittedCommits: [
         {
           stageId: "apply-decision",
-          label: "Decline 1 submission",
+          label: "Deny 1 submission",
         },
       ],
       freshness: { state: "current" },
@@ -186,7 +186,7 @@ describe("Course Check 14 decision review projection", () => {
         expect.objectContaining({
           key: "decisions",
           state: "pending",
-          summary: "1 submission will be declined.",
+          summary: "1 submission will be denied.",
         }),
         expect.objectContaining({
           key: "drafts",
@@ -204,12 +204,12 @@ describe("Course Check 14 decision review projection", () => {
     const applied = await applyDecision(created, "cc14-single-decline-apply");
     expect(applied.decisionReview).toMatchObject({
       phase: "applied",
-      title: "Decline decision applied",
+      title: "Denial decision applied",
       primaryActionLabel: null,
       preCommitBoundary: null,
       permittedCommits: [],
       result: {
-        title: "Decline decision applied",
+        title: "Denial decision applied",
         decisions: { accepted: 0, declined: 1, total: 1 },
         generatedRecords: { totalCreated: 0 },
         unchangedCount: 0,
@@ -240,14 +240,14 @@ describe("Course Check 14 decision review projection", () => {
       title: "Review 2 decisions",
       counts: { selected: 2, ready: 2, needsAction: 0, skipped: 0 },
       primaryActionLabel:
-        "Accept 1 submission, decline 1 submission, and create 7 related records",
+        "Accept 1 submission, deny 1 submission, and create 7 related records",
     });
     expect(created.decisionReview?.effectGroups).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           key: "decisions",
           state: "pending",
-          summary: "1 submission will be accepted and 1 submission will be declined.",
+          summary: "1 submission will be accepted and 1 submission will be denied.",
         }),
         expect.objectContaining({
           key: "records",
@@ -264,16 +264,16 @@ describe("Course Check 14 decision review projection", () => {
     expect(placementIssue?.actions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          label: "Change session placement",
+          label: "Fix",
           kind: "deep_repair",
           target: expect.objectContaining({
             type: "route",
-            objectType: "proposal",
-            field: "sessionPlacement",
+            objectType: "session",
+            field: "placement",
           }),
-          resultingEffectSummary: expect.stringMatching(/recheck|review/i),
+          resultingEffectSummary: expect.stringMatching(/agenda|place|schedule/i),
         }),
-        expect.objectContaining({ label: "Keep session unplaced", kind: "acknowledge" }),
+        expect.objectContaining({ label: "Accept", kind: "acknowledge" }),
         expect.objectContaining({ label: "Skip this submission", kind: "exclude" }),
       ]),
     );
@@ -432,7 +432,7 @@ describe("Course Check 14 decision review projection", () => {
         expect.objectContaining({
           itemId: third.itemId,
           proposalId: third.proposalId,
-          proposedDecision: "Will decline",
+          proposedDecision: "Will deny",
           decisionReadiness: "Ready",
           batchOutcome: "Will process",
           filter: "ready",
@@ -483,7 +483,7 @@ describe("Course Check 14 decision review projection", () => {
         skippedCount: 1,
         canExecute: true,
         requiredDeferredItemIds: [blockedItem.itemId],
-        primaryActionLabel: "Decline 1 submission; leave 1 unchanged",
+        primaryActionLabel: "Deny 1 submission; leave 1 unchanged",
         skippedOutcomeLabel: "Leave decision unchanged",
       },
     });
@@ -492,7 +492,7 @@ describe("Course Check 14 decision review projection", () => {
         expect.objectContaining({
           stageId: "apply-decision",
           requiresDeferredItemIds: [blockedItem.itemId],
-          label: "Decline 1 submission; leave 1 unchanged",
+          label: "Deny 1 submission; leave 1 unchanged",
         }),
       ]),
     );

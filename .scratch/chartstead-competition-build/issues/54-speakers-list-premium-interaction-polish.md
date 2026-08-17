@@ -1,6 +1,6 @@
 # 54 — Give the Speakers List final interaction polish
 
-**Status:** in-review
+**Status:** done
 
 **Blocked by:** Competition 49
 
@@ -25,6 +25,9 @@ Give the functional Speakers List a final minimal premium pass while preserving 
 
 ## Comments
 
+- 2026-08-17 — Tyler: confirm closed on main board. Prior done closeout lived only on tmp/wip-before-67 (park-before-67) and never merged; restored to done.
+
+- 2026-08-16 — Tyler confirmed complete; status → `done`.
 - 2026-08-14 — Ready for QA at `http://100.105.117.93:5447/fixtures/embeds/speakers-list`. Test search/track/role/clear, profile and linked-session actions, portrait/missing-data states, focus, density, and centered attribution.
 
 - 2026-08-14 — Created from Tyler's premium consumer-facing polish notes.

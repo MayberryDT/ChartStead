@@ -192,6 +192,9 @@ export function AgendaWorkspace({
   const [selectedId, setSelectedId] = useState<string | null>(
     initialSessionIds[0] ?? null,
   );
+  const [highlightSessionId, setHighlightSessionId] = useState<string | null>(
+    initialSessionIds[0] ?? null,
+  );
   const [moveOpen, setMoveOpen] = useState(false);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -501,7 +504,14 @@ export function AgendaWorkspace({
 
   useEffect(() => {
     setSelectedId(initialSessionIds[0] ?? null);
+    setHighlightSessionId(initialSessionIds[0] ?? null);
   }, [initialSessionKey]);
+
+  useEffect(() => {
+    if (!highlightSessionId) return;
+    const timer = window.setTimeout(() => setHighlightSessionId(null), 2800);
+    return () => window.clearTimeout(timer);
+  }, [highlightSessionId]);
 
   useEffect(() => {
     if (initialDay && days.includes(initialDay)) {
@@ -522,6 +532,7 @@ export function AgendaWorkspace({
     const linkedSession = sessions.find((session) => session.id === firstLinkedSessionId);
     const linkedDay = linkedSession ? sessionDay(linkedSession) : null;
     if (linkedDay && linkedDay !== selectedDay) setSelectedDay(linkedDay);
+    if (linkedSession) setMoveOpen(true);
   }, [initialDay, initialSessionKey, selectedDay, sessions]);
 
   function place(sessionId: string, patch: SessionPlacementPatch) {
@@ -885,7 +896,7 @@ export function AgendaWorkspace({
                       selected?.id === session.id ? "is-selected" : ""
                     } ${session.placementStatus === "partial" ? "is-partial" : ""} ${
                       sessionHasConflict(session.id, conflicts) ? "has-conflict" : ""
-                    }`}
+                    } ${highlightSessionId === session.id ? "is-highlight" : ""}`}
                     draggable
                     onDragStart={(drag) => {
                       drag.dataTransfer.setData("text/session-id", session.id);
@@ -934,9 +945,12 @@ export function AgendaWorkspace({
                       key={key}
                       className={`agenda-grid-cell ${
                         dragOverKey === key ? "is-drop-target" : ""
-                      } ${cell.length === 0 ? "is-empty" : ""}`}
+                      } ${cell.length === 0 ? "is-empty" : ""} ${
+                        cell.length > 1 ? "is-multi" : ""
+                      }`}
                       data-drop-room={room.id}
                       data-drop-slot={slot}
+                      data-session-count={cell.length || undefined}
                       onDragOver={(drag) => {
                         drag.preventDefault();
                         setDragOverKey(key);
@@ -957,7 +971,7 @@ export function AgendaWorkspace({
                             session.trackId,
                           )} ${selected?.id === session.id ? "is-selected" : ""} ${
                             sessionHasConflict(session.id, conflicts) ? "has-conflict" : ""
-                          }`}
+                          } ${highlightSessionId === session.id ? "is-highlight" : ""}`}
                           draggable
                           onDragStart={(drag) => {
                             drag.dataTransfer.setData("text/session-id", session.id);

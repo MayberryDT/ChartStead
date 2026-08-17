@@ -1,6 +1,6 @@
 # 56 — Give the Schedule Itinerary final interaction polish
 
-**Status:** in-review
+**Status:** done
 
 **Blocked by:** Competition 51
 
@@ -25,8 +25,12 @@ Give the functional Indexed Folio itinerary its final minimal premium pass, keep
 
 ## Comments
 
+- 2026-08-17 — Tyler: confirm closed on main board. Prior done closeout lived only on tmp/wip-before-67 (park-before-67) and never merged; restored to done.
+
+- 2026-08-16 — Tyler confirmed complete; status → `done`.
 - 2026-08-14 — Started on the verified Competition 51 functional baseline in branch `ticket-51-56-itinerary-functional-polish`.
 - 2026-08-14 — Ready for QA at `http://100.105.117.93:5456/fixtures/itinerary-embed`; test centered attribution, rail/grid density, save/filter transitions, reduced motion, long titles, and narrow horizontal navigation. Evidence: `docs/qa/competition-51-56/`.
 
 - 2026-08-14 — Created from Tyler's premium consumer-facing polish notes.
+
 - 2026-08-14 — frontier-reconcile: Still blocked on: Competition 51 (in-progress).

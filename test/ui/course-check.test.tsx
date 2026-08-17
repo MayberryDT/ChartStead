@@ -632,21 +632,21 @@ describe("Course Check review workspace", () => {
       outcomes: ["accepted"] as const,
       title: "Review 1 acceptance decision",
       action: "Accept 1 submission, create 1 session, link 1 speaker record, and create 2 onboarding tasks",
-      decisionText: "1 accepted · 0 declined",
+      decisionText: "1 accepted · 0 denied",
     },
     {
       name: "declined",
       outcomes: ["declined"] as const,
-      title: "Review 1 decline decision",
-      action: "Decline 1 submission",
-      decisionText: "0 accepted · 1 declined",
+      title: "Review 1 denial decision",
+      action: "Deny 1 submission",
+      decisionText: "0 accepted · 1 denied",
     },
     {
       name: "mixed",
       outcomes: ["accepted", "declined"] as const,
       title: "Review 2 decisions",
-      action: "Accept 1 submission, decline 1 submission, create 1 session, link 1 speaker record, and create 2 onboarding tasks",
-      decisionText: "1 accepted · 1 declined",
+      action: "Accept 1 submission, deny 1 submission, create 1 session, link 1 speaker record, and create 2 onboarding tasks",
+      decisionText: "1 accepted · 1 denied",
     },
   ])("uses the compact clean fast path for a $name decision batch", async ({ outcomes, title, action, decisionText }) => {
     const speaker = {
@@ -722,7 +722,7 @@ describe("Course Check review workspace", () => {
         issues: [],
         effectGroups: proposedDecisionReview.effectGroups.map((group) =>
           group.key === "decisions"
-            ? { ...group, count: items.length, summary: `${accepted} accepted and ${declined} declined.` }
+            ? { ...group, count: items.length, summary: `${accepted} accepted and ${declined} denied.` }
             : group.key === "records"
               ? { ...group, count: accepted ? 5 : 0 }
               : group,
@@ -1097,21 +1097,25 @@ describe("Course Check review workspace", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(projectedPlan));
     renderCourseCheck();
 
-    const deepRepair = await screen.findByRole("link", { name: "Change session placement" });
+    const deepRepair = await screen.findByRole("link", { name: "Fix" });
     expect(deepRepair).toHaveAttribute(
       "href",
       expect.stringContaining("/submissions/SUB-PODS0001?field=sessionPlacement"),
     );
     expect(screen.queryByRole("button", { name: /fix|resolve|manage/i })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Keep session unplaced" }));
+    await user.click(
+      document.querySelector(
+        '[data-issue-action-id="warning-unplaced:acknowledge"]',
+      ) as HTMLButtonElement,
+    );
     const acknowledgement = screen.getByText(
       "Acknowledged: The decision can proceed with placement still pending.",
     );
     expect(acknowledgement).toBeVisible();
     expect(acknowledgement).toHaveFocus();
 
-    await user.click(screen.getByRole("button", { name: "Skip this submission" }));
+    await user.click(screen.getByRole("button", { name: "Skip" }));
     expect(screen.getByRole("checkbox", { name: /SUB-PODS0001/ })).toBeChecked();
     expect(screen.getByPlaceholderText("Why defer these items?")).toHaveFocus();
   });

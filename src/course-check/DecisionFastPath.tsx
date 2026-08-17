@@ -70,7 +70,7 @@ export function decisionFastPathActionLabel(counts: DecisionFastPathCounts) {
   }
   if (counts.declined > 0) {
     clauses.push(
-      `${clauses.length === 0 ? "Decline" : "decline"} ${counts.declined} ${plural(
+      `${clauses.length === 0 ? "Deny" : "deny"} ${counts.declined} ${plural(
         counts.declined,
         "submission",
       )}`,
@@ -188,7 +188,6 @@ export function DecisionFastPath({
         aria-describedby={result ? undefined : "decision-fast-path-boundary"}
       >
         <header>
-          <p className="eyebrow">Course Check</p>
           <h1 id="decision-fast-path-title" ref={titleRef} tabIndex={-1}>
             {review.title}
           </h1>
@@ -220,7 +219,7 @@ export function DecisionFastPath({
           <ul className="course-check-fast-path-counts">
             <li>
               <strong>Decisions</strong>
-              <span>{counts.accepted} accepted · {counts.declined} declined</span>
+              <span>{counts.accepted} accepted · {counts.declined} denied</span>
             </li>
             <li>
               <strong>Sessions</strong>

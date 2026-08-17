@@ -161,6 +161,20 @@ function speakerSortKey(speaker: PublicProgramSpeaker): string {
   return `${last.toLocaleLowerCase()} ${speaker.name.toLocaleLowerCase()}`;
 }
 
+function sessionSpeakerSubtitle(
+  sessionTitle: string,
+  sessionSpeaker: PublicProgramSession["speakers"][number],
+  fullSpeaker: PublicProgramSpeaker | null | undefined,
+): string {
+  const role = fullSpeaker?.title ?? sessionSpeaker.title;
+  const company = fullSpeaker?.company ?? sessionSpeaker.company;
+  const roleLooksLikeSession =
+    Boolean(role) &&
+    (role === sessionTitle ||
+      sessionTitle.startsWith(role!.slice(0, Math.min(24, role!.length))));
+  return [roleLooksLikeSession ? null : role, company].filter(Boolean).join(" · ") || "Speaker";
+}
+
 function speakerSessionMeta(session: PublicProgramSession): string {
   return `${dateTimeLabel(session)} · ${roomLabel(session)}`;
 }
@@ -476,10 +490,12 @@ export function PublicProgramRenderer({
     >
       <header className="program-header">
         <div className="program-header-top">
-          <div className="program-brand-inline">
-            <img src={markOnLightUrl} width="22" height="22" alt="" />
-            <span>ChartStead</span>
-          </div>
+          {currentWidget !== "speakers" ? (
+            <div className="program-brand-inline">
+              <img src={markOnLightUrl} width="28" height="28" alt="" />
+              <span>ChartStead</span>
+            </div>
+          ) : null}
           {currentWidget !== "sessions" && currentWidget !== "speakers" ? <p className="eyebrow">{widgetLabel(currentWidget)}</p> : null}
         </div>
         <div className="program-title-line">
@@ -501,7 +517,9 @@ export function PublicProgramRenderer({
           </label>
           <AppSelect label="Track" value={filters.trackId ?? ""} options={[{ value: "", label: "All Tracks" }, ...data.event.tracks.map((track) => ({ value: track.id, label: track.name }))]} onValueChange={(value) => setFilters((current) => ({ ...current, trackId: value || undefined }))} />
           <AppSelect label="Role" value={filters.format ?? ""} options={[{ value: "", label: "All Roles" }, ...speakerRoles.map((role) => ({ value: role, label: role }))]} onValueChange={(value) => setFilters((current) => ({ ...current, format: value || undefined }))} />
-          <div className="speaker-directory-filter-actions"><Button type="button" aria-label="Clear filters" onClick={() => setFilters(() => ({}))}><RotateCcw aria-hidden="true" />Clear filters</Button></div>
+          <div className="speaker-directory-filter-actions">
+            <Button type="button" aria-label="Clear filters" onClick={() => setFilters(() => ({}))}><RotateCcw aria-hidden="true" />Clear filters</Button>
+          </div>
         </section>
       ) : <section className="program-filters" aria-label="Program filters">
         <label className="program-search-field">
@@ -539,22 +557,29 @@ export function PublicProgramRenderer({
         {currentWidget === "sessions" ? <Button type="button" className="sessions-my-schedule" aria-label={`My schedule, ${itinerarySessionIds.size} saved ${countNoun(itinerarySessionIds.size, "session", "sessions")}`} aria-expanded={scheduleOpen} onClick={() => { selectSession(null); setScheduleOpen((open) => !open); }}><Bookmark aria-hidden="true" />My schedule <span>{itinerarySessionIds.size}</span></Button> : null}
       </section>}
 
-      {currentWidget !== "speakers" ? <p className={`program-counts${currentWidget === "sessions" ? " sessions-result-count" : ""}`} role="status" aria-live="polite" data-testid="program-result-count">
-        {sessions.length === data.sessions.length ? (
-          <>
-            <strong>{sessions.length}</strong>{" "}
-            {countNoun(sessions.length, "session", "sessions")}
-          </>
-        ) : (
-          <>
-            Showing <strong>{sessions.length}</strong> of {data.sessions.length}{" "}
-            {countNoun(data.sessions.length, "session", "sessions")}
-          </>
-        )}
-        {" · "}
-        <strong>{speakers.length}</strong>{" "}
-        {countNoun(speakers.length, "speaker", "speakers")}
-      </p> : null}
+      {currentWidget !== "speakers" ? (
+        <p
+          className={`program-counts${currentWidget === "program" ? " sr-only" : ""}${currentWidget === "sessions" ? " sessions-result-count" : ""}`}
+          role="status"
+          aria-live="polite"
+          data-testid="program-result-count"
+        >
+          {sessions.length === data.sessions.length ? (
+            <>
+              <strong>{sessions.length}</strong>{" "}
+              {countNoun(sessions.length, "session", "sessions")}
+            </>
+          ) : (
+            <>
+              Showing <strong>{sessions.length}</strong> of {data.sessions.length}{" "}
+              {countNoun(data.sessions.length, "session", "sessions")}
+            </>
+          )}
+          {" · "}
+          <strong>{speakers.length}</strong>{" "}
+          {countNoun(speakers.length, "speaker", "speakers")}
+        </p>
+      ) : null}
 
       {currentWidget === "program" ? (
         <FullProgramLayout
@@ -787,7 +812,7 @@ function SessionInspector({ session, data, fields, saved, itineraryPending = fal
     {fields.description && session.description ? <p>{session.description}</p> : null}
     {fields.speakers && session.speakers.length ? <section className="session-inspector-speakers"><h3>Speakers</h3><ul>{session.speakers.map((sessionSpeaker, index) => {
       const speaker = speakers[index];
-      return <li key={sessionSpeaker.id}>{speaker ? <SpeakerAvatar speaker={speaker} /> : <span className="session-speaker-fallback" aria-hidden="true">{sessionSpeakerInitials(sessionSpeaker.name)}</span>}<span><strong>{sessionSpeaker.name}</strong><small>{[sessionSpeaker.title, sessionSpeaker.company].filter(Boolean).join(" · ")}</small></span></li>;
+      return <li key={sessionSpeaker.id}>{speaker ? <SpeakerAvatar speaker={speaker} /> : <span className="session-speaker-fallback" aria-hidden="true">{sessionSpeakerInitials(sessionSpeaker.name)}</span>}<span><strong>{sessionSpeaker.name}</strong><small>{sessionSpeakerSubtitle(session.title, sessionSpeaker, speaker)}</small></span></li>;
     })}</ul></section> : null}
     {onToggleSaved ? <Button type="button" className="session-schedule-action" disabled={itineraryPending} aria-pressed={saved} aria-label={`${saved ? "Remove" : "Add"} ${session.title} ${saved ? "from" : "to"} my schedule`} onClick={onToggleSaved}>{saved ? "Remove from my schedule" : "Add to my schedule"}</Button> : null}
     <AddToCalendarMenu eventId={data.event.id} session={session} revisionId={data.revision.isCurrent ? undefined : data.revision.id} />
@@ -962,6 +987,7 @@ function FullProgramLayout({
                           selected={selectedId === session.id}
                           expanded={expandedSessionIds.has(session.id)}
                           fields={fields}
+                          speakerDirectory={data.speakers}
                           onSelect={() => {
                             if (selectedId === session.id) {
                               onSelectSession(null);
@@ -1101,16 +1127,15 @@ function FullProgramLayout({
                 ) : null}
 
                 {fields.speakers && selected.speakers.length > 0 ? (
-                  <section className="popup-speakers-section">
+                  <section className="session-inspector-speakers">
                     <h3>Speakers</h3>
-                    <ul className="popup-speakers-list">
+                    <ul>
                       {selected.speakers.map((sessionSpeaker) => {
                         const fullSpeaker = data.speakers.find((s) => s.id === sessionSpeaker.id || s.name === sessionSpeaker.name);
                         return (
                           <li key={sessionSpeaker.id}>
                             <button
                               type="button"
-                              className="popup-speaker-btn"
                               onClick={() => {
                                 onSelectSession(null);
                                 onSelectSpeaker(fullSpeaker ? fullSpeaker.id : sessionSpeaker.id);
@@ -1125,7 +1150,7 @@ function FullProgramLayout({
                               )}
                               <span>
                                 <strong>{sessionSpeaker.name}</strong>
-                                <small>{[sessionSpeaker.title, sessionSpeaker.company].filter(Boolean).join(" · ") || "Speaker"}</small>
+                                <small>{sessionSpeakerSubtitle(selected.title, sessionSpeaker, fullSpeaker)}</small>
                               </span>
                             </button>
                           </li>
@@ -1175,6 +1200,7 @@ function SessionCompactCard({
   selected,
   expanded,
   fields,
+  speakerDirectory,
   onSelect,
   onToggleDescription,
 }: {
@@ -1182,6 +1208,7 @@ function SessionCompactCard({
   selected: boolean;
   expanded: boolean;
   fields: PublicEmbedFieldVisibility;
+  speakerDirectory: PublicProgramSpeaker[];
   onSelect: () => void;
   onToggleDescription: () => void;
 }) {
@@ -1218,19 +1245,31 @@ function SessionCompactCard({
       </h4>
 
       <div className="program-compact-meta">
-        <span className="program-compact-room">{fields.room ? roomLabel(session) : " "}</span>
         {fields.speakers && session.speakers.length > 0 ? (
           <ul className="program-compact-speaker-list" aria-label="Session speakers">
-            {session.speakers.map((speaker) => (
-              <li key={speaker.id}>
-                <span className="program-compact-speaker">{speaker.name}</span>
-                <span className="sr-only">{speakerDetails(speaker)}</span>
-              </li>
-            ))}
+            {session.speakers.map((speaker) => {
+              const fullSpeaker = speakerDirectory.find((s) => s.id === speaker.id || s.name === speaker.name);
+              return (
+                <li key={speaker.id} className="program-compact-speaker-row">
+                  {fields.headshots ? (
+                    fullSpeaker ? (
+                      <SpeakerAvatar speaker={fullSpeaker} compact />
+                    ) : (
+                      <span className="program-compact-speaker-fallback" aria-hidden="true">
+                        {sessionSpeakerInitials(speaker.name)}
+                      </span>
+                    )
+                  ) : null}
+                  <span className="program-compact-speaker">{speaker.name}</span>
+                  <span className="sr-only">{speakerDetails(speaker)}</span>
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <span className="program-compact-speaker-placeholder">&nbsp;</span>
         )}
+        {fields.room ? <span className="program-compact-room">{roomLabel(session)}</span> : null}
       </div>
 
       {/* Hidden elements for test accessibility */}
@@ -1770,21 +1809,58 @@ function SpeakerDirectoryButton({
   interactive?: boolean;
   onSelect: () => void;
 }) {
+  const reduceMotion = useReducedMotion();
   const content = (
     <>
       {fields.headshots ? <SpeakerAvatar speaker={speaker} /> : null}
       <span className="program-speaker-list-copy">
         <span className="program-speaker-list-heading">
           <strong>{speaker.name}</strong>
-          {!compact && interactive ? <span className="program-speaker-view-link">View profile ›</span> : null}
+          {!compact && interactive ? <span>View profile&nbsp; ›</span> : null}
         </span>
-        <span className="program-speaker-title">{speaker.title || "Professional details pending"}</span>
-        {speaker.company ? <span className="program-speaker-company">{speaker.company}</span> : null}
+        <span>{speaker.title || "Professional details pending"}</span>
+        <b>{speaker.company || "Organization pending"}</b>
+        {sessions.length > 0 ? (
+          <span className={`program-speaker-session-links ${trackClass(sessions[0]!.trackId)}`}>
+            <span className="program-speaker-session-links-text">
+              {compact ? (
+                <span>
+                  {sessions[0]!.title}
+                  {sessions.length > 1 ? ` +${sessions.length - 1} more` : ""}
+                </span>
+              ) : (
+                sessions.map((session, index) => (
+                  <span key={session.id}>
+                    {index > 0 ? <i aria-hidden="true">•</i> : null}
+                    {session.title}
+                  </span>
+                ))
+              )}
+            </span>
+          </span>
+        ) : null}
       </span>
     </>
   );
   if (!interactive) {
-    return <article className="program-speaker-list-entry">{content}</article>;
+    return (
+      <motion.article
+        className="program-speaker-list-entry"
+        data-motion-surface="speaker-card"
+        whileHover={
+          reduceMotion
+            ? undefined
+            : {
+                y: -4,
+                scale: 1.012,
+                boxShadow: "0 14px 30px rgba(23, 73, 130, 0.16), inset 4px 0 0 #2f5d98",
+              }
+        }
+        transition={premiumSpring}
+      >
+        {content}
+      </motion.article>
+    );
   }
   return (
     <Button
@@ -1809,17 +1885,18 @@ function SpeakerGalleryButton({
   fields: PublicEmbedFieldVisibility;
   onSelect: () => void;
 }) {
+  const subtitle = speaker.company?.trim() || (speaker.title?.trim() && speaker.title.trim().length < 42 ? speaker.title.trim() : "") || "Speaker";
   return (
     <button
       type="button"
-      className="program-speaker-gallery-card"
+      className={`program-speaker-gallery-card${selected ? " is-selected" : ""}`}
       aria-pressed={selected}
       onClick={onSelect}
     >
       {fields.headshots ? <SpeakerAvatar speaker={speaker} large /> : null}
       <span>
         <strong>{speaker.name}</strong>
-        <span>{speakerSubtitle(speaker)}</span>
+        <span>{subtitle}</span>
       </span>
     </button>
   );
@@ -1828,12 +1905,19 @@ function SpeakerGalleryButton({
 function SpeakerAvatar({
   speaker,
   large = false,
+  compact = false,
 }: {
   speaker: PublicProgramSpeaker;
   large?: boolean;
+  compact?: boolean;
 }) {
+  const className = large
+    ? "program-speaker-avatar is-large"
+    : compact
+      ? "program-speaker-avatar is-compact"
+      : "program-speaker-avatar";
   return (
-    <span className={large ? "program-speaker-avatar is-large" : "program-speaker-avatar"}>
+    <span className={className}>
       {speaker.headshotUrl ? <img src={speaker.headshotUrl} alt={`Portrait of ${speaker.name}`} /> : <span aria-hidden="true">{speakerInitials(speaker)}</span>}
     </span>
   );

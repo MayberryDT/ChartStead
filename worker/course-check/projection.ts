@@ -233,7 +233,7 @@ function decisionSummary(
     clauses.push(
       `${declined} ${plural(declined, "submission")} ${
         phase === "applied" ? (declined === 1 ? "was" : "were") : "will be"
-      } declined`,
+      } denied`,
     );
   }
   if (clauses.length === 0) {
@@ -254,7 +254,7 @@ function decisionActionLabel(
     clauses.push(`Accept ${accepted} ${plural(accepted, "submission")}`);
   }
   if (declined > 0) {
-    clauses.push(`decline ${declined} ${plural(declined, "submission")}`);
+    clauses.push(`deny ${declined} ${plural(declined, "submission")}`);
   }
   if (recordCount > 0) {
     clauses.push(
@@ -276,7 +276,7 @@ function decisionReviewTitle(
       return `Acceptance ${plural(accepted, "decision")} applied`;
     }
     if (declined > 0 && accepted === 0) {
-      return `Decline ${plural(declined, "decision")} applied`;
+      return `Denial ${plural(declined, "decision")} applied`;
     }
     return "Decision results";
   }
@@ -284,7 +284,7 @@ function decisionReviewTitle(
     return `Review ${selected} acceptance ${plural(selected, "decision")}`;
   }
   if (declined === selected) {
-    return `Review ${selected} decline ${plural(selected, "decision")}`;
+    return `Review ${selected} denial ${plural(selected, "decision")}`;
   }
   return `Review ${selected} decisions`;
 }
@@ -518,8 +518,8 @@ function itemProjection(
           ? "Accepted"
           : "Will accept"
         : applied
-          ? "Declined"
-          : "Will decline",
+          ? "Denied"
+          : "Will deny",
     speakerContext:
       speakers.length === 0
         ? "No speaker records will be created"

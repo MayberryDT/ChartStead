@@ -37,8 +37,15 @@ export function toPortalFacingDeliveryStatus(
 
 export function auditEventLabel(type: string, toStatus: string): string {
   switch (type) {
-    case "course_check.decision.applied":
-      return `applied final outcome ${toStatus}`;
+    case "course_check.decision.applied": {
+      const outcome =
+        toStatus === "accepted"
+          ? "Accepted"
+          : toStatus === "declined"
+            ? "Denied"
+            : toStatus;
+      return `applied final outcome ${outcome}`;
+    }
     case "course_check.communication.drafts_created":
       return `froze communication drafts (${toStatus})`;
     case "course_check.communication.send_started":
