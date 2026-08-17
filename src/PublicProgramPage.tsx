@@ -4,7 +4,6 @@ import { Button } from "@base-ui/react/button";
 
 import type { PublicEmbedWidget, PublicProgramFilters } from "../shared/events";
 import { isPublicEmbedWidget } from "../shared/public-program";
-import markOnLightUrl from "../design/assets/brand/chartstead-mark-on-light.png";
 import { ApiError, fetchPublicEmbed, fetchPublicProgram } from "./api";
 import { PublicProgramRenderer } from "./PublicProgramRenderer";
 import { demoSpeakerGalleryFixture } from "./demoSpeakerGalleryFixture";
@@ -96,8 +95,8 @@ export function PublicProgramPage({
 
   const updateProgramSearch = (
     nextFilters: PublicProgramFilters,
-    nextSessionId: string | null,
-    nextSpeakerId = selectedSpeakerId,
+    nextSessionId: string | null = null,
+    nextSpeakerId: string | null = null,
     nextItinerarySessionIds = itinerary.data,
   ) => {
     const nextSearch = programSearch(
@@ -114,6 +113,8 @@ export function PublicProgramPage({
         to: "/e/$eventId/program/embed",
         params: { eventId },
         search: nextSearch,
+        resetScroll: false,
+        replace: true,
       });
       return;
     }
@@ -121,6 +122,8 @@ export function PublicProgramPage({
       to: "/e/$eventId/program",
       params: { eventId },
       search: nextSearch,
+      resetScroll: false,
+      replace: true,
     });
   };
 
@@ -178,40 +181,37 @@ export function PublicProgramPage({
 
   return (
     <main className={`program-shell mode-${mode}`}>
-      {mode === "page" ? (
-        <div className="program-brand">
-          <img src={markOnLightUrl} width="40" height="40" alt="" />
-        </div>
-      ) : null}
       <PublicProgramRenderer
         data={useSignalRailFixture ? demoSpeakerGalleryFixture : program.data}
         mode={mode}
         widget={surface}
         filters={filters}
-        onFiltersChange={(nextFilters) => updateProgramSearch(nextFilters, null)}
+        onFiltersChange={(nextFilters) => updateProgramSearch(nextFilters, null, null)}
         selectedSessionId={selectedSessionId}
-        onSelectSession={(sessionId) => updateProgramSearch(filters, sessionId)}
+        onSelectSession={(sessionId) => updateProgramSearch(filters, sessionId, null)}
         selectedSpeakerId={selectedSpeakerId}
-        onSelectSpeaker={(speakerId) => updateProgramSearch(filters, selectedSessionId, speakerId)}
+        onSelectSpeaker={(speakerId) => updateProgramSearch(filters, null, speakerId)}
         itinerarySessionIds={itinerary.data}
         onItinerarySessionIdsChange={(sessionIds) => itineraryMutation.mutate(sessionIds)}
         itineraryPending={itineraryMutation.isPending}
         itineraryError={itineraryMutation.isError ? "We couldn't save that itinerary change." : null}
       />
-      {surface !== "itinerary" ? <footer className="program-footer">
-        <p>Powered by ChartStead</p>
-        {mode === "page" ? (
-          <p>
-            <Link
-              to="/e/$eventId/program/embed"
-              params={{ eventId }}
-              search={programSearch(revisionId, filters, selectedSessionId, surface, selectedSpeakerId, itinerary.data, fixture)}
-            >
-              Embed view
-            </Link>
-          </p>
-        ) : null}
-      </footer> : null}
+      {surface !== "itinerary" ? (
+        <footer className="program-footer">
+          <p>Powered by ChartStead</p>
+          {mode === "page" ? (
+            <p>
+              <Link
+                to="/e/$eventId/program/embed"
+                params={{ eventId }}
+                search={programSearch(revisionId, filters, selectedSessionId, surface, selectedSpeakerId, itinerary.data, fixture)}
+              >
+                Embed view
+              </Link>
+            </p>
+          ) : null}
+        </footer>
+      ) : null}
     </main>
   );
 }
@@ -284,11 +284,6 @@ export function PublicManagedEmbedPage() {
       />
       <footer className="program-footer">
         <p>Powered by ChartStead</p>
-        {embed.data.config.revisionId ? (
-          <p>Revision-pinned embed</p>
-        ) : (
-          <p>Updates with the current published revision</p>
-        )}
       </footer>
     </main>
   );
