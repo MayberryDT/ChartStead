@@ -6,7 +6,7 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 
 import type {
@@ -15,7 +15,7 @@ import type {
   OrganizerCfpFormSummary,
   PublishedCfpForm,
 } from "../shared/events";
-import { validateCfpDefinition } from "../shared/cfp-definition";
+import { getWelcomeContent, validateCfpDefinition } from "../shared/cfp-definition";
 import { fetchOrganizerForm, fetchOrganizerForms } from "./api";
 import { AppSelect } from "./AppSelect";
 import { CfpRuntime } from "./CfpRuntime";
@@ -246,18 +246,22 @@ function FormInspector({
   const detail = useQuery({
     queryKey: ["form", eventId, formId],
     queryFn: () => fetchOrganizerForm(eventId, formId),
-    placeholderData: keepPreviousData,
     staleTime: 60_000,
   });
-  const form = detail.data?.form;
+  // Never treat another form's cached/placeholder payload as the current selection.
+  const form = detail.data?.form?.id === formId ? detail.data.form : undefined;
   const preview = form ? previewFormFromOrganizer(form) : null;
-  const showingPrevious = detail.isFetching && detail.isPlaceholderData;
+  const welcome = form
+    ? getWelcomeContent(form.publishedDefinition ?? form.draft)
+    : null;
+  const loading = !form && (detail.isPending || detail.isFetching);
 
   return (
     <div
       className="inspector-content"
-      aria-busy={detail.isFetching || undefined}
-      data-preview-pending={showingPrevious ? "true" : undefined}
+      aria-busy={loading || undefined}
+      data-preview-form-id={form?.id ?? undefined}
+      data-preview-pending={loading ? "true" : undefined}
     >
       {detail.isError && !form ? (
         <p className="form-message" data-tone="error" role="alert">
@@ -265,23 +269,36 @@ function FormInspector({
         </p>
       ) : null}
       {form ? (
-        <div className="inspector-body forms-inspector-body">
-          {preview ? (
-            <CfpRuntime
-              key={form.id}
-              eventId={eventId}
-              form={preview}
-              mode="preview"
-              themeAccent={detail.data?.event.themeAccent}
-            />
-          ) : (
-            <p className="empty-state padded">
-              This draft cannot preview until required fields are valid.
-            </p>
-          )}
-        </div>
-      ) : detail.isPending ? (
-        <p className="empty-state padded">Loading form…</p>
+        <>
+          <div className="inspector-header forms-preview-header">
+            <div className="inspector-kicker">Preview</div>
+            <h2 data-testid="forms-preview-name">{form.name}</h2>
+            {welcome?.title ? (
+              <p className="forms-preview-welcome" data-testid="forms-preview-welcome">
+                {welcome.title}
+              </p>
+            ) : null}
+          </div>
+          <div className="inspector-body forms-inspector-body">
+            {preview ? (
+              <CfpRuntime
+                key={formId}
+                eventId={eventId}
+                form={preview}
+                mode="preview"
+                themeAccent={detail.data?.event.themeAccent}
+              />
+            ) : (
+              <p className="empty-state padded" data-testid="forms-preview-invalid">
+                This draft cannot preview until required fields are valid.
+              </p>
+            )}
+          </div>
+        </>
+      ) : loading ? (
+        <p className="empty-state padded" data-testid="forms-preview-loading">
+          Loading form…
+        </p>
       ) : null}
     </div>
   );
@@ -672,7 +689,7 @@ export function FormsWorkspace({
             aria-label="Form preview"
           >
             {selectedId ? (
-              <FormInspector eventId={eventId} formId={selectedId} />
+              <FormInspector key={selectedId} eventId={eventId} formId={selectedId} />
             ) : (
               <div className="inspector-body">
                 <p className="empty-state padded">Select a form to preview it.</p>
