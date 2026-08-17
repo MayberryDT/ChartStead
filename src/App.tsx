@@ -952,7 +952,7 @@ const PROPOSAL_SORTS: ProposalSort[] = [
 ];
 
 function parseQueueSearch(search: Record<string, unknown>): ProposalQueueState {
-  const status = ["unreviewed", "approve", "maybe", "deny", "all"].includes(
+  const status = ["unreviewed", "approve", "maybe", "deny", "locked", "all"].includes(
     String(search.status ?? ""),
   )
     ? (search.status as ProposalQueueState["status"])
