@@ -14,7 +14,6 @@ import {
 import type {
   FilesLibraryItem,
   OnboardingBoardSpeaker,
-  OnboardingBulkReminderResult,
   OnboardingReminderDraft,
 } from "../shared/events";
 import { formatFileSize } from "../shared/onboarding-tasks";
@@ -43,7 +42,17 @@ import {
   type SpeakerDirectoryFilter,
 } from "./SpeakerDirectory";
 import { AppSelect } from "./AppSelect";
+import { createClientId } from "./id";
 import { SpeakerCsvImport } from "./SpeakerCsvImport";
+
+/** Server rejects larger batches; keep the toolbar from offering an impossible Prepare. */
+const BULK_REMINDER_SPEAKER_LIMIT = 100;
+
+function reminderErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return fallback;
+}
 
 function formatWhen(value: string | null | undefined): string {
   if (!value) return "—";
@@ -642,8 +651,6 @@ export function OnboardingWorkspace({
   const [taskSpeakerIds, setTaskSpeakerIds] = useState<Set<string>>(new Set());
   const [reminderSpeakerIds, setReminderSpeakerIds] = useState<Set<string>>(new Set());
   const [bulkReminderMode, setBulkReminderMode] = useState<"draft" | "send">("draft");
-  const [bulkReminderResult, setBulkReminderResult] =
-    useState<OnboardingBulkReminderResult | null>(null);
   const [draft, setDraft] = useState<OnboardingReminderDraft | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<"success" | "error" | null>(null);
@@ -860,7 +867,7 @@ export function OnboardingWorkspace({
         completionRequirement: taskRequirement,
         readinessFlag: activePreset.flag || null,
         dueAt: taskDueAt ? new Date(taskDueAt).toISOString() : null,
-        idempotencyKey: `onboarding-task-${crypto.randomUUID()}`,
+        idempotencyKey: `onboarding-task-${createClientId()}`,
       });
     },
     onSuccess: async (result) => {
@@ -879,26 +886,31 @@ export function OnboardingWorkspace({
   });
 
   const prepareBulkReminder = useMutation({
-    mutationFn: () =>
-      prepareBulkOnboardingReminders(eventId, {
-        speakerIds: [...reminderSpeakerIds],
+    mutationFn: () => {
+      const speakerIds = [...reminderSpeakerIds];
+      if (speakerIds.length > BULK_REMINDER_SPEAKER_LIMIT) {
+        throw new ApiError(
+          `Choose ${BULK_REMINDER_SPEAKER_LIMIT} speakers or fewer per reminder operation. You have ${speakerIds.length} selected.`,
+          400,
+        );
+      }
+      return prepareBulkOnboardingReminders(eventId, {
+        speakerIds,
         mode: bulkReminderMode,
-        idempotencyKey: `bulk-onboarding-reminder-${crypto.randomUUID()}`,
-      }),
+        idempotencyKey: `bulk-onboarding-reminder-${createClientId()}`,
+      });
+    },
     onSuccess: async (result) => {
-      setBulkReminderResult(result);
       setReminderSpeakerIds(new Set());
+      const verb = bulkReminderMode === "send" ? "queued" : "drafted";
       flash(
-        `Bulk reminders: ${result.counts.prepared} prepared, ${result.counts.queued} queued, ${result.counts.failed} failed, ${result.counts.skipped} skipped.`,
+        `Task reminders ${verb}: ${result.counts.prepared} prepared, ${result.counts.queued} queued, ${result.counts.failed} failed, ${result.counts.skipped} skipped. Open a speaker → History to review.`,
         result.counts.failed > 0 ? "error" : "success",
       );
       await refresh();
     },
     onError: (error) => {
-      flash(
-        error instanceof ApiError ? error.message : "Could not prepare bulk reminders.",
-        "error",
-      );
+      flash(reminderErrorMessage(error, "Could not prepare bulk reminders."), "error");
     },
   });
 
@@ -931,7 +943,6 @@ export function OnboardingWorkspace({
   const runDueReminders = useMutation({
     mutationFn: () => processDueOnboardingReminders(eventId),
     onSuccess: async (result) => {
-      setBulkReminderResult(result);
       flash(
         `Due reminder policy processed ${result.counts.selected} speaker${result.counts.selected === 1 ? "" : "s"}: ${result.counts.prepared} draft(s), ${result.counts.queued} queued.`,
       );
@@ -1025,9 +1036,26 @@ export function OnboardingWorkspace({
     (speaker) => speaker.speakerId,
   );
   const outstandingKey = outstandingSpeakerIds.join(",");
+  const selectableOutstandingIds = outstandingSpeakerIds.slice(
+    0,
+    BULK_REMINDER_SPEAKER_LIMIT,
+  );
   const allOutstandingSelected =
-    outstandingSpeakerIds.length > 0 &&
-    outstandingSpeakerIds.every((speakerId) => reminderSpeakerIds.has(speakerId));
+    selectableOutstandingIds.length > 0 &&
+    selectableOutstandingIds.every((speakerId) => reminderSpeakerIds.has(speakerId)) &&
+    reminderSpeakerIds.size === selectableOutstandingIds.length;
+  const overBulkLimit = selectedCount > BULK_REMINDER_SPEAKER_LIMIT;
+
+  function selectOutstandingSpeakers() {
+    const next = new Set(selectableOutstandingIds);
+    setReminderSpeakerIds(next);
+    if (outstandingSpeakerIds.length > BULK_REMINDER_SPEAKER_LIMIT) {
+      flash(
+        `Selected the first ${BULK_REMINDER_SPEAKER_LIMIT} of ${outstandingSpeakerIds.length} speakers with open tasks (batch limit). Clear and pick another set for the rest.`,
+        "error",
+      );
+    }
+  }
 
   const batchChrome = (
     <div
@@ -1036,7 +1064,11 @@ export function OnboardingWorkspace({
       aria-label="Bulk task reminders"
     >
       <strong className="topbar-batch-count">
-        {selectedCount === 0 ? "None selected" : `${selectedCount} selected`}
+        {selectedCount === 0
+          ? "None selected"
+          : overBulkLimit
+            ? `${selectedCount} selected · max ${BULK_REMINDER_SPEAKER_LIMIT}`
+            : `${selectedCount} selected`}
       </strong>
       <AppSelect
         label="Action"
@@ -1053,22 +1085,25 @@ export function OnboardingWorkspace({
       <button
         type="button"
         className="btn btn-primary btn-sm"
-        disabled={selectedCount === 0 || prepareBulkReminder.isPending}
+        disabled={selectedCount === 0 || overBulkLimit || prepareBulkReminder.isPending}
+        title={
+          overBulkLimit
+            ? `Choose ${BULK_REMINDER_SPEAKER_LIMIT} speakers or fewer per reminder operation.`
+            : undefined
+        }
         onClick={() => prepareBulkReminder.mutate()}
       >
         {prepareBulkReminder.isPending
           ? "Preparing…"
-          : `Prepare ${selectedCount || ""}`.trim()}
+          : bulkReminderMode === "send"
+            ? "Queue sends"
+            : "Prepare drafts"}
       </button>
       <button
         type="button"
         className="btn btn-secondary btn-sm"
-        disabled={filteredSpeakersWithOutstanding.length === 0 || allOutstandingSelected}
-        onClick={() =>
-          setReminderSpeakerIds(
-            new Set(filteredSpeakersWithOutstanding.map((speaker) => speaker.speakerId)),
-          )
-        }
+        disabled={selectableOutstandingIds.length === 0 || allOutstandingSelected}
+        onClick={selectOutstandingSpeakers}
       >
         Select outstanding
       </button>
@@ -1104,70 +1139,9 @@ export function OnboardingWorkspace({
 
   useEffect(() => {
     if (!onShellToolsChange) return undefined;
-    onShellToolsChange(
-      <div className="topbar-tools-inner">
-        <SpeakerDirectoryControls
-          search={speakerSearch}
-          filter={speakerFilter}
-          visibleCount={filteredSpeakers.length}
-          totalCount={speakers.length}
-          addOpen={addingSpeaker}
-          importOpen={csvImportOpen}
-          onSearchChange={setSpeakerSearch}
-          onFilterChange={setSpeakerFilter}
-          onToggleAdd={toggleAddingSpeaker}
-          onToggleImport={toggleCsvImport}
-        />
-        <span className="topbar-tools-spacer" aria-hidden="true" />
-        <div
-          className={`topbar-batch${selectedCount === 0 ? " topbar-batch-idle" : ""}`}
-          role="region"
-          aria-label="Bulk task reminders"
-        >
-          <strong className="topbar-batch-count">
-            {selectedCount === 0 ? "None selected" : `${selectedCount} selected`}
-          </strong>
-          <AppSelect
-            label="Action"
-            ariaLabel="Reminder action"
-            value={bulkReminderMode}
-            options={[
-              { value: "draft", label: "Prepare drafts for review" },
-              { value: "send", label: "Queue sends now" },
-            ]}
-            onValueChange={(value) =>
-              setBulkReminderMode(value === "send" ? "send" : "draft")
-            }
-          />
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            disabled={selectedCount === 0 || prepareBulkReminder.isPending}
-            onClick={() => prepareBulkReminder.mutate()}
-          >
-            {prepareBulkReminder.isPending
-              ? "Preparing…"
-              : `Prepare ${selectedCount || ""}`.trim()}
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            disabled={outstandingSpeakerIds.length === 0 || allOutstandingSelected}
-            onClick={() => setReminderSpeakerIds(new Set(outstandingSpeakerIds))}
-          >
-            Select outstanding
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            disabled={selectedCount === 0}
-            onClick={() => setReminderSpeakerIds(new Set())}
-          >
-            Clear
-          </button>
-        </div>
-      </div>,
-    );
+    onShellToolsChange(directoryChrome);
+    // directoryChrome is rebuilt each render from the primitives below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- avoid setState loops from fresh JSX
   }, [
     addingSpeaker,
     allOutstandingSelected,
@@ -1176,6 +1150,7 @@ export function OnboardingWorkspace({
     filteredSpeakers.length,
     onShellToolsChange,
     outstandingKey,
+    overBulkLimit,
     prepareBulkReminder.isPending,
     selectedCount,
     speakerFilter,
@@ -1308,26 +1283,6 @@ export function OnboardingWorkspace({
         >
           {message}
         </div>
-      ) : null}
-      {bulkReminderResult ? (
-        <details className="onboarding-reminder-result" aria-live="polite">
-          <summary>
-            Last reminder operation: {bulkReminderResult.counts.prepared} prepared · {bulkReminderResult.counts.queued} queued · {bulkReminderResult.counts.failed} failed
-          </summary>
-          <ul className="onboarding-history-list">
-            {bulkReminderResult.recipients.map((recipient) => (
-              <li key={`${bulkReminderResult.idempotencyKey}-${recipient.speakerId}`}>
-                <strong>{recipient.speakerName}</strong>
-                <div>
-                  <span>{contactLabel(recipient.status)}</span>
-                  <p className="muted-line">
-                    {recipient.reason} Tasks: {recipient.taskSummaries.map((task) => `${task.title}${task.dueAt ? ` (${formatWhen(task.dueAt)})` : ""}`).join(", ") || "none"}.
-                  </p>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </details>
       ) : null}
       <div
         ref={splitRef}

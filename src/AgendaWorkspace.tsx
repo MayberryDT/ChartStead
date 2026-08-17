@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   type FormEvent,
-  type KeyboardEvent,
   type ReactNode,
   useEffect,
   useMemo,
@@ -109,19 +108,6 @@ function endsFromStart(startsAt: string, previousEndsAt: string | null): string 
   return new Date(Date.parse(startsAt) + DEFAULT_DURATION_MS).toISOString();
 }
 
-function actionLabel(action: ScheduleConflict["actions"][number]): string {
-  switch (action) {
-    case "move_time":
-      return "Find another time";
-    case "move_room":
-      return "Move room";
-    case "keep_placement":
-      return "Keep this session";
-    case "open_speaker_schedule":
-      return "Open speaker schedule";
-  }
-}
-
 function placementSummary(session: OrganizerSession): string {
   const room = session.roomName ?? (session.roomId ? "Room set" : null);
   const time =
@@ -199,6 +185,11 @@ export function AgendaWorkspace({
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [dismissedConflictIds, setDismissedConflictIds] = useState<string[]>([]);
+  const [conflictsOpen, setConflictsOpen] = useState(false);
+  const [exitingConflictIds, setExitingConflictIds] = useState<string[]>([]);
+  const [conflictAutoPlacingId, setConflictAutoPlacingId] = useState<string | null>(
+    null,
+  );
   const [autoPreview, setAutoPreview] = useState<AgendaAutoPlacePreview | null>(null);
   const [autoScope, setAutoScope] = useState<AutoPlaceScope>("all");
   const [moveDay, setMoveDay] = useState(event.startsOn);
@@ -291,6 +282,7 @@ export function AgendaWorkspace({
     mutationFn: (input: {
       scope: AutoPlaceScope;
       selectedSessionId: string | null;
+      selectedSessionIds?: string[];
     }) => {
       const mode =
         input.scope === "selected" || input.scope === "selected-manual"
@@ -298,14 +290,17 @@ export function AgendaWorkspace({
           : "all";
       const includeManual =
         input.scope === "all-manual" || input.scope === "selected-manual";
-      if (mode === "selected" && !input.selectedSessionId) {
+      const selectedIds =
+        input.selectedSessionIds && input.selectedSessionIds.length > 0
+          ? input.selectedSessionIds
+          : input.selectedSessionId
+            ? [input.selectedSessionId]
+            : [];
+      if (mode === "selected" && selectedIds.length === 0) {
         throw new Error("Select a session before previewing a selected-session auto-place.");
       }
       return previewAgendaAutoPlace(event.id, {
-        selectedSessionIds:
-          mode === "selected" && input.selectedSessionId
-            ? [input.selectedSessionId]
-            : undefined,
+        selectedSessionIds: mode === "selected" ? selectedIds : undefined,
         includeManual,
       });
     },
@@ -331,6 +326,7 @@ export function AgendaWorkspace({
       }),
     onSuccess: async (result) => {
       setAutoPreview(null);
+      if (result.agenda.counts.conflicts === 0) setConflictsOpen(false);
       queryClient.setQueryData(["agenda", event.id], result.agenda);
       await queryClient.invalidateQueries({ queryKey: ["agenda", event.id] });
       setSelectedId(result.appliedSessionIds[0] ?? selectedId);
@@ -359,7 +355,6 @@ export function AgendaWorkspace({
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-
   const slots = useMemo(() => timeSlots(), []);
   const rooms = event.rooms;
   const roomColumns = useMemo(
@@ -382,6 +377,12 @@ export function AgendaWorkspace({
   const visibleConflicts = conflicts.filter(
     (conflict) => !dismissedConflictIds.includes(conflict.id),
   );
+
+  useEffect(() => {
+    if (visibleConflicts.length === 0 && conflictsOpen) {
+      setConflictsOpen(false);
+    }
+  }, [visibleConflicts.length, conflictsOpen]);
 
   const pool = sessions.filter((session) => session.placementStatus !== "placed");
   const daySessions = sessions.filter((session) => {
@@ -448,37 +449,12 @@ export function AgendaWorkspace({
     syncAgendaUrl({ day });
   }
 
-  function focusDayTab(day: string) {
-    window.requestAnimationFrame(() => {
-      const tab = document.querySelector<HTMLElement>(
-        `.agenda-day-switcher [role="tab"][data-day="${day}"]`,
-      );
-      tab?.focus();
-    });
-  }
-
-  function onDayTabsKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (
-      event.key !== "ArrowLeft" &&
-      event.key !== "ArrowRight" &&
-      event.key !== "Home" &&
-      event.key !== "End"
-    ) {
-      return;
-    }
+  function stepDay(delta: -1 | 1) {
     const index = days.indexOf(selectedDay);
     if (index < 0) return;
-    let next = index;
-    if (event.key === "ArrowLeft") next = Math.max(0, index - 1);
-    if (event.key === "ArrowRight") next = Math.min(days.length - 1, index + 1);
-    if (event.key === "Home") next = 0;
-    if (event.key === "End") next = days.length - 1;
-    if (next === index) return;
-    event.preventDefault();
-    const day = days[next];
-    if (!day) return;
-    selectDay(day);
-    focusDayTab(day);
+    const next = days[index + delta];
+    if (!next) return;
+    selectDay(next);
   }
 
   function selectSession(sessionId: string) {
@@ -587,37 +563,63 @@ export function AgendaWorkspace({
     });
   }
 
-  function conflictAction(
-    conflict: ScheduleConflict,
-    action: ScheduleConflict["actions"][number],
-  ) {
+  function fixConflict(conflict: ScheduleConflict) {
     const focusId = conflict.sessionIds[0];
-    const focus = sessions.find((session) => session.id === focusId);
+    if (!focusId) return;
+    setConflictsOpen(false);
+    setHighlightSessionId(focusId);
     selectSession(focusId);
-    if (action === "keep_placement") {
+  }
+
+  async function autoPlaceConflict(conflict: ScheduleConflict) {
+    const selectedSessionIds = conflict.sessionIds.filter(Boolean);
+    if (selectedSessionIds.length === 0) {
+      showToast("No sessions on this conflict to auto-place.");
+      return;
+    }
+    if (conflictAutoPlacingId) return;
+    setConflictAutoPlacingId(conflict.id);
+    setExitingConflictIds((ids) =>
+      ids.includes(conflict.id) ? ids : [...ids, conflict.id],
+    );
+    try {
+      await new Promise((resolve) => window.setTimeout(resolve, 280));
+      const preview = await previewAgendaAutoPlace(event.id, {
+        selectedSessionIds,
+        includeManual: true,
+      });
+      const result = await applyAgendaAutoPlace(event.id, {
+        previewId: preview.previewId,
+        previewDigest: preview.previewDigest,
+        agendaVersion: preview.agendaVersion,
+        idempotencyKey: `ui-conflict-auto-${event.id}-${conflict.id}-${createClientId()}`,
+      });
+      queryClient.setQueryData(["agenda", event.id], result.agenda);
+      await queryClient.invalidateQueries({ queryKey: ["agenda", event.id] });
       setDismissedConflictIds((ids) =>
         ids.includes(conflict.id) ? ids : [...ids, conflict.id],
       );
-      showToast("Kept current placement. Conflict remains saved.");
-      return;
-    }
-    if (action === "open_speaker_schedule") {
       showToast(
-        conflict.speakerName
-          ? `Showing sessions involving ${conflict.speakerName}.`
-          : "Showing speaker schedule context.",
+        result.idempotent
+          ? "Auto-place already recorded; agenda is current."
+          : `Auto-placed ${result.appliedSessionIds.length || selectedSessionIds.length} session${
+              (result.appliedSessionIds.length || selectedSessionIds.length) === 1
+                ? ""
+                : "s"
+            }.`,
       );
-      return;
+      if (result.agenda.counts.conflicts === 0) setConflictsOpen(false);
+    } catch (error) {
+      setExitingConflictIds((ids) => ids.filter((id) => id !== conflict.id));
+      showToast(
+        error instanceof ApiError || error instanceof Error
+          ? error.message
+          : "Unable to auto-place this conflict.",
+      );
+    } finally {
+      setConflictAutoPlacingId(null);
+      setExitingConflictIds((ids) => ids.filter((id) => id !== conflict.id));
     }
-    if (action === "move_room" && focus) {
-      const alternate =
-        rooms.find((room) => room.id !== focus.roomId)?.id ?? null;
-      if (alternate) {
-        place(focus.id, { roomId: alternate });
-        return;
-      }
-    }
-    setMoveOpen(true);
   }
 
   const counts = agenda?.counts ?? {
@@ -629,39 +631,66 @@ export function AgendaWorkspace({
 
   useEffect(() => {
     if (!onChromeChange) return;
+    const dayIndex = days.indexOf(selectedDay);
+    const selectedDayCount = daySessionCounts.get(selectedDay) ?? 0;
+    const hostsSelectionElsewhere = Boolean(
+      selectedSessionDay && selectedSessionDay !== selectedDay,
+    );
     onChromeChange({
       tools: (
         <div className="topbar-tools-inner agenda-shell-tools">
           <div className="agenda-shell-left">
             <div
-              className="agenda-day-switcher"
-              role="tablist"
-              aria-label="Event days"
+              className="agenda-day-nav"
+              role="group"
+              aria-label="Event day"
               data-day-count={days.length}
-              onKeyDown={onDayTabsKeyDown}
             >
-              {days.map((day) => {
-                const count = daySessionCounts.get(day) ?? 0;
-                const isSelected = day === selectedDay;
-                const hostsSelection = selectedSessionDay === day && !isSelected;
-                return (
-                  <button
-                    key={day}
-                    type="button"
-                    role="tab"
-                    data-day={day}
-                    aria-selected={isSelected}
-                    tabIndex={isSelected ? 0 : -1}
-                    className={`btn btn-secondary btn-sm agenda-day-btn${
-                      hostsSelection ? " has-selection-elsewhere" : ""
-                    }${isSelected ? " is-selected" : ""}`}
-                    onClick={() => selectDay(day)}
-                  >
-                    <span className="agenda-day-label">{dayLabel(day)}</span>
-                    <span className="agenda-day-count">{count}</span>
-                  </button>
-                );
-              })}
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm agenda-day-step"
+                aria-label="Previous day"
+                disabled={dayIndex <= 0}
+                onClick={() => stepDay(-1)}
+              >
+                ‹
+              </button>
+              <div
+                className={`agenda-day-current${
+                  hostsSelectionElsewhere ? " has-selection-elsewhere" : ""
+                }`}
+                data-day={selectedDay}
+              >
+                <span className="agenda-day-label">{dayLabel(selectedDay)}</span>
+                <span className="agenda-day-count">{selectedDayCount}</span>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm agenda-day-step"
+                aria-label="Next day"
+                disabled={dayIndex < 0 || dayIndex >= days.length - 1}
+                onClick={() => stepDay(1)}
+              >
+                ›
+              </button>
+            </div>
+            <div className="topbar-track agenda-auto-scope">
+              <AppSelect
+                label="Scope"
+                ariaLabel="Auto-place scope"
+                hideLabel
+                value={autoScope}
+                options={[
+                  { value: "all", label: "Unplaced" },
+                  { value: "all-manual", label: "Unplaced +" },
+                  { value: "selected", label: "Selected" },
+                  { value: "selected-manual", label: "Selected +" },
+                ]}
+                onValueChange={(value) => {
+                  setAutoScope(value as AutoPlaceScope);
+                  setAutoPreview(null);
+                }}
+              />
             </div>
           </div>
           <div className="agenda-counts" aria-live="polite">
@@ -682,32 +711,21 @@ export function AgendaWorkspace({
             </span>
           </div>
           <div className="agenda-shell-right">
-            <div className="topbar-track agenda-auto-scope">
-              <AppSelect
-                label="Scope"
-                ariaLabel="Auto-place scope"
-                value={autoScope}
-                options={[
-                  { value: "all", label: "All unplaced" },
-                  {
-                    value: "all-manual",
-                    label: "All unplaced + manual/partial",
-                  },
-                  { value: "selected", label: "Selected only" },
-                  {
-                    value: "selected-manual",
-                    label: "Selected + overwrite manual",
-                  },
-                ]}
-                onValueChange={(value) => {
-                  setAutoScope(value as AutoPlaceScope);
-                  setAutoPreview(null);
-                }}
-              />
-            </div>
+            {visibleConflicts.length > 0 ? (
+              <button
+                type="button"
+                className="btn btn-secondary agenda-toolbar-btn agenda-fix-conflicts"
+                onClick={() => setConflictsOpen(true)}
+              >
+                Fix Conflicts
+                <span className="agenda-fix-conflicts-count" aria-hidden="true">
+                  {visibleConflicts.length}
+                </span>
+              </button>
+            ) : null}
             <button
               type="button"
-              className="btn btn-secondary btn-sm"
+              className="btn btn-secondary agenda-toolbar-btn"
               disabled={previewAutoPlaceMutation.isPending}
               onClick={() => {
                 previewAutoPlaceMutation.mutate({
@@ -716,7 +734,7 @@ export function AgendaWorkspace({
                 });
               }}
             >
-              {previewAutoPlaceMutation.isPending ? "Previewing…" : "Preview auto-place"}
+              {previewAutoPlaceMutation.isPending ? "Working…" : "Auto-place"}
             </button>
           </div>
         </div>
@@ -724,7 +742,7 @@ export function AgendaWorkspace({
       actions: (
         <button
           type="button"
-          className="btn btn-primary btn-sm"
+          className="btn btn-primary agenda-toolbar-btn"
           disabled={publishMutation.isPending}
           onClick={() => publishMutation.mutate()}
         >
@@ -741,6 +759,7 @@ export function AgendaWorkspace({
     counts.placed,
     counts.unplaced,
     dayCountKey,
+    daySessionCounts,
     days,
     onChromeChange,
     previewAutoPlaceMutation.isPending,
@@ -748,6 +767,7 @@ export function AgendaWorkspace({
     selected?.id,
     selectedDay,
     selectedSessionDay,
+    visibleConflicts.length,
   ]);
 
   useEffect(() => {
@@ -875,6 +895,87 @@ export function AgendaWorkspace({
                   : `Apply ${autoPreview.proposals.length} placement${
                       autoPreview.proposals.length === 1 ? "" : "s"
                     }`}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {conflictsOpen && visibleConflicts.length > 0 ? (
+        <div className="dialog-backdrop" aria-hidden="true" />
+      ) : null}
+      {conflictsOpen && visibleConflicts.length > 0 ? (
+        <div className="dialog-viewport">
+          <div
+            className="routing-dialog agenda-conflicts-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="agenda-conflicts-title"
+          >
+            <div className="routing-dialog-header">
+              <div>
+                <p className="eyebrow">Schedule conflicts</p>
+                <h2 id="agenda-conflicts-title">Fix Conflicts</h2>
+                <p>
+                  {visibleConflicts.length} conflict
+                  {visibleConflicts.length === 1 ? "" : "s"} need a placement decision.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="dialog-close"
+                aria-label="Close conflicts"
+                onClick={() => setConflictsOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="agenda-conflicts-dialog-body">
+              <ul className="agenda-conflict-list" aria-label="Conflicts">
+                {visibleConflicts.map((conflict) => {
+                  const exiting = exitingConflictIds.includes(conflict.id);
+                  const busy = conflictAutoPlacingId === conflict.id;
+                  return (
+                    <li
+                      key={conflict.id}
+                      className={`agenda-conflict-card${exiting ? " is-exiting" : ""}`}
+                    >
+                      <p>{conflict.summary}</p>
+                      {conflict.sessionTitles.length > 0 ? (
+                        <p className="muted agenda-conflict-sessions">
+                          {conflict.sessionTitles.join(" · ")}
+                        </p>
+                      ) : null}
+                      <div className="agenda-conflict-actions">
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          disabled={Boolean(conflictAutoPlacingId)}
+                          onClick={() => void autoPlaceConflict(conflict)}
+                        >
+                          {busy ? "Auto-placing…" : "Auto-place"}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          disabled={Boolean(conflictAutoPlacingId)}
+                          onClick={() => fixConflict(conflict)}
+                        >
+                          Fix
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+            <div className="agenda-auto-place-dialog-actions">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setConflictsOpen(false)}
+              >
+                Close
               </button>
             </div>
           </div>
@@ -1227,30 +1328,6 @@ export function AgendaWorkspace({
               ) : null}
             </div>
           )}
-
-          {visibleConflicts.length > 0 ? (
-            <div className="agenda-conflicts">
-              <ul className="agenda-conflict-list">
-                {visibleConflicts.map((conflict) => (
-                  <li key={conflict.id} className="agenda-conflict-card">
-                    <p>{conflict.summary}</p>
-                    <div className="agenda-conflict-actions">
-                      {conflict.actions.map((action) => (
-                        <button
-                          key={action}
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => conflictAction(conflict, action)}
-                        >
-                          {actionLabel(action)}
-                        </button>
-                      ))}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
         </aside>
       </div>
     </div>

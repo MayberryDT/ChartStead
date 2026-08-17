@@ -4,7 +4,7 @@
 
 **Blocked by:** Course Check 11 — Course Check interaction model (out of the way); Course Check 02 — Batch decisions and shared workspace.
 
-**Status:** in-progress
+**Status:** done
 
 ## Problem
 
@@ -12,11 +12,11 @@ Ticket 11 defines *how* Course Check talks to the user and the logic behind it. 
 
 ## Goals
 
-- [ ] Inventory every user-visible surface produced or retargeted by Course Check 11 (confirm sheet, exception interrupt, result state, entry chrome, related Settings/Agents copy if still visible).
-- [ ] Polish each surface against `design/DESIGN.md` / source-of-truth / organizer desk chrome: spacing, typography, hierarchy, severity without color-only cues, collapsed clean detail vs expanded risk.
-- [ ] Batch and single-decision entry chrome match desk density and no longer look bolted on.
-- [ ] States and counts (ready / needs action / skipped / drafts / no email sent) are calm and scannable at a glance on desktop; mobile remains legible for status/recovery.
-- [ ] No second decision path and no reopening of 11’s interaction decisions unless a visual treatment proves the model unusable (escalate back to 11 / Tyler).
+- [x] Inventory every user-visible surface produced or retargeted by Course Check 11 (confirm sheet, exception interrupt, result state, entry chrome, related Settings/Agents copy if still visible).
+- [x] Polish each surface against `design/DESIGN.md` / source-of-truth / organizer desk chrome: spacing, typography, hierarchy, severity without color-only cues, collapsed clean detail vs expanded risk.
+- [x] Batch and single-decision entry chrome match desk density and no longer look bolted on.
+- [x] States and counts (ready / needs action / skipped / drafts / no email sent) are calm and scannable at a glance on desktop; mobile remains legible for status/recovery.
+- [x] No second decision path and no reopening of 11’s interaction decisions unless a visual treatment proves the model unusable (escalate back to 11 / Tyler).
 
 ## Surface inventory (from Course Check 11)
 
@@ -37,6 +37,7 @@ Ticket 11 defines *how* Course Check talks to the user and the logic behind it. 
 
 ## Comments
 
+- 2026-08-17 — Tyler: polished in tandem with Course Check 11; status → `done`.
 - 2026-08-17 — With 11: warning cards reduced to Accept + Fix; Fix → Agenda with session highlight pulse when the session exists.
 - 2026-08-17 — Tyler: during 11 QA, pull visual + placement into this pass with 11 (inspector-hosted review, kill resume banner above table, concise copy, compact buttons). Status → in-progress.
 - 2026-08-17 — Course Check 11 → in-review with surface inventory above. This ticket stays human-tandem; still blocked until 11 is done (visual polish of the shipped model).

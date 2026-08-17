@@ -4,7 +4,7 @@
 
 **Blocked by:** Course Check 11 — Course Check interaction model (out of the way).
 
-**Status:** blocked
+**Status:** ready-for-agent
 
 ## Problem
 
@@ -37,6 +37,7 @@ Course Check 11 grilling Round 4 — **Q15 A+C**: proposal history clarity in 11
 
 ## Comments
 
+- 2026-08-17 — Course Check 11/12 → `done`; blockers cleared → `ready-for-agent`. Tyler deferred starting this ticket for now.
 - 2026-08-17 — Filed from Course Check 11 grilling closeout (Tyler asked where the deferred ticket went). Blocked on 11 until that interaction model is done.
 
 - 2026-08-17 — frontier-reconcile: Still blocked on: Course Check 11 (in-review).

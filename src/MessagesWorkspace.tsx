@@ -18,6 +18,7 @@ import {
   fetchCourseCheckPlans,
   fetchOnboardingBoard,
 } from "./api";
+import { createClientId } from "./id";
 
 export type AudienceFilter = "all" | "needs_follow_up" | "overdue" | "ready";
 
@@ -428,7 +429,7 @@ export function MessagesWorkspace({
         subject,
         bodyText,
         portalInvitation,
-        idempotencyKey: `speaker-message-${crypto.randomUUID()}`,
+        idempotencyKey: `speaker-message-${createClientId()}`,
       });
     },
     onSuccess: async (plan) => {

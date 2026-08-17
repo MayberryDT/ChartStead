@@ -202,9 +202,10 @@ describe("Ticket 08 agenda workspace", () => {
     expect(within(toolbar).getByLabelText("0 placed")).toBeVisible();
     expect(within(toolbar).getByLabelText("0 conflicts")).toBeVisible();
     expect(within(toolbar).getByRole("button", { name: "Publish program" })).toBeVisible();
-    expect(
-      within(toolbar).getByRole("tab", { name: /Thu, Oct 8/, selected: true }),
-    ).toBeVisible();
+    const dayNav = within(toolbar).getByRole("group", { name: "Event day" });
+    expect(within(dayNav).getByText(/Thu, Oct 8/)).toBeVisible();
+    expect(within(dayNav).getByLabelText("Next day")).toBeDisabled();
+    expect(within(dayNav).getByLabelText("Previous day")).toBeEnabled();
     expect(
       within(await screen.findByRole("complementary", { name: "Session inspector" })).getByRole(
         "heading",
@@ -212,12 +213,10 @@ describe("Ticket 08 agenda workspace", () => {
       ),
     ).toBeVisible();
 
-    await user.click(within(toolbar).getByRole("tab", { name: /Wed, Oct 7/ }));
+    await user.click(within(dayNav).getByLabelText("Previous day"));
 
     await waitFor(() => {
-      expect(
-        within(toolbar).getByRole("tab", { name: /Wed, Oct 7/, selected: true }),
-      ).toBeVisible();
+      expect(within(dayNav).getByText(/Wed, Oct 7/)).toBeVisible();
     });
     expect(router.state.location.search.day).toBeUndefined();
     expect(router.state.location.search.sessionIds).toBe("ses-2");
@@ -276,39 +275,30 @@ describe("Ticket 08 agenda workspace", () => {
 
     await screen.findByLabelText("Unplaced sessions");
     const toolbar = container.querySelector(".shell-toolbar") as HTMLElement;
-    const dayTabs = within(toolbar).getByRole("tablist", { name: "Event days" });
-    expect(dayTabs).toHaveAttribute("data-day-count", "4");
-    const expectedDays = [
-      { day: "2026-06-29", label: /Mon, Jun 29/ },
-      { day: "2026-06-30", label: /Tue, Jun 30/ },
-      { day: "2026-07-01", label: /Wed, Jul 1/ },
-      { day: "2026-07-02", label: /Thu, Jul 2/ },
-    ];
-    for (const { day, label } of expectedDays) {
-      const tab = within(dayTabs).getByRole("tab", { name: label });
-      expect(tab).toBeVisible();
-      expect(tab).toHaveAttribute("data-day", day);
-    }
-    expect(within(dayTabs).getAllByRole("tab")).toHaveLength(4);
-    expect(
-      within(dayTabs).getByRole("tab", { name: /Tue, Jun 30/ }),
-    ).toHaveClass("has-selection-elsewhere");
+    const dayNav = within(toolbar).getByRole("group", { name: "Event day" });
+    expect(dayNav).toHaveAttribute("data-day-count", "4");
+    expect(within(dayNav).getByLabelText("Previous day")).toBeDisabled();
+    expect(within(dayNav).getByLabelText("Next day")).toBeEnabled();
+    expect(dayNav.querySelector('[data-day="2026-06-29"]')).toBeTruthy();
+    expect(within(dayNav).getByText(/Mon, Jun 29/)).toBeVisible();
+    expect(dayNav.querySelector(".agenda-day-current")).toHaveClass(
+      "has-selection-elsewhere",
+    );
 
-    await user.click(within(dayTabs).getByRole("tab", { name: /Thu, Jul 2/ }));
+    await user.click(within(dayNav).getByLabelText("Next day"));
     await waitFor(() => {
-      expect(
-        within(dayTabs).getByRole("tab", { name: /Thu, Jul 2/, selected: true }),
-      ).toBeVisible();
+      expect(dayNav.querySelector('[data-day="2026-06-30"]')).toBeTruthy();
     });
-    expect(router.state.location.search.day).toBe("2026-07-02");
+    expect(router.state.location.search.day).toBe("2026-06-30");
     expect(within(toolbar).getByLabelText(/unplaced/i)).toBeVisible();
 
-    within(dayTabs).getByRole("tab", { name: /Thu, Jul 2/, selected: true }).focus();
-    await user.keyboard("{ArrowLeft}");
+    await user.click(within(dayNav).getByLabelText("Next day"));
     await waitFor(() => {
-      expect(
-        within(dayTabs).getByRole("tab", { name: /Wed, Jul 1/, selected: true }),
-      ).toBeVisible();
+      expect(dayNav.querySelector('[data-day="2026-07-01"]')).toBeTruthy();
+    });
+    await user.click(within(dayNav).getByLabelText("Previous day"));
+    await waitFor(() => {
+      expect(dayNav.querySelector('[data-day="2026-06-30"]')).toBeTruthy();
     });
   });
 
@@ -331,18 +321,17 @@ describe("Ticket 08 agenda workspace", () => {
     const { container } = renderAgenda(`/e/${eventId}/agenda`);
     await screen.findByLabelText("Unplaced sessions");
     const toolbar = container.querySelector(".shell-toolbar") as HTMLElement;
-    const dayTabs = within(toolbar).getByRole("tablist", { name: "Event days" });
-    expect(dayTabs).toHaveAttribute("data-day-count", "2");
-    expect(within(dayTabs).getAllByRole("tab")).toHaveLength(2);
-    expect(within(dayTabs).getByRole("tab", { name: /Wed, Oct 7/, selected: true })).toBeVisible();
-    expect(within(dayTabs).getByRole("tab", { name: /Thu, Oct 8/ })).toBeVisible();
+    const dayNav = within(toolbar).getByRole("group", { name: "Event day" });
+    expect(dayNav).toHaveAttribute("data-day-count", "2");
+    expect(within(dayNav).getByText(/Wed, Oct 7/)).toBeVisible();
+    expect(within(dayNav).getByLabelText("Previous day")).toBeDisabled();
+    expect(within(dayNav).getByLabelText("Next day")).toBeEnabled();
 
-    await user.click(within(dayTabs).getByRole("tab", { name: /Thu, Oct 8/ }));
+    await user.click(within(dayNav).getByLabelText("Next day"));
     await waitFor(() => {
-      expect(
-        within(dayTabs).getByRole("tab", { name: /Thu, Oct 8/, selected: true }),
-      ).toBeVisible();
+      expect(within(dayNav).getByText(/Thu, Oct 8/)).toBeVisible();
     });
+    expect(within(dayNav).getByLabelText("Next day")).toBeDisabled();
   });
 
   it("shows unplaced pool, live counts, TBD labels, and keyboard Move Session", async () => {
@@ -527,7 +516,7 @@ describe("Ticket 08 agenda workspace", () => {
 
     renderAgenda();
 
-    await user.click(await screen.findByRole("button", { name: "Preview auto-place" }));
+    await user.click(await screen.findByRole("button", { name: "Auto-place" }));
     expect(previewBodies).toEqual([{ includeManual: false }]);
     const dialog = await screen.findByRole("dialog", { name: /Auto-place preview/i });
     expect(within(dialog).getByLabelText("Proposed auto-place slots")).toHaveTextContent(
@@ -547,7 +536,7 @@ describe("Ticket 08 agenda workspace", () => {
     expect(screen.queryByRole("dialog", { name: /Auto-place preview/i })).toBeNull();
   });
 
-  it("shows named conflicts with non-blocking repair actions", async () => {
+  it("opens Fix Conflicts modal with Auto-place and Fix only", async () => {
     const user = userEvent.setup();
     const conflict: ScheduleConflict = {
       id: "room:harbor-hall:ses-1:ses-2",
@@ -585,6 +574,26 @@ describe("Ticket 08 agenda workspace", () => {
       conflicts: [conflict],
       counts: { unplaced: 0, partial: 0, placed: 2, conflicts: 1 },
     });
+    const previewBody = {
+      previewId: "preview-conflict-1",
+      previewDigest: "digest-conflict-1",
+      agendaVersion: 3,
+      proposals: [
+        {
+          sessionId: "ses-1",
+          title: "Opening Keynote",
+          roomId: "compass-room",
+          roomName: "Compass Room",
+          startsAt: "2026-10-07T17:00:00.000Z",
+          endsAt: "2026-10-07T17:45:00.000Z",
+          reason: "First free slot.",
+        },
+      ],
+      leftovers: [],
+      conflicts: [],
+      assumptions: ["45-minute duration"],
+      manualPlacementPreserved: [],
+    };
 
     vi.stubGlobal(
       "fetch",
@@ -594,23 +603,106 @@ describe("Ticket 08 agenda workspace", () => {
         if (url.endsWith("/api/events") || url.endsWith("/api/events/")) {
           return Response.json(eventsResponse);
         }
-        if (url.includes("/sessions/") && method === "PATCH") {
-          const moved = {
-            ...placedA,
-            roomId: "compass-room",
-            roomName: "Compass Room",
-          };
+        if (url.includes(`/api/events/${eventId}/sessions`) && method === "GET") {
+          return Response.json(agenda);
+        }
+        if (url.endsWith(`/api/events/${eventId}/agenda/auto-place/preview`) && method === "POST") {
+          return Response.json(previewBody);
+        }
+        if (url.endsWith(`/api/events/${eventId}/agenda/auto-place/apply`) && method === "POST") {
           agenda = agendaResponse({
-            sessions: [moved, placedB],
+            sessions: [
+              {
+                ...placedA,
+                roomId: "compass-room",
+                roomName: "Compass Room",
+                startsAt: "2026-10-07T17:00:00.000Z",
+                endsAt: "2026-10-07T17:45:00.000Z",
+              },
+              placedB,
+            ],
             conflicts: [],
             counts: { unplaced: 0, partial: 0, placed: 2, conflicts: 0 },
           });
           return Response.json({
-            session: moved,
-            conflicts: [],
-            counts: agenda.counts,
-            calendarIntentsCreated: [],
+            agenda,
+            appliedSessionIds: ["ses-1"],
+            idempotent: false,
           });
+        }
+        return new Response(JSON.stringify({ error: `unhandled ${method} ${url}` }), {
+          status: 500,
+        });
+      }),
+    );
+
+    renderAgenda();
+
+    expect(await screen.findByLabelText("1 conflicts")).toBeInTheDocument();
+    expect(screen.queryByText(/Room overlap in Harbor Hall/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Fix Conflicts/i }));
+    const dialog = await screen.findByRole("dialog", { name: "Fix Conflicts" });
+    expect(within(dialog).getByText(/Room overlap in Harbor Hall/i)).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "Auto-place" })).toBeEnabled();
+    expect(within(dialog).getByRole("button", { name: "Fix" })).toBeEnabled();
+
+    await user.click(within(dialog).getByRole("button", { name: "Auto-place" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Auto-place preview" })).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Fix Conflicts" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByLabelText("0 conflicts")).toBeInTheDocument();
+  });
+
+  it("Fix from conflicts modal selects the session in the inspector", async () => {
+    const user = userEvent.setup();
+    const conflict: ScheduleConflict = {
+      id: "room:harbor-hall:ses-1:ses-2",
+      kind: "room_overlap",
+      summary: 'Room overlap in Harbor Hall: “Opening Keynote” and “Platform Deep Dive”',
+      sessionIds: ["ses-1", "ses-2"],
+      sessionTitles: ["Opening Keynote", "Platform Deep Dive"],
+      roomId: "harbor-hall",
+      roomName: "Harbor Hall",
+      startsAt: "2026-10-07T16:00:00.000Z",
+      endsAt: "2026-10-07T16:45:00.000Z",
+      actions: ["move_time", "move_room", "keep_placement"],
+    };
+    const placedA = session({
+      id: "ses-1",
+      title: "Opening Keynote",
+      roomId: "harbor-hall",
+      roomName: "Harbor Hall",
+      startsAt: "2026-10-07T16:00:00.000Z",
+      endsAt: "2026-10-07T16:45:00.000Z",
+      placementStatus: "placed",
+    });
+    const placedB = session({
+      id: "ses-2",
+      title: "Platform Deep Dive",
+      roomId: "harbor-hall",
+      roomName: "Harbor Hall",
+      startsAt: "2026-10-07T16:30:00.000Z",
+      endsAt: "2026-10-07T17:15:00.000Z",
+      placementStatus: "placed",
+      speakers: [{ id: "sp-2", name: "Grace Hopper", email: "grace@example.com", role: "primary" }],
+    });
+    const agenda = agendaResponse({
+      sessions: [placedA, placedB],
+      conflicts: [conflict],
+      counts: { unplaced: 0, partial: 0, placed: 2, conflicts: 1 },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = requestUrl(input);
+        const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+        if (url.endsWith("/api/events") || url.endsWith("/api/events/")) {
+          return Response.json(eventsResponse);
         }
         if (url.includes(`/api/events/${eventId}/sessions`) && method === "GET") {
           return Response.json(agenda);
@@ -622,16 +714,13 @@ describe("Ticket 08 agenda workspace", () => {
     );
 
     renderAgenda();
-
-    expect(await screen.findByText(/Room overlap in Harbor Hall/i)).toBeInTheDocument();
-    expect(screen.getByLabelText("1 conflicts")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Keep this session" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Find another time" })).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Move room" }));
+    await user.click(await screen.findByRole("button", { name: /Fix Conflicts/i }));
+    const dialog = await screen.findByRole("dialog", { name: "Fix Conflicts" });
+    await user.click(within(dialog).getByRole("button", { name: "Fix" }));
     await waitFor(() => {
-      expect(screen.getByLabelText("0 conflicts")).toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: "Fix Conflicts" })).not.toBeInTheDocument();
     });
+    expect(screen.getByRole("heading", { name: "Opening Keynote" })).toBeVisible();
   });
 
   it("edits central session content", async () => {

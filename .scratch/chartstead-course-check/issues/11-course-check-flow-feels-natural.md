@@ -4,7 +4,7 @@
 
 **Blocked by:** Course Check 01 — Single Decision Course Check tracer.
 
-**Status:** in-review
+**Status:** done
 
 **Demo:** http://100.105.117.93:5811/demo → Enter as organizer → Submissions
 
@@ -72,16 +72,16 @@ Research lock: `.research/chartstead-course-check-ux-research.md` — **Keep the
 
 ## What to test
 
-- [ ] Soft buttons are Recommend / Not recommend / Unreviewed — no Maybe; no Locked filter
-- [ ] Finalized rows show Accepted or Denied; checkbox missing with clear title; soft footer hidden
-- [ ] Single Accept / Deny opens in-place confirm (clean) or inspector review (dirty) — does **not** navigate away as the primary path
-- [ ] Dirty warning cards show only **Accept** and **Fix** (no Keep / Skip / Change placement clutter)
-- [ ] Fix for placement opens Agenda **without** a full page reload; grid looks correct (rooms as columns)
-- [ ] Fix for placement opens Agenda (highlights session when it already exists) + Return to decision review
-- [ ] Batch Accept / Deny same behavior; counts in confirm, not toolbar verb
-- [ ] Apply prepares drafts; result is a toast; no emails sent
-- [ ] Cancel discards the review; Fix persists and resumes when returning
-- [ ] Review history distinguishes committee leaning vs final outcome apply
+- [x] Soft buttons are Recommend / Not recommend / Unreviewed — no Maybe; no Locked filter
+- [x] Finalized rows show Accepted or Denied; checkbox missing with clear title; soft footer hidden
+- [x] Single Accept / Deny opens in-place confirm (clean) or inspector review (dirty) — does **not** navigate away as the primary path
+- [x] Dirty warning cards show only **Accept** and **Fix** (no Keep / Skip / Change placement clutter)
+- [x] Fix for placement opens Agenda **without** a full page reload; grid looks correct (rooms as columns)
+- [x] Fix for placement opens Agenda (highlights session when it already exists) + Return to decision review
+- [x] Batch Accept / Deny same behavior; counts in confirm, not toolbar verb
+- [x] Apply prepares drafts; result is a toast; no emails sent
+- [x] Cancel discards the review; Fix persists and resumes when returning
+- [x] Review history distinguishes committee leaning vs final outcome apply
 
 ## Non-goals
 
@@ -92,6 +92,7 @@ Research lock: `.research/chartstead-course-check-ux-research.md` — **Keep the
 
 ## Comments
 
+- 2026-08-17 — Tyler: 11 and 12 complete; status → `done`. Course Check 24 left unstarted (do not open yet).
 - 2026-08-17 — Tyler QA: Fix used hard `<a href>` (full reload) + agenda grid CSS was missing since Ticket 17. Restored `.agenda-layout` CSS; Fix/Return now client-navigate via TanStack (same pattern as sidebar). Research: `.scratch/chartstead-course-check/research-in-app-deeplink-navigation.md`.
 - 2026-08-17 — Tyler QA: warning cards → only **Accept** + **Fix**; Fix routes to Agenda (session highlight when possible) / source record; footer Accept/Cancel apply or discard all. Resume only after Fix return.
 - 2026-08-17 — QA fix pass: finalize lives in **inspector** (table viewport untouched); resume banner removed (close discards); results are **toasts**; copy/buttons shortened; compact exception review. Course Check 12 in-progress with 11.
