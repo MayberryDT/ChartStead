@@ -1191,6 +1191,94 @@ describe("organizer application", () => {
     expect(await screen.findByRole("checkbox", { name: `Select ${proposal.id} for batch decision` })).toBeChecked();
   });
 
+  it("shows Locked status in-row and filters locked outcomes without extra row height or grayed checkboxes", async () => {
+    const user = userEvent.setup();
+    const openProposal = {
+      id: "SUB-OPEN01",
+      eventId: "pacific-open-data-summit-2026",
+      formId: "main-cfp",
+      formDefinitionVersion: 1,
+      answers: {},
+      title: "Open charts for harbor operations",
+      abstract: "Abstract text",
+      trackId: "platform",
+      trackName: "Platform",
+      speakerName: "Ada Harbor",
+      speakerEmail: "ada@example.com",
+      biography: "Bio",
+      supportingLink: "https://example.com",
+      sessionFormat: "talk",
+      workshopDuration: "",
+      coSpeakers: [],
+      supportingFile: null,
+      status: "unreviewed" as const,
+      committeeNote: "Committee only",
+      privateNote: "",
+      reviewVersion: 0,
+      confirmationEmailStatus: null,
+      submittedAt: "2026-08-10T12:00:00.000Z",
+      programOutcome: null,
+    };
+    const lockedProposal = {
+      ...openProposal,
+      id: "SUB-LOCK99",
+      title: "Accepted harbor keynote",
+      speakerName: "Bea Quay",
+      status: "approve" as const,
+      committeeNote: "Locked note",
+      programOutcome: "accepted" as const,
+      submittedAt: "2026-08-09T12:00:00.000Z",
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/api/events")) {
+        return new Response(JSON.stringify(eventsPayload), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes(`/organizer/proposals/${lockedProposal.id}`)) {
+        return new Response(
+          JSON.stringify({ proposal: lockedProposal, auditEvents: [] }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("/proposals")) {
+        return new Response(
+          JSON.stringify({ proposals: [openProposal, lockedProposal] }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderAt("/e/pacific-open-data-summit-2026/submissions");
+
+    const openRow = await screen.findByRole("row", {
+      name: /Open charts for harbor operations/,
+    });
+    const lockedRow = screen.getByRole("row", {
+      name: /Accepted harbor keynote/,
+    });
+
+    expect(within(openRow).getByText("Unreviewed")).toBeVisible();
+    expect(
+      within(openRow).getByRole("checkbox", {
+        name: `Select ${openProposal.id} for batch decision`,
+      }),
+    ).toBeEnabled();
+    expect(within(lockedRow).getByText("Locked")).toBeVisible();
+    expect(within(lockedRow).queryByText(/Outcome locked/)).not.toBeInTheDocument();
+    expect(within(lockedRow).queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(lockedRow).not.toHaveClass("proposal-row-locked");
+
+    await user.click(screen.getByRole("button", { name: "Locked", pressed: false }));
+    expect(screen.queryByRole("row", { name: /Open charts for harbor operations/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /Accepted harbor keynote/ })).toBeVisible();
+
+    await user.click(within(screen.getByRole("row", { name: /Accepted harbor keynote/ })).getByRole("link"));
+    expect(await screen.findByText("Locked note")).toBeVisible();
+  });
+
   it("preserves review queue context while saving notes and reversible decisions", async () => {
     const user = userEvent.setup();
     const reviewWrites: Array<Record<string, unknown>> = [];

@@ -871,8 +871,18 @@ table.grid thead .th-sort {
   z-index: 4;
 }
 
-.proposal-row-locked {
-  opacity: 0.72;
+.batch-check-slot {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+}
+
+.flag-locked {
+  color: var(--on-surface-variant);
+}
+
+.flag-locked::before {
+  background: var(--outline-strong);
 }
 
 .forms-work {

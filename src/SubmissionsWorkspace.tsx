@@ -67,9 +67,11 @@ export type ProposalSort =
   | "aggregate-asc"
   | "aggregate-desc";
 
+export type ProposalQueueStatus = ProposalStatus | "all" | "locked";
+
 export interface ProposalQueueState {
   query: string;
-  status: ProposalStatus | "all";
+  status: ProposalQueueStatus;
   track: string;
   roundId: string;
   sort: ProposalSort;
@@ -118,7 +120,7 @@ function formatSubmittedAt(value: string) {
   }).format(new Date(value));
 }
 
-function statusLabel(status: ProposalStatus) {
+function statusLabel(status: ProposalStatus | "locked") {
   switch (status) {
     case "approve":
       return "Approve";
@@ -126,9 +128,30 @@ function statusLabel(status: ProposalStatus) {
       return "Maybe";
     case "deny":
       return "Deny";
+    case "locked":
+      return "Locked";
     default:
       return "Unreviewed";
   }
+}
+
+function programOutcomeLabel(outcome: ProgramOutcome) {
+  switch (outcome) {
+    case "accepted":
+      return "Accepted";
+    case "declined":
+      return "Declined";
+  }
+}
+
+function rowStatusLabel(proposal: OrganizerProposal): string {
+  if (proposal.programOutcome) return statusLabel("locked");
+  return statusLabel(proposal.status);
+}
+
+function rowStatusClass(proposal: OrganizerProposal): string {
+  if (proposal.programOutcome) return "flag flag-locked";
+  return `flag flag-${proposal.status}`;
 }
 
 function proposalHref(
@@ -267,7 +290,7 @@ export function SubmissionsCommandBar({
         />
       </label>
       <div className="seg" role="group" aria-label="Status filter">
-        {(["all", "unreviewed", "approve", "maybe", "deny"] as const).map((status) => (
+        {(["all", "unreviewed", "approve", "maybe", "deny", "locked"] as const).map((status) => (
           <button
             key={status}
             type="button"
@@ -408,8 +431,12 @@ function filterAndSortProposals(
 ): OrganizerProposal[] {
   const needle = queue.query.trim().toLowerCase();
   let next = rows;
-  if (queue.status !== "all") {
-    next = next.filter((row) => row.status === queue.status);
+  if (queue.status === "locked") {
+    next = next.filter((row) => Boolean(row.programOutcome));
+  } else if (queue.status !== "all") {
+    next = next.filter(
+      (row) => row.status === queue.status && !row.programOutcome,
+    );
   }
   if (queue.track) {
     next = next.filter((row) => row.trackId === queue.track);
@@ -963,43 +990,34 @@ export function SubmissionsWorkspace({
                   return (
                     <tr
                       key={proposal.id}
-                      className={`proposal-row${locked ? " proposal-row-locked" : ""}`}
+                      className="proposal-row"
                       data-id={proposal.id}
+                      data-locked={locked ? "true" : undefined}
                       data-polish-id="S-2-row"
                       aria-selected={selectedProposalId === proposal.id}
-                      title={
-                        locked
-                          ? `Final outcome already set (${proposal.programOutcome}). Open to inspect; batch select is locked.`
-                          : undefined
-                      }
                     >
                       {currentRole === "admin" ? (
                         <td className="col-batch">
-                          <input
-                            className="batch-check"
-                            type="checkbox"
-                            aria-label={
-                              locked
-                                ? `${proposal.id} locked — final outcome already set`
-                                : `Select ${proposal.id} for batch decision`
-                            }
-                            checked={batchIds.has(proposal.id)}
-                            disabled={locked}
-                            title={
-                              locked
-                                ? `Final outcome already set (${proposal.programOutcome})`
-                                : "Select for batch decision"
-                            }
-                            onClick={(click) => click.stopPropagation()}
-                            onChange={() => {
-                              setBatchIds((current) => {
-                                const next = new Set(current);
-                                if (next.has(proposal.id)) next.delete(proposal.id);
-                                else next.add(proposal.id);
-                                return next;
-                              });
-                            }}
-                          />
+                          {locked ? (
+                            <span className="batch-check-slot" aria-hidden="true" />
+                          ) : (
+                            <input
+                              className="batch-check"
+                              type="checkbox"
+                              aria-label={`Select ${proposal.id} for batch decision`}
+                              checked={batchIds.has(proposal.id)}
+                              title="Select for batch decision"
+                              onClick={(click) => click.stopPropagation()}
+                              onChange={() => {
+                                setBatchIds((current) => {
+                                  const next = new Set(current);
+                                  if (next.has(proposal.id)) next.delete(proposal.id);
+                                  else next.add(proposal.id);
+                                  return next;
+                                });
+                              }}
+                            />
+                          )}
                         </td>
                       ) : null}
                       <td className="col-avatar">
@@ -1026,8 +1044,15 @@ export function SubmissionsWorkspace({
                         </span>
                       </td>
                       <td className="col-status">
-                        <span className={`flag flag-${proposal.status}`}>
-                          {statusLabel(proposal.status)}
+                        <span
+                          className={rowStatusClass(proposal)}
+                          title={
+                            proposal.programOutcome
+                              ? `Final outcome: ${programOutcomeLabel(proposal.programOutcome)}`
+                              : undefined
+                          }
+                        >
+                          {rowStatusLabel(proposal)}
                         </span>
                       </td>
                       <td className="col-score">
