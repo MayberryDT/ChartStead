@@ -6,8 +6,8 @@ Judge-facing path through ChartStead from public CFP to published program. Uses 
 
 | Surface | URL |
 | --- | --- |
-| **Deployed evaluator entry** | https://chartstead-demo.mayberrydt.workers.dev/demo |
-| Organizer deep link | https://chartstead-demo.mayberrydt.workers.dev |
+| **Deployed evaluator entry** | https://demo.chartstead.com/demo |
+| Organizer deep link | https://demo.chartstead.com |
 | Production (auth required) | https://chartstead.mayberrydt.workers.dev |
 | Local demo | `npm run dev:demo -- --host 0.0.0.0 --port 5173` → `http://100.105.117.93:5173` |
 
@@ -108,8 +108,8 @@ Details: [course-check-killer-walkthrough.md](./course-check-killer-walkthrough.
 ### 14. HTTP API smoke
 
 ```bash
-curl -sS https://chartstead-demo.mayberrydt.workers.dev/api/v1/health
-curl -sS https://chartstead-demo.mayberrydt.workers.dev/api/events/pacific-open-data-summit-2026/program
+curl -sS https://demo.chartstead.com/api/v1/health
+curl -sS https://demo.chartstead.com/api/events/pacific-open-data-summit-2026/program
 ```
 
 Authenticated vertical slice: [http-api-v1.md](./http-api-v1.md).  

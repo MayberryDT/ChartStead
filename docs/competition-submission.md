@@ -13,7 +13,7 @@ Paste-ready material for the open-source competition form and judges.
 | Forge repository | https://forge.smol.ai/tylermayberry/ChartStead |
 | GitHub mirror | https://github.com/MayberryDT/ChartStead |
 | License | MIT (`LICENSE`) |
-| **Demo evaluator entry (no login)** | https://chartstead-demo.mayberrydt.workers.dev/demo |
+| **Demo evaluator entry (no login)** | https://demo.chartstead.com/demo |
 | Production | https://chartstead.mayberrydt.workers.dev |
 | Walkthrough | [competition-walkthrough.md](./competition-walkthrough.md) |
 | Course Check deep dive | [course-check-killer-walkthrough.md](./course-check-killer-walkthrough.md) |
@@ -75,6 +75,6 @@ npm run deploy:dry
 Live smoke (no auth on demo):
 
 ```bash
-curl -sS https://chartstead-demo.mayberrydt.workers.dev/api/health
-curl -sS https://chartstead-demo.mayberrydt.workers.dev/api/v1/health
+curl -sS https://demo.chartstead.com/api/health
+curl -sS https://demo.chartstead.com/api/v1/health
 ```
