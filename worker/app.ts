@@ -57,7 +57,9 @@ import {
   SpeakerCsvParseError,
 } from "../shared/speaker-csv";
 import {
+  authStatusFromEnv,
   createAuth,
+  emptyPrincipalForUser,
   resolveProductionAuthenticatedUser,
   resolveProductionPrincipal,
   type AuthenticatedUser,
@@ -1118,6 +1120,8 @@ export function createApp(options: AppOptions = {}) {
 
   app.get("/api/health", (c) => c.json({ status: "ok" }));
 
+  app.get("/api/auth-status", (c) => c.json(authStatusFromEnv(c.env)));
+
   app.get("/api/reviewer-invitations/:token", async (c) => {
     const invitation = await getReviewerInvitationByToken(
       c.env.AUTH_DB,
@@ -1354,6 +1358,10 @@ export function createApp(options: AppOptions = {}) {
   app.get("/api/events", async (c) => {
     const principal = await resolvePrincipal(c.req.raw, c.env);
     if (!principal) {
+      const user = await resolveAuthenticatedUser(c.req.raw, c.env);
+      if (user) {
+        return c.json({ events: [], principal: emptyPrincipalForUser(user) });
+      }
       return c.json({ error: "Unauthorized" }, 401);
     }
 

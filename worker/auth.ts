@@ -2,12 +2,97 @@ import { betterAuth } from "better-auth";
 import { magicLink } from "better-auth/plugins";
 
 import type { OrganizerPrincipal } from "../shared/events";
+import { renderMagicLinkEmail } from "./emails/magic-link";
+import { listAllEventWorkspaceIds } from "./event-catalog";
 import type { AppBindings } from "./types";
 
 export interface AuthenticatedUser {
   id: string;
   name: string;
   email: string;
+}
+
+export const PRODUCTION_BOOTSTRAP_ADMIN_EMAIL = "tyler@animasai.co";
+
+const TAILSCALE_HOST = "100.105.117.93";
+const LOCAL_AUTH_PORTS = ["5173", "5858"];
+
+export function isProductionBootstrapAdmin(email: string): boolean {
+  return email.trim().toLowerCase() === PRODUCTION_BOOTSTRAP_ADMIN_EMAIL;
+}
+
+export function authTrustedOrigins(baseURL: string | undefined): string[] {
+  const origins = new Set<string>();
+  if (baseURL) origins.add(baseURL.replace(/\/$/, ""));
+  for (const port of LOCAL_AUTH_PORTS) {
+    origins.add(`http://localhost:${port}`);
+    origins.add(`http://127.0.0.1:${port}`);
+    origins.add(`http://${TAILSCALE_HOST}:${port}`);
+  }
+  origins.add("https://app.chartstead.com");
+  origins.add("https://chartstead.mayberrydt.workers.dev");
+  return [...origins];
+}
+
+/** Google rejects Tailscale CGNAT IPs, so local Google uses localhost. Email links still open on Tailscale. */
+export function magicLinkPublicUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") {
+      parsed.hostname = TAILSCALE_HOST;
+    }
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+export function emptyPrincipalForUser(user: AuthenticatedUser): OrganizerPrincipal {
+  return {
+    id: user.id,
+    displayName: user.name,
+    role: "reviewer",
+    eventIds: [],
+    rolesByEvent: {},
+  };
+}
+
+function hasRealSecret(value: string | undefined): boolean {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return false;
+  return !/replace-with|example\.com|changeme/i.test(trimmed);
+}
+
+export function authStatusFromEnv(env: AppBindings): {
+  configured: boolean;
+  google: boolean;
+  magicLink: boolean;
+} {
+  return {
+    configured: hasRealSecret(env.BETTER_AUTH_SECRET),
+    google: hasRealSecret(env.GOOGLE_CLIENT_ID) && hasRealSecret(env.GOOGLE_CLIENT_SECRET),
+    magicLink: hasRealSecret(env.RESEND_API_KEY) && hasRealSecret(env.AUTH_EMAIL_FROM),
+  };
+}
+
+export async function grantBootstrapAdminMemberships(
+  database: D1Database,
+  user: { id: string; email: string },
+): Promise<void> {
+  if (!isProductionBootstrapAdmin(user.email)) return;
+  const eventIds = await listAllEventWorkspaceIds(database);
+  if (eventIds.length === 0) return;
+  await database.batch(
+    eventIds.map((eventId) =>
+      database
+        .prepare(
+          `INSERT INTO event_memberships (event_id, user_id, role)
+           VALUES (?, ?, 'admin')
+           ON CONFLICT(event_id, user_id) DO UPDATE SET role = 'admin'`,
+        )
+        .bind(eventId, user.id),
+    ),
+  );
 }
 
 async function sendMagicLink(
@@ -19,6 +104,7 @@ async function sendMagicLink(
     throw new Error("Magic-link email is not configured for this environment.");
   }
 
+  const message = await renderMagicLinkEmail({ url: magicLinkPublicUrl(url) });
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -28,8 +114,9 @@ async function sendMagicLink(
     body: JSON.stringify({
       from: env.AUTH_EMAIL_FROM,
       to: email,
-      subject: "Sign in to ChartStead",
-      text: `Open your ChartStead event desk: ${url}`,
+      subject: message.subject,
+      html: message.html,
+      text: message.text,
     }),
   });
 
@@ -57,7 +144,7 @@ export function createAuth(env: AppBindings) {
     database: env.AUTH_DB,
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
-    trustedOrigins: [env.BETTER_AUTH_URL],
+    trustedOrigins: authTrustedOrigins(env.BETTER_AUTH_URL),
     socialProviders: google,
     account: { encryptOAuthTokens: true },
     session: {
@@ -123,6 +210,11 @@ export async function resolveProductionPrincipal(
   if (!session) {
     return null;
   }
+
+  await grantBootstrapAdminMemberships(env.AUTH_DB, {
+    id: session.user.id,
+    email: session.user.email,
+  });
 
   return loadPrincipalForUser(env.AUTH_DB, {
     id: session.user.id,

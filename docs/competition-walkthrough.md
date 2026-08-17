@@ -8,7 +8,7 @@ Judge-facing path through ChartStead from public CFP to published program. Uses 
 | --- | --- |
 | **Deployed evaluator entry** | https://demo.chartstead.com/demo |
 | Organizer deep link | https://demo.chartstead.com |
-| Production (auth required) | https://chartstead.mayberrydt.workers.dev |
+| Production (auth required) | https://app.chartstead.com |
 | Local demo | `npm run dev:demo -- --host 0.0.0.0 --port 5173` → `http://100.105.117.93:5173` |
 
 Event id: `pacific-open-data-summit-2026`  

@@ -14,7 +14,7 @@ Paste-ready material for the open-source competition form and judges.
 | GitHub mirror | https://github.com/MayberryDT/ChartStead |
 | License | MIT (`LICENSE`) |
 | **Demo evaluator entry (no login)** | https://demo.chartstead.com/demo |
-| Production | https://chartstead.mayberrydt.workers.dev |
+| Production | https://app.chartstead.com |
 | Walkthrough | [competition-walkthrough.md](./competition-walkthrough.md) |
 | Course Check deep dive | [course-check-killer-walkthrough.md](./course-check-killer-walkthrough.md) |
 | HTTP API | [http-api-v1.md](./http-api-v1.md) |

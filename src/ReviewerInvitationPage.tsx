@@ -1,19 +1,16 @@
 import { Button } from "@base-ui/react/button";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { type FormEvent, useState } from "react";
 
 import markOnLightUrl from "../design/assets/brand/chartstead-mark-on-light.png";
 import { acceptReviewerInvitation, fetchReviewerInvitation } from "./api";
 import { authClient } from "./auth-client";
+import { AuthMethodButtons } from "./SignIn";
 
 export function ReviewerInvitationPage() {
   const { token } = useParams({ strict: false }) as { token: string };
   const navigate = useNavigate();
   const session = authClient.useSession();
-  const [email, setEmail] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
   const query = useQuery({
     queryKey: ["reviewer-invitation", token],
     queryFn: () => fetchReviewerInvitation(token),
@@ -25,19 +22,6 @@ export function ReviewerInvitationPage() {
       void navigate({ to: result.queuePath });
     },
   });
-
-  async function requestMagicLink(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSending(true);
-    const callbackURL = window.location.pathname;
-    const result = await authClient.signIn.magicLink({ email, callbackURL });
-    setSending(false);
-    setMessage(
-      result.error
-        ? result.error.message ?? "Unable to send sign-in link."
-        : "Check your email for a secure sign-in link, then return here.",
-    );
-  }
 
   return (
     <main className="sign-in-shell">
@@ -72,24 +56,13 @@ export function ReviewerInvitationPage() {
                 {acceptMutation.isPending ? "Joining queue…" : "Accept and open review queue"}
               </Button>
             ) : (
-              <form className="magic-link-form" onSubmit={requestMagicLink}>
-                <label htmlFor="reviewer-invitation-email">Sign in with the invited email</label>
-                <div>
-                  <input
-                    id="reviewer-invitation-email"
-                    type="email"
-                    required
-                    autoComplete="email"
-                    value={email}
-                    onChange={(change) => setEmail(change.target.value)}
-                  />
-                  <Button className="secondary-action" type="submit" disabled={sending} focusableWhenDisabled>
-                    {sending ? "Sending…" : "Email sign-in link"}
-                  </Button>
-                </div>
-              </form>
+              <AuthMethodButtons
+                callbackURL={window.location.pathname}
+                emailInputId="reviewer-invitation-email"
+                emailLabel="Sign in with the invited email"
+                emailButtonLabel="Email sign-in link"
+              />
             )}
-            {message ? <p className="form-message" role="status">{message}</p> : null}
             {acceptMutation.isError ? (
               <p className="form-message" data-tone="error" role="alert">
                 {acceptMutation.error.message}

@@ -34,6 +34,10 @@ export interface CommunicationEmailSender {
 }
 
 export {
+  renderMagicLinkEmail,
+  type MagicLinkEmailInput,
+} from "./emails/magic-link";
+export {
   renderSubmissionConfirmationEmail,
   type SubmissionConfirmationEmailInput,
 } from "./emails/submission-confirmation";
