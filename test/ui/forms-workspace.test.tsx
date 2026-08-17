@@ -4,7 +4,11 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createDefaultCfpDefinition } from "../../shared/cfp-definition";
+import {
+  createDefaultCfpDefinition,
+  updateQuestion,
+  updateWelcome,
+} from "../../shared/cfp-definition";
 import type { OrganizerCfpForm, OrganizerCfpFormSummary } from "../../shared/events";
 import {
   defaultFormsQueue,
@@ -65,16 +69,44 @@ const forms: OrganizerCfpFormSummary[] = [
   },
 ];
 
-function organizerForm(summary: OrganizerCfpFormSummary): OrganizerCfpForm {
-  const draft = createDefaultCfpDefinition({
+function organizerForm(
+  summary: OrganizerCfpFormSummary,
+  options?: { welcomeTitle?: string; titleLabel?: string; invalid?: boolean },
+): OrganizerCfpForm {
+  let draft = createDefaultCfpDefinition({
     definitionId: summary.id,
     eventId,
     trackChoices: [{ value: "platform", text: "Platform" }],
   });
+  if (options?.welcomeTitle) {
+    draft = updateWelcome(draft, {
+      title: options.welcomeTitle,
+      body: `Welcome body for ${summary.name}.`,
+    });
+  }
+  if (options?.titleLabel) {
+    draft = updateQuestion(draft, "title", { title: options.titleLabel });
+  }
+  if (options?.invalid) {
+    draft = {
+      ...draft,
+      runtime: {
+        ...draft.runtime,
+        survey: {
+          ...draft.runtime.survey,
+          elements: draft.runtime.survey.elements.filter(
+            (element) => element.name !== "title",
+          ),
+        },
+      },
+    };
+  }
   return {
     ...summary,
     draft,
-    publishedDefinition: summary.publishedVersion ? { ...draft, status: "published", definitionVersion: summary.publishedVersion } : null,
+    publishedDefinition: summary.publishedVersion
+      ? { ...draft, status: "published", definitionVersion: summary.publishedVersion }
+      : null,
   };
 }
 
@@ -97,12 +129,15 @@ function Harness() {
   );
 }
 
-function renderForms(data: OrganizerCfpFormSummary[] = forms) {
+function renderForms(
+  data: OrganizerCfpFormSummary[] = forms,
+  detailFactory: (summary: OrganizerCfpFormSummary) => OrganizerCfpForm = organizerForm,
+) {
   vi.spyOn(api, "fetchOrganizerForms").mockResolvedValue(data);
   vi.spyOn(api, "fetchOrganizerForm").mockImplementation(async (_eventId, formId) => {
     const summary = data.find((form) => form.id === formId) ?? data[0]!;
     return {
-      form: organizerForm(summary),
+      form: detailFactory(summary),
       event: {
         id: eventId,
         name: "Pacific Open Data Summit 2026",
@@ -166,6 +201,167 @@ describe("FormsWorkspace", () => {
       `/e/${eventId}/forms/late-draft`,
     );
     expect(screen.getByLabelText("Form preview")).toBeVisible();
+  });
+
+  it("updates the right preview when a different form is selected", async () => {
+    const user = userEvent.setup();
+    const pair: OrganizerCfpFormSummary[] = [
+      {
+        id: "alpha-form",
+        name: "Alpha talks",
+        lifecycleStatus: "draft",
+        draftUpdatedAt: "2026-08-11T00:00:00.000Z",
+        publishedVersion: null,
+        publishedAt: null,
+      },
+      {
+        id: "beta-form",
+        name: "Beta workshops",
+        lifecycleStatus: "published",
+        draftUpdatedAt: "2026-08-01T00:00:00.000Z",
+        publishedVersion: 1,
+        publishedAt: "2026-08-01T00:00:00.000Z",
+      },
+    ];
+
+    renderForms(pair, (summary) =>
+      organizerForm(summary, {
+        welcomeTitle:
+          summary.id === "alpha-form" ? "Welcome to Alpha" : "Welcome to Beta",
+        titleLabel:
+          summary.id === "alpha-form" ? "Alpha talk title" : "Beta workshop title",
+      }),
+    );
+
+    const table = await screen.findByRole("table", { name: "Forms" });
+    await waitFor(() => {
+      expect(screen.getByTestId("forms-preview-name")).toHaveTextContent("Alpha talks");
+    });
+    expect(screen.getByTestId("forms-preview-welcome")).toHaveTextContent("Welcome to Alpha");
+    expect(screen.getByText("Alpha talk title")).toBeVisible();
+    expect(screen.queryByText("Beta workshop title")).toBeNull();
+
+    await user.click(within(table).getByRole("link", { name: "Beta workshops" }).closest("tr")!);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("forms-preview-name")).toHaveTextContent("Beta workshops");
+    });
+    expect(screen.getByTestId("forms-preview-welcome")).toHaveTextContent("Welcome to Beta");
+    expect(screen.getByText("Beta workshop title")).toBeVisible();
+    expect(screen.queryByText("Alpha talk title")).toBeNull();
+    expect(screen.queryByTestId("forms-preview-loading")).toBeNull();
+  });
+
+  it("shows a clear loading state instead of a stale previous preview", async () => {
+    const user = userEvent.setup();
+    const pair: OrganizerCfpFormSummary[] = [
+      {
+        id: "first-form",
+        name: "First form",
+        lifecycleStatus: "draft",
+        draftUpdatedAt: "2026-08-11T00:00:00.000Z",
+        publishedVersion: null,
+        publishedAt: null,
+      },
+      {
+        id: "second-form",
+        name: "Second form",
+        lifecycleStatus: "published",
+        draftUpdatedAt: "2026-08-01T00:00:00.000Z",
+        publishedVersion: 1,
+        publishedAt: "2026-08-01T00:00:00.000Z",
+      },
+    ];
+
+    let releaseSecond!: () => void;
+    const secondGate = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+
+    vi.spyOn(api, "fetchOrganizerForms").mockResolvedValue(pair);
+    vi.spyOn(api, "fetchOrganizerForm").mockImplementation(async (_eventId, formId) => {
+      const summary = pair.find((form) => form.id === formId) ?? pair[0]!;
+      if (formId === "second-form") await secondGate;
+      return {
+        form: organizerForm(summary, {
+          welcomeTitle: formId === "first-form" ? "First welcome" : "Second welcome",
+        }),
+        event: {
+          id: eventId,
+          name: "Pacific Open Data Summit 2026",
+          startsOn: "2026-10-07",
+          endsOn: "2026-10-08",
+          timezone: "America/Los_Angeles",
+        },
+      };
+    });
+
+    render(<Harness />);
+    const table = await screen.findByRole("table", { name: "Forms" });
+    await waitFor(() => {
+      expect(screen.getByTestId("forms-preview-name")).toHaveTextContent("First form");
+    });
+
+    await user.click(within(table).getByRole("link", { name: "Second form" }).closest("tr")!);
+
+    expect(await screen.findByTestId("forms-preview-loading")).toBeVisible();
+    expect(screen.queryByTestId("forms-preview-name")).toBeNull();
+    expect(screen.queryByText("First welcome")).toBeNull();
+
+    releaseSecond();
+    await waitFor(() => {
+      expect(screen.getByTestId("forms-preview-name")).toHaveTextContent("Second form");
+    });
+    expect(screen.getByTestId("forms-preview-welcome")).toHaveTextContent("Second welcome");
+  });
+
+  it("keeps the invalid-draft empty state scoped to the selected form", async () => {
+    const user = userEvent.setup();
+    const pair: OrganizerCfpFormSummary[] = [
+      {
+        id: "valid-form",
+        name: "Valid form",
+        lifecycleStatus: "published",
+        draftUpdatedAt: "2026-08-01T00:00:00.000Z",
+        publishedVersion: 1,
+        publishedAt: "2026-08-01T00:00:00.000Z",
+      },
+      {
+        id: "broken-form",
+        name: "Broken draft",
+        lifecycleStatus: "draft",
+        draftUpdatedAt: "2026-08-11T00:00:00.000Z",
+        publishedVersion: null,
+        publishedAt: null,
+      },
+    ];
+
+    renderForms(pair, (summary) =>
+      organizerForm(summary, {
+        welcomeTitle: summary.id === "valid-form" ? "Valid welcome" : "Broken welcome",
+        invalid: summary.id === "broken-form",
+      }),
+    );
+
+    const table = await screen.findByRole("table", { name: "Forms" });
+    await waitFor(() => {
+      expect(screen.getByTestId("forms-preview-name")).toHaveTextContent("Broken draft");
+    });
+    // name-asc sorts Broken before Valid
+    expect(screen.getByTestId("forms-preview-invalid")).toBeVisible();
+
+    await user.click(within(table).getByRole("link", { name: "Valid form" }).closest("tr")!);
+    await waitFor(() => {
+      expect(screen.getByTestId("forms-preview-name")).toHaveTextContent("Valid form");
+    });
+    expect(screen.queryByTestId("forms-preview-invalid")).toBeNull();
+    expect(screen.getByTestId("forms-preview-welcome")).toHaveTextContent("Valid welcome");
+
+    await user.click(within(table).getByRole("link", { name: "Broken draft" }).closest("tr")!);
+    await waitFor(() => {
+      expect(screen.getByTestId("forms-preview-invalid")).toBeVisible();
+    });
+    expect(screen.getByTestId("forms-preview-name")).toHaveTextContent("Broken draft");
   });
 
   it("sorts locally from headers without changing the loaded set", async () => {
