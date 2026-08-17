@@ -1,6 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import type {
   AgendaAutoPlacePreview,
@@ -438,6 +445,39 @@ export function AgendaWorkspace({
     syncAgendaUrl({ day });
   }
 
+  function focusDayTab(day: string) {
+    window.requestAnimationFrame(() => {
+      const tab = document.querySelector<HTMLElement>(
+        `.agenda-day-switcher [role="tab"][data-day="${day}"]`,
+      );
+      tab?.focus();
+    });
+  }
+
+  function onDayTabsKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (
+      event.key !== "ArrowLeft" &&
+      event.key !== "ArrowRight" &&
+      event.key !== "Home" &&
+      event.key !== "End"
+    ) {
+      return;
+    }
+    const index = days.indexOf(selectedDay);
+    if (index < 0) return;
+    let next = index;
+    if (event.key === "ArrowLeft") next = Math.max(0, index - 1);
+    if (event.key === "ArrowRight") next = Math.min(days.length - 1, index + 1);
+    if (event.key === "Home") next = 0;
+    if (event.key === "End") next = days.length - 1;
+    if (next === index) return;
+    event.preventDefault();
+    const day = days[next];
+    if (!day) return;
+    selectDay(day);
+    focusDayTab(day);
+  }
+
   function selectSession(sessionId: string) {
     const session = sessions.find((item) => item.id === sessionId);
     setSelectedId(sessionId);
@@ -582,7 +622,13 @@ export function AgendaWorkspace({
       tools: (
         <div className="topbar-tools-inner agenda-shell-tools">
           <div className="agenda-shell-left">
-            <div className="agenda-day-tabs seg" role="tablist" aria-label="Event days">
+            <div
+              className="agenda-day-switcher"
+              role="tablist"
+              aria-label="Event days"
+              data-day-count={days.length}
+              onKeyDown={onDayTabsKeyDown}
+            >
               {days.map((day) => {
                 const count = daySessionCounts.get(day) ?? 0;
                 const isSelected = day === selectedDay;
@@ -592,8 +638,12 @@ export function AgendaWorkspace({
                     key={day}
                     type="button"
                     role="tab"
+                    data-day={day}
                     aria-selected={isSelected}
-                    className={hostsSelection ? "has-selection-elsewhere" : undefined}
+                    tabIndex={isSelected ? 0 : -1}
+                    className={`btn btn-secondary btn-sm agenda-day-btn${
+                      hostsSelection ? " has-selection-elsewhere" : ""
+                    }${isSelected ? " is-selected" : ""}`}
                     onClick={() => selectDay(day)}
                   >
                     <span className="agenda-day-label">{dayLabel(day)}</span>
