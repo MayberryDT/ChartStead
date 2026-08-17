@@ -73,7 +73,7 @@ Tyler (2026-08-17): thorough testing of MCP and API agent integration; agents mu
     4. Same Activity picker: pick the **agent** — same on-behalf-of wording.
     5. Propose-only key cannot apply; MCP still blocks `/api-keys` and `/integrations`.
   - Verified: `test/worker/agent-api-mcp-parity.test.ts` 5/5; organizer-activity / ai-connections / course-check-agent-api 27/27 worker; UI organizer-activity 2/2.
-  - Gap-closes: stored on-behalf labels; activity dual-index on initiating human; agents in Activity picker; `GET /api/v1/.../organizer/activity`; Activity rows show actor name.
+  - Gap-closes: stored on-behalf labels; activity dual-index on initiating human; agents in Activity picker; `GET /api/v1/.../organizer/activity`; Activity rows show actor name; MCP `chartstead_event_api` allows safe query strings (activity filters).
 
 - 2026-08-17 — Claimed for implementation: parity matrix, human/API/MCP equivalence tests, agent-on-behalf activity attribution (incl. initiating-human dual index), gap-close, handoff brief.
 

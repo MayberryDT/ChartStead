@@ -66,6 +66,7 @@ Use the single-context domain-doc layout. See [docs/agents/domain.md](docs/agent
 - Competition walkthrough / submission package: [`docs/competition-walkthrough.md`](docs/competition-walkthrough.md), [`docs/competition-submission.md`](docs/competition-submission.md)
 - Full manual rubric audit handoff: [`docs/2026-08-12-chartstead-full-rubric-acceptance-audit-handoff.md`](docs/2026-08-12-chartstead-full-rubric-acceptance-audit-handoff.md)
 - Automation access (API keys + MCP): [`docs/ai-connections.md`](docs/ai-connections.md)
+- Agent UI ↔ API ↔ MCP parity matrix + activity attribution: [`docs/agent-api-mcp-parity-matrix.md`](docs/agent-api-mcp-parity-matrix.md)
 
 ## Private / bulk source material
 

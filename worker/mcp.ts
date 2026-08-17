@@ -158,28 +158,32 @@ async function callTool(
     } catch {
       /* rejected below */
     }
+    const hashIndex = decodedPath.indexOf("#");
+    if (hashIndex >= 0) decodedPath = decodedPath.slice(0, hashIndex);
+    const queryIndex = decodedPath.indexOf("?");
+    const pathOnly = queryIndex >= 0 ? decodedPath.slice(0, queryIndex) : decodedPath;
+    const query = queryIndex >= 0 ? decodedPath.slice(queryIndex + 1) : "";
     const eventPrefix = `/events/${encodeURIComponent(eventId)}`;
-    const normalizedPath = decodedPath
-      ? new URL(`${eventPrefix}${decodedPath}`, "https://chartstead.invalid").pathname
+    const normalizedPath = pathOnly
+      ? new URL(`${eventPrefix}${pathOnly}`, "https://chartstead.invalid").pathname
       : "";
     if (
       !["GET", "POST", "PATCH"].includes(method) ||
-      !decodedPath.startsWith("/") ||
-      decodedPath.includes("..") ||
-      decodedPath.includes("\\") ||
-      decodedPath.includes("?") ||
-      decodedPath.includes("#") ||
+      !pathOnly.startsWith("/") ||
+      pathOnly.includes("..") ||
+      pathOnly.includes("\\") ||
       !normalizedPath.startsWith(`${eventPrefix}/`)
     ) {
       return toolError(id, "Choose a supported method and a relative event API path.");
     }
-    if (/^\/(?:api-keys|integrations)(?:\/|$)/.test(decodedPath)) {
+    if (/^\/(?:api-keys|integrations)(?:\/|$)/.test(pathOnly)) {
       return toolError(id, "Agents cannot manage credentials or integration configuration.");
     }
     const headers = new Headers();
     if (method !== "GET") headers.set("content-type", "application/json");
     if (typeof args.idempotencyKey === "string") headers.set("idempotency-key", args.idempotencyKey);
-    response = await requestV1(normalizedPath, {
+    const requestPath = query ? `${normalizedPath}?${query}` : normalizedPath;
+    response = await requestV1(requestPath, {
       method,
       headers,
       body: method === "GET" ? undefined : JSON.stringify(args.body ?? {}),
