@@ -1,0 +1,1916 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ChartStead Embeds tab — 10 layout directions</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --primary: #081D3A;
+      --secondary: #2F5D98;
+      --tertiary: #22B573;
+      --bg: #FFFFFF;
+      --surface: #FFFFFF;
+      --subtle: #F3F5F7;
+      --muted: #E9EDF2;
+      --on: #081D3A;
+      --on-var: #526071;
+      --on-muted: #5B6878;
+      --outline: #D7DEE7;
+      --outline-strong: #AEBAC8;
+      --selection: #EAF2FB;
+      --success-bg: #E9F8F1;
+      --success: #087A4D;
+      --warn-bg: #FFF4E5;
+      --warn: #8A4D09;
+      --error-bg: #FDECEA;
+      --error: #B42318;
+      --harbor: #e8f0f8;
+      --focus: #2F5D98;
+      --page: #eef2f6;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+      --sans: Inter, ui-sans-serif, system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font: 14px/1.45 var(--sans);
+      color: var(--on);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #dfeaf7 0%, transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, #e8f4ee 0%, transparent 45%),
+        var(--page);
+    }
+
+    a { color: inherit; }
+
+    .page {
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 28px 24px 80px;
+    }
+
+    .hero {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 22px;
+      padding: 22px 24px;
+      border: 1px solid var(--outline);
+      border-radius: 12px;
+      background: color-mix(in srgb, white 88%, var(--harbor));
+      box-shadow: 0 10px 30px rgba(8, 29, 58, 0.05);
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: 28px;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+    }
+
+    .hero p {
+      margin: 0;
+      max-width: 72ch;
+      color: var(--on-var);
+    }
+
+    .hero .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 6px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 0 10px;
+      border: 1px solid var(--outline);
+      border-radius: 999px;
+      background: white;
+      color: var(--on-muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .index {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 10px 0 14px;
+      margin: 0 0 18px;
+      background: linear-gradient(var(--page) 70%, transparent);
+      backdrop-filter: blur(6px);
+    }
+
+    .index a {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 36px;
+      padding: 0 12px;
+      border: 1px solid var(--outline);
+      border-radius: 999px;
+      background: white;
+      text-decoration: none;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--on-var);
+      transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+    }
+
+    .index a:hover,
+    .index a:focus-visible {
+      border-color: var(--secondary);
+      color: var(--primary);
+      background: var(--selection);
+      outline: none;
+    }
+
+    .index a span {
+      display: inline-grid;
+      place-items: center;
+      width: 20px;
+      height: 20px;
+      border-radius: 999px;
+      background: var(--primary);
+      color: white;
+      font-size: 11px;
+    }
+
+    .option {
+      margin: 0 0 42px;
+      scroll-margin-top: 64px;
+    }
+
+    .option-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: end;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 0 0 12px;
+    }
+
+    .option-head h2 {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: -0.02em;
+    }
+
+    .option-head p {
+      margin: 4px 0 0;
+      color: var(--on-muted);
+      max-width: 70ch;
+      font-size: 13px;
+    }
+
+    .option-num {
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--secondary);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    /* Shared mini-app chrome */
+    .desk {
+      --desk-radius: 14px;
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      min-height: 620px;
+      border: 1px solid var(--outline-strong);
+      border-radius: var(--desk-radius);
+      overflow: hidden;
+      background: white;
+      box-shadow:
+        0 1px 0 rgba(255,255,255,0.7) inset,
+        0 18px 40px rgba(8, 29, 58, 0.08);
+    }
+
+    .rail {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      padding: 16px 14px;
+      background: linear-gradient(180deg, #0b2344 0%, #081d3a 100%);
+      color: white;
+    }
+
+    .brand {
+      display: grid;
+      gap: 2px;
+      padding: 4px 8px 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.12);
+    }
+
+    .brand strong { font-size: 14px; letter-spacing: -0.02em; }
+    .brand span { color: rgba(255,255,255,0.62); font-size: 11px; }
+
+    .nav {
+      display: grid;
+      gap: 4px;
+    }
+
+    .nav button {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: rgba(255,255,255,0.78);
+      text-align: left;
+      min-height: 36px;
+      padding: 0 10px;
+      border-radius: 8px;
+      font: inherit;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: default;
+    }
+
+    .nav button.active {
+      background: rgba(255,255,255,0.12);
+      color: white;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+    }
+
+    .main {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      min-width: 0;
+      background: #f7f9fb;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 56px;
+      padding: 10px 14px;
+      background: var(--harbor);
+      border-bottom: 1px solid var(--outline);
+    }
+
+    .toolbar-tools {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .toolbar-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+    }
+
+    .btn {
+      appearance: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 36px;
+      padding: 0 12px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      font: inherit;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: default;
+      white-space: nowrap;
+    }
+
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-secondary { background: white; color: var(--on); border-color: var(--outline-strong); }
+    .btn-ghost { background: transparent; color: var(--on-var); border-color: transparent; }
+    .btn-sm { min-height: 32px; padding: 0 10px; font-size: 12px; }
+
+    .field {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 36px;
+      padding: 0 10px;
+      border: 1px solid var(--outline-strong);
+      border-radius: 8px;
+      background: white;
+      color: var(--on-var);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .field select,
+    .field input {
+      border: 0;
+      background: transparent;
+      font: inherit;
+      color: var(--on);
+      outline: none;
+      min-width: 0;
+    }
+
+    .work {
+      min-width: 0;
+      min-height: 0;
+      padding: 14px;
+    }
+
+    .panel {
+      background: white;
+      border: 1px solid var(--outline);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .panel-h {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--outline);
+      background: color-mix(in srgb, white 70%, var(--subtle));
+    }
+
+    .panel-h h3 {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .panel-h span {
+      color: var(--on-muted);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .flag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 0 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    .flag-live { background: var(--success-bg); color: var(--success); }
+    .flag-off { background: var(--error-bg); color: var(--error); }
+    .flag-pin { background: var(--selection); color: #244E7D; }
+    .flag-cur { background: var(--subtle); color: var(--on-var); }
+
+    table.ops {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    table.ops th,
+    table.ops td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--outline);
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    table.ops th {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--on-muted);
+      background: var(--subtle);
+      font-weight: 700;
+    }
+
+    table.ops tr.selected td {
+      background: var(--selection);
+    }
+
+    table.ops td strong {
+      display: block;
+      font-size: 13px;
+      letter-spacing: -0.01em;
+    }
+
+    table.ops td .sub {
+      color: var(--on-muted);
+      font-size: 12px;
+      margin-top: 2px;
+    }
+
+    .mono {
+      font-family: var(--mono);
+      font-size: 11.5px;
+      line-height: 1.45;
+    }
+
+    .code {
+      margin: 0;
+      padding: 12px;
+      background: #0b1a30;
+      color: #d7e6f8;
+      overflow: auto;
+      border-radius: 0 0 12px 12px;
+    }
+
+    .label {
+      display: grid;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--on-var);
+    }
+
+    .label input,
+    .label select,
+    .label textarea {
+      min-height: 36px;
+      padding: 8px 10px;
+      border: 1px solid var(--outline-strong);
+      border-radius: 8px;
+      font: inherit;
+      color: var(--on);
+      background: white;
+    }
+
+    .checks {
+      display: grid;
+      gap: 6px;
+    }
+
+    .checks label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 32px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--on);
+    }
+
+    .widget-tiles {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .widget-tiles button {
+      appearance: none;
+      min-height: 64px;
+      padding: 10px;
+      border: 1px solid var(--outline);
+      border-radius: 10px;
+      background: white;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--on);
+      text-align: left;
+      cursor: default;
+    }
+
+    .widget-tiles button.on {
+      border-color: var(--secondary);
+      background: var(--selection);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--secondary) 18%, transparent);
+    }
+
+    .preview-frame {
+      border: 1px dashed color-mix(in srgb, var(--secondary) 35%, var(--outline));
+      border-radius: 10px;
+      background:
+        linear-gradient(180deg, #fbfdff 0%, #f3f7fb 100%);
+      overflow: hidden;
+      min-height: 220px;
+    }
+
+    .preview-chrome {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--outline);
+      background: white;
+      font-size: 11px;
+      color: var(--on-muted);
+      font-weight: 600;
+    }
+
+    .preview-body {
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+    }
+
+    .session {
+      display: grid;
+      gap: 4px;
+      padding: 10px 12px;
+      border: 1px solid var(--outline);
+      border-radius: 8px;
+      background: white;
+    }
+
+    .session strong { font-size: 13px; }
+    .session span { color: var(--on-muted); font-size: 12px; }
+    .session .accent {
+      width: 4px;
+      height: 100%;
+      border-radius: 999px;
+      background: var(--secondary);
+      position: absolute;
+      left: 0;
+      top: 0;
+    }
+
+    .muted { color: var(--on-muted); }
+    .tiny { font-size: 11px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: var(--on-muted); }
+
+    /* —— Option-specific layouts —— */
+
+    /* 01 Harbor Ledger */
+    .o01 .split {
+      display: grid;
+      grid-template-columns: minmax(280px, 0.95fr) minmax(340px, 1.1fr);
+      gap: 12px;
+      height: 100%;
+      min-height: 520px;
+    }
+    .o01 .preview-wrap { margin-top: 12px; }
+    .o01 .editor {
+      display: grid;
+      gap: 12px;
+      padding: 12px;
+    }
+    .o01 .editor-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    /* 02 Snippet Forge */
+    .o02 .tri {
+      display: grid;
+      grid-template-columns: 240px minmax(280px, 1fr) minmax(300px, 1.05fr);
+      gap: 10px;
+      min-height: 520px;
+    }
+    .o02 .list-item {
+      display: grid;
+      gap: 4px;
+      width: 100%;
+      padding: 10px 12px;
+      border: 0;
+      border-bottom: 1px solid var(--outline);
+      background: white;
+      text-align: left;
+      font: inherit;
+      cursor: default;
+    }
+    .o02 .list-item.on { background: var(--selection); }
+    .o02 .forge-form {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      align-content: start;
+    }
+    .o02 .preview-frame { min-height: 100%; height: 100%; }
+
+    /* 03 Install-First Rail */
+    .o03 .stage {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) 320px;
+      gap: 12px;
+      min-height: 520px;
+    }
+    .o03 .install {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 0;
+    }
+    .o03 .config-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .o03 .config-strip .label { padding: 10px; border: 1px solid var(--outline); border-radius: 10px; background: white; }
+    .o03 .embed-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .o03 .embed-pills button {
+      appearance: none;
+      border: 1px solid var(--outline);
+      background: white;
+      border-radius: 999px;
+      min-height: 32px;
+      padding: 0 12px;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: default;
+    }
+    .o03 .embed-pills button.on {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+
+    /* 04 Widget Catalog */
+    .o04 .catalog {
+      display: grid;
+      gap: 12px;
+    }
+    .o04 .hero-widgets {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .o04 .hero-widgets article {
+      display: grid;
+      gap: 8px;
+      padding: 14px;
+      border: 1px solid var(--outline);
+      border-radius: 12px;
+      background: white;
+      min-height: 140px;
+    }
+    .o04 .hero-widgets article.pick {
+      border-color: var(--secondary);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--secondary) 20%, transparent);
+      background: linear-gradient(180deg, #f7fbff, white);
+    }
+    .o04 .hero-widgets h4 { margin: 0; font-size: 14px; }
+    .o04 .hero-widgets p { margin: 0; color: var(--on-muted); font-size: 12px; }
+    .o04 .lower {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 12px;
+      min-height: 280px;
+    }
+
+    /* 05 Distribution Console */
+    .o05 .console {
+      display: grid;
+      grid-template-rows: 1fr 240px;
+      gap: 10px;
+      min-height: 520px;
+    }
+    .o05 .inspector {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr 1fr;
+      gap: 0;
+      border: 1px solid var(--outline);
+      border-radius: 12px;
+      overflow: hidden;
+      background: white;
+    }
+    .o05 .inspector > div {
+      padding: 12px;
+      border-right: 1px solid var(--outline);
+      min-width: 0;
+    }
+    .o05 .inspector > div:last-child { border-right: 0; }
+    .o05 .metrics {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .o05 .metric {
+      flex: 1;
+      padding: 10px 12px;
+      border: 1px solid var(--outline);
+      border-radius: 10px;
+      background: white;
+    }
+    .o05 .metric strong { display: block; font-size: 18px; letter-spacing: -0.03em; }
+    .o05 .metric span { color: var(--on-muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+
+    /* 06 Pinned Blueprint Board */
+    .o06 .board {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      min-height: 320px;
+    }
+    .o06 .col {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      border: 1px solid var(--outline);
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--subtle) 70%, white);
+      min-height: 300px;
+      overflow: hidden;
+    }
+    .o06 .col-h {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--outline);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--on-var);
+      background: white;
+    }
+    .o06 .cards {
+      display: grid;
+      gap: 8px;
+      padding: 10px;
+      align-content: start;
+    }
+    .o06 .card {
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+      border: 1px solid var(--outline);
+      border-radius: 10px;
+      background: white;
+      box-shadow: 0 1px 0 rgba(8,29,58,0.04);
+    }
+    .o06 .card.on {
+      border-color: var(--secondary);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--secondary) 18%, transparent);
+    }
+    .o06 .detail {
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      min-height: 180px;
+    }
+
+    /* 07 Snippet Cartridge Rack */
+    .o07 .rack {
+      display: grid;
+      grid-template-columns: 340px minmax(0, 1fr);
+      gap: 12px;
+      min-height: 520px;
+    }
+    .o07 .cartridge {
+      display: grid;
+      grid-template-columns: 8px 1fr;
+      gap: 0;
+      border: 1px solid var(--outline);
+      border-radius: 12px;
+      overflow: hidden;
+      background: white;
+      margin-bottom: 8px;
+    }
+    .o07 .cartridge .spine {
+      background: linear-gradient(180deg, #2F5D98, #081D3A);
+    }
+    .o07 .cartridge.on .spine { background: linear-gradient(180deg, #22B573, #087A4D); }
+    .o07 .cartridge .body {
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+    }
+    .o07 .cartridge pre {
+      margin: 0;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: #0b1a30;
+      color: #cfe0f5;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .o07 .right {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 10px;
+      min-height: 0;
+    }
+
+    /* 08 Split Mirror */
+    .o08 .mirror {
+      display: grid;
+      grid-template-columns: minmax(320px, 0.95fr) minmax(0, 1.15fr);
+      gap: 0;
+      min-height: 520px;
+      border: 1px solid var(--outline);
+      border-radius: 12px;
+      overflow: hidden;
+      background: white;
+    }
+    .o08 .mirror-left {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      border-right: 1px solid var(--outline);
+      min-width: 0;
+    }
+    .o08 .chooser {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--outline);
+      background: var(--subtle);
+    }
+    .o08 .chooser button {
+      appearance: none;
+      border: 1px solid var(--outline);
+      background: white;
+      border-radius: 8px;
+      min-height: 34px;
+      padding: 0 10px;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+      cursor: default;
+    }
+    .o08 .chooser button.on {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+    .o08 .form {
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+      align-content: start;
+    }
+    .o08 .mirror-right {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      background:
+        repeating-linear-gradient(
+          -12deg,
+          transparent,
+          transparent 10px,
+          color-mix(in srgb, var(--outline) 35%, transparent) 10px,
+          color-mix(in srgb, var(--outline) 35%, transparent) 11px
+        ),
+        #eef3f8;
+    }
+    .o08 .mirror-right .preview-frame {
+      margin: 14px;
+      min-height: calc(100% - 28px);
+      height: calc(100% - 28px);
+      border-style: solid;
+      box-shadow: 0 18px 40px rgba(8,29,58,0.12);
+    }
+
+    /* 09 Command Strip */
+    .o09 .scroll {
+      display: grid;
+      gap: 12px;
+      max-width: 920px;
+      margin: 0 auto;
+    }
+    .o09 .section {
+      border: 1px solid var(--outline);
+      border-radius: 12px;
+      background: white;
+      overflow: hidden;
+    }
+    .o09 .section-h {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--outline);
+      background: var(--subtle);
+    }
+    .o09 .section-h h3 { margin: 0; font-size: 14px; }
+    .o09 .section-b { padding: 14px; display: grid; gap: 12px; }
+    .o09 .row-table { border: 1px solid var(--outline); border-radius: 10px; overflow: hidden; }
+
+    /* 10 Stage and Script */
+    .o10 .theater {
+      display: grid;
+      grid-template-rows: 1.35fr auto;
+      gap: 12px;
+      min-height: 520px;
+    }
+    .o10 .stage-wrap {
+      position: relative;
+      border: 1px solid var(--outline);
+      border-radius: 14px;
+      overflow: hidden;
+      background:
+        radial-gradient(800px 280px at 50% 0%, #1a3b6b 0%, #081d3a 60%);
+      color: white;
+      min-height: 300px;
+      padding: 18px;
+    }
+    .o10 .stage-wrap .label-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.72);
+    }
+    .o10 .stage-card {
+      background: white;
+      color: var(--on);
+      border-radius: 12px;
+      min-height: 220px;
+      overflow: hidden;
+      box-shadow: 0 24px 50px rgba(0,0,0,0.28);
+    }
+    .o10 .cue {
+      display: grid;
+      grid-template-columns: 56px 1fr auto auto auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--outline);
+      background: white;
+      font-size: 13px;
+    }
+    .o10 .cue.on { background: var(--selection); }
+    .o10 .cue .t {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--on-muted);
+      font-weight: 600;
+    }
+    .o10 .script {
+      border: 1px solid var(--outline);
+      border-radius: 12px;
+      overflow: hidden;
+      background: white;
+    }
+    .o10 .script-h {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--outline);
+      background: var(--subtle);
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    @media (max-width: 1100px) {
+      .desk { grid-template-columns: 1fr; }
+      .rail { display: none; }
+      .o01 .split,
+      .o02 .tri,
+      .o03 .stage,
+      .o04 .lower,
+      .o04 .hero-widgets,
+      .o05 .inspector,
+      .o06 .board,
+      .o06 .detail,
+      .o07 .rack,
+      .o08 .mirror {
+        grid-template-columns: 1fr;
+      }
+      .widget-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div class="option-num">Competition 40 · human-tandem</div>
+      <h1>Embeds tab — 10 layout directions</h1>
+      <p>
+        Same organizer scenario across every option: Pacific Open Data Summit 2026, four saved embeds,
+        live draft preview, install snippet, current vs pinned revision. Judge structure and hierarchy —
+        not sample content. ChartStead tokens throughout so a pick can ship to the desk.
+      </p>
+      <div class="meta">
+        <span class="chip">Route /e/…/embeds</span>
+        <span class="chip">4 saved configs</span>
+        <span class="chip">5 widgets</span>
+        <span class="chip">Install code + feed</span>
+        <span class="chip">Public-safe preview</span>
+      </div>
+    </header>
+
+    <nav class="index" aria-label="Directions">
+      <a href="#o01"><span>1</span> Harbor Ledger</a>
+      <a href="#o02"><span>2</span> Snippet Forge</a>
+      <a href="#o03"><span>3</span> Install-First</a>
+      <a href="#o04"><span>4</span> Widget Catalog</a>
+      <a href="#o05"><span>5</span> Dist. Console</a>
+      <a href="#o06"><span>6</span> Blueprint Board</a>
+      <a href="#o07"><span>7</span> Cartridge Rack</a>
+      <a href="#o08"><span>8</span> Split Mirror</a>
+      <a href="#o09"><span>9</span> Command Strip</a>
+      <a href="#o10"><span>10</span> Stage &amp; Script</a>
+    </nav>
+
+    <!-- 01 -->
+    <section class="option o01" id="o01">
+      <div class="option-head">
+        <div>
+          <div class="option-num">Direction 01</div>
+          <h2>Harbor Ledger Desk</h2>
+          <p>Submissions-shaped operational table + inspector. Preview docks under the split. Closest to locked desk chrome.</p>
+        </div>
+      </div>
+      <div class="desk">
+        <aside class="rail">
+          <div class="brand"><strong>ChartStead</strong><span>Pacific Open Data Summit 2026</span></div>
+          <div class="nav">
+            <button type="button">Overview</button>
+            <button type="button">Submissions</button>
+            <button type="button">Forms</button>
+            <button type="button">Agenda</button>
+            <button type="button">Speakers</button>
+            <button type="button">Messages</button>
+            <button type="button" class="active">Embeds</button>
+            <button type="button">Settings</button>
+          </div>
+        </aside>
+        <div class="main">
+          <div class="toolbar">
+            <div class="toolbar-tools">
+              <label class="field">Search <input value="" placeholder="Filter embeds" /></label>
+              <label class="field">Status
+                <select><option>All</option><option>Live</option><option>Disabled</option></select>
+              </label>
+            </div>
+            <div class="toolbar-actions">
+              <button type="button" class="btn btn-secondary btn-sm">Disable</button>
+              <button type="button" class="btn btn-primary btn-sm">New embed</button>
+            </div>
+          </div>
+          <div class="work">
+            <div class="split">
+              <div class="panel">
+                <div class="panel-h"><h3>Saved embeds</h3><span>4</span></div>
+                <table class="ops">
+                  <thead>
+                    <tr><th>Name</th><th>Widget</th><th>Revision</th><th>Status</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr class="selected">
+                      <td><strong>Conference agenda</strong><div class="sub">Updated 2h ago</div></td>
+                      <td>Agenda</td>
+                      <td><span class="flag flag-cur">Current</span></td>
+                      <td><span class="flag flag-live">Live</span></td>
+                    </tr>
+                    <tr>
+                      <td><strong>Keynote track sessions</strong><div class="sub">Updated yesterday</div></td>
+                      <td>Sessions</td>
+                      <td><span class="flag flag-pin">Pinned r3</span></td>
+                      <td><span class="flag flag-live">Live</span></td>
+                    </tr>
+                    <tr>
+                      <td><strong>Homepage speaker gallery</strong><div class="sub">Updated 5d ago</div></td>
+                      <td>Gallery</td>
+                      <td><span class="flag flag-cur">Current</span></td>
+                      <td><span class="flag flag-off">Disabled</span></td>
+                    </tr>
+                    <tr>
+                      <td><strong>Day-one itinerary</strong><div class="sub">Updated 12d ago</div></td>
+                      <td>Itinerary</td>
+                      <td><span class="flag flag-cur">Current</span></td>
+                      <td><span class="flag flag-live">Live</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="panel">
+                <div class="panel-h"><h3>Conference agenda</h3><span>Editing</span></div>
+                <div class="editor">
+                  <label class="label">Embed name<input value="Conference agenda" /></label>
+                  <div class="widget-tiles">
+                    <button type="button">Sessions</button>
+                    <button type="button">Speakers</button>
+                    <button type="button" class="on">Agenda</button>
+                    <button type="button">Itinerary</button>
+                    <button type="button">Gallery</button>
+                  </div>
+                  <div class="editor-grid">
+                    <label class="label">Theme<select><option>Light</option><option>Dark</option><option>Minimal</option></select></label>
+                    <label class="label">Revision<select><option>Current published</option><option>Revision 3 (pinned)</option></select></label>
+                    <label class="label">Track<select><option>All tracks</option><option>Keynotes</option></select></label>
+                    <label class="label">Room<select><option>All rooms</option></select></label>
+                  </div>
+                  <div class="checks" style="grid-template-columns:1fr 1fr;display:grid;gap:4px 12px">
+                    <label><input type="checkbox" checked /> Session titles</label>
+                    <label><input type="checkbox" checked /> Date and time</label>
+                    <label><input type="checkbox" checked /> Room</label>
+                    <label><input type="checkbox" checked /> Track</label>
+                    <label><input type="checkbox" checked /> Speakers</label>
+                    <label><input type="checkbox" /> Descriptions</label>
+                  </div>
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <button type="button" class="btn btn-primary btn-sm">Update embed</button>
+                    <button type="button" class="btn btn-secondary btn-sm">Copy embed code</button>
+                    <button type="button" class="btn btn-ghost btn-sm">Copy feed URL</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="preview-wrap panel">
+              <div class="panel-h"><h3>Public-safe preview</h3><span>Draft filters · light theme</span></div>
+              <div class="preview-frame" style="border:0;border-radius:0">
+                <div class="preview-chrome"><span>iframe · /embed/cfg_agenda</span><span>No organizer chrome</span></div>
+                <div class="preview-body">
+                  <div class="session"><strong>Opening keynote: Charts that hold water</strong><span>Thu 09:00 · Ballroom A · Keynotes · Amira Chen</span></div>
+                  <div class="session"><strong>Municipal open data desks</strong><span>Thu 10:30 · Room 12 · Civic · Jordan Blake, Sam Okonkwo</span></div>
+                  <div class="session"><strong>Lunch break</strong><span>Thu 12:00 · Courtyard · Format: break</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 02 -->
+    <section class="option o02" id="o02">
+      <div class="option-head">
+        <div>
+          <div class="option-num">Direction 02</div>
+          <h2>Snippet Forge Bench</h2>
+          <p>Three equal columns: config list, forge form, always-on live preview. Site-builder tension; install stays in the form column.</p>
+        </div>
+      </div>
+      <div class="desk">
+        <aside class="rail">
+          <div class="brand"><strong>ChartStead</strong><span>Pacific Open Data Summit 2026</span></div>
+          <div class="nav">
+            <button type="button">Overview</button>
+            <button type="button" class="active">Embeds</button>
+            <button type="button">Settings</button>
+          </div>
+        </aside>
+        <div class="main">
+          <div class="toolbar">
+            <div class="toolbar-tools"><span class="tiny">Forge</span></div>
+            <div class="toolbar-actions">
+              <button type="button" class="btn btn-secondary btn-sm">Open public</button>
+              <button type="button" class="btn btn-primary btn-sm">New embed</button>
+            </div>
+          </div>
+          <div class="work">
+            <div class="tri">
+              <div class="panel" style="overflow:auto">
+                <div class="panel-h"><h3>Configs</h3><span>4</span></div>
+                <button type="button" class="list-item on"><strong>Conference agenda</strong><span class="sub">Agenda · Current · Live</span></button>
+                <button type="button" class="list-item"><strong>Keynote track sessions</strong><span class="sub">Sessions · Pinned r3 · Live</span></button>
+                <button type="button" class="list-item"><strong>Homepage speaker gallery</strong><span class="sub">Gallery · Current · Disabled</span></button>
+                <button type="button" class="list-item"><strong>Day-one itinerary</strong><span class="sub">Itinerary · Current · Live</span></button>
+              </div>
+              <div class="panel">
+                <div class="panel-h"><h3>Forge</h3><span>Conference agenda</span></div>
+                <div class="forge-form">
+                  <label class="label">Name<input value="Conference agenda" /></label>
+                  <label class="label">Widget
+                    <select><option>Agenda</option><option>Sessions List</option><option>Speakers List</option><option>Schedule Itinerary</option><option>Speaker Gallery</option></select>
+                  </label>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                    <label class="label">Theme<select><option>Light</option></select></label>
+                    <label class="label">Revision<select><option>Current</option></select></label>
+                  </div>
+                  <label class="label">Track filter<select><option>All tracks</option></select></label>
+                  <div class="checks">
+                    <label><input type="checkbox" checked /> Titles · time · room · track · speakers</label>
+                    <label><input type="checkbox" /> Descriptions · format · bios · headshots</label>
+                  </div>
+                  <button type="button" class="btn btn-primary">Save embed</button>
+                  <div class="panel" style="border-style:dashed">
+                    <div class="panel-h"><h3>Install</h3><span>iframe</span></div>
+                    <pre class="code mono">&lt;iframe src="https://…/embed/cfg_agenda"
+  title="Conference agenda"
+  style="width:100%;min-height:640px;border:0"&gt;
+&lt;/iframe&gt;</pre>
+                  </div>
+                  <div style="display:flex;gap:8px">
+                    <button type="button" class="btn btn-secondary btn-sm">Copy code</button>
+                    <button type="button" class="btn btn-secondary btn-sm">Copy feed</button>
+                  </div>
+                </div>
+              </div>
+              <div class="panel">
+                <div class="panel-h"><h3>Live preview</h3><span>Public-safe</span></div>
+                <div class="preview-frame" style="border:0;border-radius:0;min-height:480px">
+                  <div class="preview-chrome"><span>light · agenda · current</span><span>updates with draft</span></div>
+                  <div class="preview-body">
+                    <div class="session"><strong>Opening keynote: Charts that hold water</strong><span>Thu 09:00 · Ballroom A</span></div>
+                    <div class="session"><strong>Municipal open data desks</strong><span>Thu 10:30 · Room 12</span></div>
+                    <div class="session"><strong>Mapping overnight service gaps</strong><span>Thu 11:15 · Room 8</span></div>
+                    <div class="session"><strong>Lunch break</strong><span>Thu 12:00 · Courtyard</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 03 -->
+    <section class="option o03" id="o03">
+      <div class="option-head">
+        <div>
+          <div class="option-num">Direction 03</div>
+          <h2>Install-First Distribution Rail</h2>
+          <p>Copy/install is the product. Big preview stage, sticky install rail, config as a thin strip. Embeds chosen as chips, not a table.</p>
+        </div>
+      </div>
+      <div class="desk">
+        <aside class="rail">
+          <div class="brand"><strong>ChartStead</strong><span>Pacific Open Data Summit 2026</span></div>
+          <div class="nav"><button type="button" class="active">Embeds</button></div>
+        </aside>
+        <div class="main">
+          <div class="toolbar">
+            <div class="toolbar-tools">
+              <div class="embed-pills" style="margin:0">
+                <button type="button" class="on">Conference agenda</button>
+                <button type="button">Keynote track sessions</button>
+                <button type="button">Homepage speaker gallery</button>
+                <button type="button">Day-one itinerary</button>
+              </div>
+            </div>
+            <div class="toolbar-actions">
+              <button type="button" class="btn btn-primary btn-sm">New embed</button>
+            </div>
+          </div>
+          <div class="work">
+            <div class="stage">
+              <div>
+                <div class="preview-frame" style="min-height:360px">
+                  <div class="preview-chrome"><span>Public-safe rendering</span><span class="flag flag-live">Live</span></div>
+                  <div class="preview-body">
+                    <div class="session"><strong>Opening keynote: Charts that hold water</strong><span>Thu 09:00 · Ballroom A · Amira Chen</span></div>
+                    <div class="session"><strong>Municipal open data desks</strong><span>Thu 10:30 · Room 12</span></div>
+                    <div class="session"><strong>Lunch break</strong><span>Thu 12:00 · Courtyard</span></div>
+                  </div>
+                </div>
+                <div class="config-strip">
+                  <label class="label">Widget<select><option>Agenda</option></select></label>
+                  <label class="label">Theme<select><option>Light</option></select></label>
+                  <label class="label">Revision<select><option>Current</option></select></label>
+                  <label class="label">Track<select><option>All tracks</option></select></label>
+                </div>
+              </div>
+              <div class="panel install">
+                <div class="panel-h"><h3>Install</h3><span>Primary job</span></div>
+                <div style="padding:12px;display:grid;gap:10px;align-content:start">
+                  <p class="muted" style="margin:0;font-size:12px">Paste on the conference site. Feed URL for custom front-ends.</p>
+                  <pre class="code mono" style="border-radius:10px">&lt;iframe
+  src="https://app…/embed/cfg_agenda"
+  title="Conference agenda"
+  loading="lazy"
+  style="width:100%;border:0;min-height:640px"&gt;
+&lt;/iframe&gt;</pre>
+                  <label class="label">JSON feed
+                    <input class="mono" value="https://app…/api/…/feed/cfg_agenda" readonly />
+                  </label>
+                </div>
+                <div style="padding:12px;border-top:1px solid var(--outline);display:grid;gap:8px">
+                  <button type="button" class="btn btn-primary">Copy embed code</button>
+                  <button type="button" class="btn btn-secondary">Copy feed URL</button>
+                  <button type="button" class="btn btn-ghost">Open public embed</button>
+                  <button type="button" class="btn btn-secondary">Disable embed</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 04 -->
+    <section class="option o04" id="o04">
+      <div class="option-head">
+        <div>
+          <div class="option-num">Direction 04</div>
+          <h2>Widget Catalog Wall</h2>
+          <p>Start from the five rubric widgets as large tiles. Saved configs and install become secondary once a widget is chosen.</p>
+        </div>
+      </div>
+      <div class="desk">
+        <aside class="rail">
+          <div class="brand"><strong>ChartStead</strong><span>Pacific Open Data Summit 2026</span></div>
+          <div class="nav"><button type="button" class="active">Embeds</button></div>
+        </aside>
+        <div class="main">
+          <div class="toolbar">
+            <div class="toolbar-tools"><span class="tiny">Choose a public widget</span></div>
+            <div class="toolbar-actions"><button type="button" class="btn btn-primary btn-sm">Create from Agenda</button></div>
+          </div>
+          <div class="work catalog">
+            <div class="hero-widgets">
+              <article><h4>Sessions List</h4><p>Filterable session cards for a track page.</p><span class="flag flag-cur">1 saved</span></article>
+              <article><h4>Speakers List</h4><p>Directory with roles and session links.</p><span class="flag flag-cur">0 saved</span></article>
+              <article class="pick"><h4>Agenda</h4><p>Day and room schedule map.</p><span class="flag flag-live">2 live</span></article>
+              <article><h4>Schedule Itinerary</h4><p>Personal path through the day.</p><span class="flag flag-live">1 live</span></article>
+              <article><h4>Speaker Gallery</h4><p>Portrait grid for marketing pages.</p><span class="flag flag-off">1 off</span></article>
+            </div>
+            <div class="lower">
+              <div class="panel">
+                <div class="panel-h"><h3>Agenda embeds</h3><span>Selected widget</span></div>
+                <table class="ops">
+                  <thead><tr><th>Name</th><th>Revision</th><th>Status</th><th></th></tr></thead>
+                  <tbody>
+                    <tr class="selected"><td><strong>Conference agenda</strong></td><td>Current</td><td><span class="flag flag-live">Live</span></td><td>Edit</td></tr>
+                    <tr><td><strong>Day-one itinerary</strong></td><td>Current</td><td><span class="flag flag-live">Live</span></td><td>Edit</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="panel">
+                <div class="panel-h"><h3>Configure · Conference agenda</h3><span>Install ready</span></div>
+                <div style="padding:12px;display:grid;gap:10px">
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                    <label class="label">Theme<select><option>Light</option></select></label>
+                    <label class="label">Revision<select><option>Current</option></select></label>
+                  </div>
+                  <button type="button" class="btn btn-secondary btn-sm">Copy iframe</button>
+                  <div class="preview-frame" style="min-height:140px">
+                    <div class="preview-body">
+                      <div class="session"><strong>Opening keynote</strong><span>Thu 09:00 · Ballroom A</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 05 -->
+    <section class="option o05" id="o05">
+      <div class="option-head">
+        <div>
+          <div class="option-num">Direction 05</div>
+          <h2>Distribution Console</h2>
+          <p>Full-width ops table owns the room. Bottom inspector is a fixed three-pane strip: properties, fields, install. Preview is secondary text state.</p>
+        </div>
+      </div>
+      <div class="desk">
+        <aside class="rail">
+          <div class="brand"><strong>ChartStead</strong><span>Pacific Open Data Summit 2026</span></div>
+          <div class="nav"><button type="button" class="active">Embeds</button></div>
+        </aside>
+        <div class="main">
+          <div class="toolbar">
+            <div class="toolbar-tools">
+              <label class="field">Search <input placeholder="Name or widget" /></label>
+              <label class="field">Widget<select><option>All widgets</option></select></label>
+            </div>
+            <div class="toolbar-actions">
+              <button type="button" class="btn btn-secondary btn-sm">Disable</button>
+              <button type="button" class="btn btn-secondary btn-sm">Copy code</button>
+              <button type="button" class="btn btn-primary btn-sm">New embed</button>
+            </div>
+          </div>
+          <div class="work">
+            <div class="console">
+              <div>
+                <div class="metrics">
+                  <div class="metric"><strong>4</strong><span>Saved</span></div>
+                  <div class="metric"><strong>3</strong><span>Live</span></div>
+                  <div class="metric"><strong>1</strong><span>Pinned</span></div>
+                  <div class="metric"><strong>1</strong><span>Disabled</span></div>
+                </div>
+                <div class="panel">
+                  <table class="ops">
+                    <thead>
+                      <tr>
+                        <th></th><th>Name</th><th>Widget</th><th>Theme</th><th>Revision</th><th>Filters</th><th>Status</th><th>Updated</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr class="selected">
+                        <td><input type="checkbox" checked /></td>
+                        <td><strong>Conference agenda</strong></td>
+                        <td>Agenda</td><td>Light</td><td>Current</td><td>All tracks</td>
+                        <td><span class="flag flag-live">Live</span></td><td class="mono">2h</td>
+                      </tr>
+                      <tr>
+                        <td><input type="checkbox" /></td>
+                        <td><strong>Keynote track sessions</strong></td>
+                        <td>Sessions</td><td>Minimal</td><td>Pinned r3</td><td>Keynotes</td>
+                        <td><span class="flag flag-live">Live</span></td><td class="mono">1d</td>
+                      </tr>
+                      <tr>
+                        <td><input type="checkbox" /></td>
+                        <td><strong>Homepage speaker gallery</strong></td>
+                        <td>Gallery</td><td>Dark</td><td>Current</td><td>—</td>
+                        <td><span class="flag flag-off">Disabled</span></td><td class="mono">5d</td>
+                      </tr>
+                      <tr>
+                        <td><input type="checkbox" /></td>
+                        <td><strong>Day-one itinerary</strong></td>
+                        <td>Itinerary</td><td>Light</td><td>Current</td><td>Day 1</td>
+                        <td><span class="flag flag-live">Live</span></td><td class="mono">12d</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="inspector">
+                <div>
+                  <div class="tiny">Properties</div>
+                  <div style="display:grid;gap:8px;margin-top:8px">
+                    <label class="label">Name<input value="Conference agenda" /></label>
+                    <label class="label">Widget<select><option>Agenda</option></select></label>
+                    <label class="label">Revision<select><option>Current published</option></select></label>
+                  </div>
+                </div>
+                <div>
+                  <div class="tiny">Visible fields</div>
+                  <div class="checks" style="margin-top:8px">
+                    <label><input type="checkbox" checked /> Titles</label>
+                    <label><input type="checkbox" checked /> Date/time</label>
+                    <label><input type="checkbox" checked /> Room · track</label>
+                    <label><input type="checkbox" checked /> Speakers</label>
+                    <label><input type="checkbox" /> Descriptions</label>
+                  </div>
+                </div>
+                <div>
+                  <div class="tiny">Install · feed</div>
+                  <pre class="code mono" style="margin-top:8px;border-radius:8px;max-height:140px">&lt;iframe src="…/embed/cfg_agenda" …&gt;</pre>
+                  <div style="display:flex;gap:6px;margin-top:8px">
+                    <button type="button" class="btn btn-primary btn-sm">Copy</button>
+                    <button type="button" class="btn btn-secondary btn-sm">Feed</button>
+                    <button type="button" class="btn btn-ghost btn-sm">Preview↗</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 06 -->
+    <section class="option o06" id="o06">
+      <div class="option-head">
+        <div>
+          <div class="option-num">Direction 06</div>
+          <h2>Pinned Blueprint Board</h2>
+          <p>Columns by distribution state: Current-following, Revision-pinned, Disabled. Makes the safety boundary legible as spatial structure.</p>
+        </div>
+      </div>
+      <div class="desk">
+        <aside class="rail">
+          <div class="brand"><strong>ChartStead</strong><span>Pacific Open Data Summit 2026</span></div>
+          <div class="nav"><button type="button" class="active">Embeds</button></div>
+        </aside>
+        <div class="main">
+          <div class="toolbar">
+            <div class="toolbar-tools"><span class="tiny">Revision binding</span></div>
+            <div class="toolbar-actions"><button type="button" class="btn btn-primary btn-sm">New embed</button></div>
+          </div>
+          <div class="work">
+            <div class="board">
+              <div class="col">
+                <div class="col-h">Current revision · follows publish</div>
+                <div class="cards">
+                  <article class="card on">
+                    <strong>Conference agenda</strong>
+                    <span class="muted">Agenda · Light</span>
+                    <span class="flag flag-live">Live</span>
+                  </article>
+                  <article class="card">
+                    <strong>Day-one itinerary</strong>
+                    <span class="muted">Itinerary · Light</span>
+                    <span class="flag flag-live">Live</span>
+                  </article>
+                </div>
+              </div>
+              <div class="col">
+                <div class="col-h">Pinned revision · immutable</div>
+                <div class="cards">
+                  <article class="card">
+                    <strong>Keynote track sessions</strong>
+                    <span class="muted">Sessions · Minimal · r3</span>
+                    <span class="flag flag-pin">Pinned</span>
+                  </article>
+                </div>
+              </div>
+              <div class="col">
+                <div class="col-h">Disabled · not served</div>
+                <div class="cards">
+                  <article class="card">
+                    <strong>Homepage speaker gallery</strong>
+                    <span class="muted">Gallery · Dark</span>
+                    <span class="flag flag-off">Disabled</span>
+                  </article>
+                </div>
+              </div>
+            </div>
+            <div class="detail">
+              <div class="panel">
+                <div class="panel-h"><h3>Conference agenda</h3><span>Current · Live</span></div>
+                <div style="padding:12px;display:grid;gap:8px">
+                  <label class="label">Name<input value="Conference agenda" /></label>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                    <label class="label">Widget<select><option>Agenda</option></select></label>
+                    <label class="label">Move to<select><option>Stay current</option><option>Pin revision…</option><option>Disable</option></select></label>
+                  </div>
+                  <button type="button" class="btn btn-primary btn-sm">Save</button>
+                </div>
+              </div>
+              <div class="panel">
+                <div class="panel-h"><h3>Install + preview</h3><span>Public-safe</span></div>
+                <div class="preview-frame" style="border:0;border-radius:0;min-height:150px">
+                  <div class="preview-body">
+                    <div class="session"><strong>Opening keynote</strong><span>Thu 09:00 · Ballroom A</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 07 -->
+    <section class="option o07" id="o07">
+      <div class="option-head">
+        <div>
+          <div class="option-num">Direction 07</div>
+          <h2>Snippet Cartridge Rack</h2>
+          <p>Each embed is a code cartridge: spine + truncated iframe + status. Detail pane is configuration; preview is a small instrument panel.</p>
+        </div>
+      </div>
+      <div class="desk">
+        <aside class="rail">
+          <div class="brand"><strong>ChartStead</strong><span>Pacific Open Data Summit 2026</span></div>
+          <div class="nav"><button type="button" class="active">Embeds</button></div>
+        </aside>
+        <div class="main">
+          <div class="toolbar">
+            <div class="toolbar-tools"><span class="tiny">Cartridges</span></div>
+            <div class="toolbar-actions"><button type="button" class="btn btn-primary btn-sm">New cartridge</button></div>
+          </div>
+          <div class="work">
+            <div class="rack">
+              <div>
+                <div class="cartridge on">
+                  <div class="spine"></div>
+                  <div class="body">
+                    <div style="display:flex;justify-content:space-between;gap:8px;align-items:start">
+                      <div><strong>Conference agenda</strong><div class="sub muted">Agenda · Current</div></div>
+                      <span class="flag flag-live">Live</span>
+                    </div>
+                    <pre>&lt;iframe src="https://app.chartstead…/embed/cfg_agenda" …&gt;</pre>
+                    <div style="display:flex;gap:6px">
+                      <button type="button" class="btn btn-secondary btn-sm">Copy</button>
+                      <button type="button" class="btn btn-ghost btn-sm">Feed</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="cartridge">
+                  <div class="spine"></div>
+                  <div class="body">
+                    <div style="display:flex;justify-content:space-between;gap:8px">
+                      <div><strong>Keynote track sessions</strong><div class="sub muted">Sessions · Pinned r3</div></div>
+                      <span class="flag flag-live">Live</span>
+                    </div>
+                    <pre>&lt;iframe src="https://app…/embed/cfg_keynotes" …&gt;</pre>
+                  </div>
+                </div>
+                <div class="cartridge">
+                  <div class="spine"></div>
+                  <div class="body">
+                    <div style="display:flex;justify-content:space-between;gap:8px">
+                      <div><strong>Homepage speaker gallery</strong><div class="sub muted">Gallery · Current</div></div>
+                      <span class="flag flag-off">Off</span>
+                    </div>
+                    <pre>&lt;iframe src="https://app…/embed/cfg_gallery" …&gt;</pre>
+                  </div>
+                </div>
+                <div class="cartridge">
+                  <div class="spine"></div>
+                  <div class="body">
+                    <div style="display:flex;justify-content:space-between;gap:8px">
+                      <div><strong>Day-one itinerary</strong><div class="sub muted">Itinerary · Current</div></div>
+                      <span class="flag flag-live">Live</span>
+                    </div>
+                    <pre>&lt;iframe src="https://app…/embed/cfg_day1" …&gt;</pre>
+                  </div>
+                </div>
+              </div>
+              <div class="right">
+                <div class="panel">
+                  <div class="panel-h"><h3>Configure cartridge</h3><span>Conference agenda</span></div>
+                  <div style="padding:12px;display:grid;gap:10px">
+                    <label class="label">Name<input value="Conference agenda" /></label>
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+                      <label class="label">Widget<select><option>Agenda</option></select></label>
+                      <label class="label">Theme<select><option>Light</option></select></label>
+                      <label class="label">Revision<select><option>Current</option></select></label>
+                    </div>
+                    <div class="checks" style="grid-template-columns:1fr 1fr;display:grid">
+                      <label><input type="checkbox" checked /> Titles</label>
+                      <label><input type="checkbox" checked /> Time</label>
+                      <label><input type="checkbox" checked /> Room</label>
+                      <label><input type="checkbox" checked /> Speakers</label>
+                    </div>
+                    <button type="button" class="btn btn-primary btn-sm">Update</button>
+                  </div>
+                </div>
+                <div class="panel" style="min-height:0">
+                  <div class="panel-h"><h3>Instrument preview</h3><span>Public-safe</span></div>
+                  <div class="preview-frame" style="border:0;border-radius:0;height:100%">
+                    <div class="preview-body">
+                      <div class="session"><strong>Opening keynote: Charts that hold water</strong><span>Thu 09:00 · Ballroom A</span></div>
+                      <div class="session"><strong>Municipal open data desks</strong><span>Thu 10:30 · Room 12</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 08 -->
+    <section class="option o08" id="o08">
+      <div class="option-head">
+        <div>
+          <div class="option-num">Direction 08</div>
+          <h2>Split Mirror Desk</h2>
+          <p>Half config, half 1:1 public mirror on a site substrate. Horizontal chooser replaces the list column. Strong “what attendees see” bias.</p>
+        </div>
+      </div>
+      <div class="desk">
+        <aside class="rail">
+          <div class="brand"><strong>ChartStead</strong><span>Pacific Open Data Summit 2026</span></div>
+          <div class="nav"><button type="button" class="active">Embeds</button></div>
+        </aside>
+        <div class="main">
+          <div class="toolbar">
+            <div class="toolbar-tools"><span class="tiny">Mirror mode</span></div>
+            <div class="toolbar-actions">
+              <button type="button" class="btn btn-secondary btn-sm">Disable</button>
+              <button type="button" class="btn btn-primary btn-sm">New embed</button>
+            </div>
+          </div>
+          <div class="work" style="padding:14px">
+            <div class="mirror">
+              <div class="mirror-left">
+                <div class="chooser">
+                  <button type="button" class="on">Conference agenda</button>
+                  <button type="button">Keynote track sessions</button>
+                  <button type="button">Homepage speaker gallery</button>
+                  <button type="button">Day-one itinerary</button>
+                  <button type="button">+ New</button>
+                </div>
+                <div class="form">
+                  <label class="label">Embed name<input value="Conference agenda" /></label>
+                  <div class="widget-tiles" style="grid-template-columns:repeat(3,1fr)">
+                    <button type="button">Sessions</button>
+                    <button type="button" class="on">Agenda</button>
+                    <button type="button">Gallery</button>
+                  </div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                    <label class="label">Theme<select><option>Light</option></select></label>
+                    <label class="label">Revision<select><option>Current published</option></select></label>
+                    <label class="label">Track<select><option>All tracks</option></select></label>
+                    <label class="label">Room<select><option>All rooms</option></select></label>
+                  </div>
+                  <div class="checks" style="display:grid;grid-template-columns:1fr 1fr">
+                    <label><input type="checkbox" checked /> Titles</label>
+                    <label><input type="checkbox" checked /> Time</label>
+                    <label><input type="checkbox" checked /> Room</label>
+                    <label><input type="checkbox" checked /> Speakers</label>
+                  </div>
+                </div>
+                <div style="padding:12px;border-top:1px solid var(--outline);display:flex;gap:8px;flex-wrap:wrap;background:var(--subtle)">
+                  <button type="button" class="btn btn-primary btn-sm">Save</button>
+                  <button type="button" class="btn btn-secondary btn-sm">Copy iframe</button>
+                  <button type="button" class="btn btn-secondary btn-sm">Copy feed</button>
+                </div>
+              </div>
+              <div class="mirror-right">
+                <div class="preview-chrome" style="margin:0;border:0;background:transparent;color:var(--on-muted);padding:12px 14px 0">
+                  <span>Host site substrate · public mirror</span>
+                  <span class="flag flag-live">Live</span>
+                </div>
+                <div class="preview-frame">
+                  <div class="preview-chrome"><span>Conference agenda</span><span>light · current</span></div>
+                  <div class="preview-body">
+                    <div class="session"><strong>Opening keynote: Charts that hold water</strong><span>Thu 09:00 · Ballroom A · Amira Chen</span></div>
+                    <div class="session"><strong>Municipal open data desks</strong><span>Thu 10:30 · Room 12 · Jordan Blake</span></div>
+                    <div class="session"><strong>Mapping overnight service gaps</strong><span>Thu 11:15 · Room 8</span></div>
+                    <div class="session"><strong>Lunch break</strong><span>Thu 12:00 · Courtyard</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 09 -->
+    <section class="option o09" id="o09">
+      <div class="option-head">
+        <div>
+          <div class="option-num">Direction 09</div>
+          <h2>Command Strip Desk</h2>
+          <p>Tools-only shell. Single narrow reading column of stacked sections — like Settings. Least spatial drama; most form-like calm.</p>
+        </div>
+      </div>
+      <div class="desk">
+        <aside class="rail">
+          <div class="brand"><strong>ChartStead</strong><span>Pacific Open Data Summit 2026</span></div>
+          <div class="nav"><button type="button" class="active">Embeds</button></div>
+        </aside>
+        <div class="main">
+          <div class="toolbar">
+            <div class="toolbar-tools">
+              <label class="field">Editing
+                <select>
+                  <option>Conference agenda</option>
+                  <option>Keynote track sessions</option>
+                  <option>Homepage speaker gallery</option>
+                  <option>Day-one itinerary</option>
+                </select>
+              </label>
+            </div>
+            <div class="toolbar-actions">
+              <button type="button" class="btn btn-secondary btn-sm">Disable</button>
+              <button type="button" class="btn btn-secondary btn-sm">New embed</button>
+              <button type="button" class="btn btn-primary btn-sm">Save</button>
+            </div>
+          </div>
+          <div class="work">
+            <div class="scroll">
+              <div class="section">
+                <div class="section-h"><h3>Saved embeds</h3><span class="muted">4 configurations</span></div>
+                <div class="section-b">
+                  <div class="row-table">
+                    <table class="ops">
+                      <thead><tr><th>Name</th><th>Widget</th><th>Revision</th><th>Status</th></tr></thead>
+                      <tbody>
+                        <tr class="selected"><td><strong>Conference agenda</strong></td><td>Agenda</td><td>Current</td><td><span class="flag flag-live">Live</span></td></tr>
+                        <tr><td><strong>Keynote track sessions</strong></td><td>Sessions</td><td>Pinned r3</td><td><span class="flag flag-live">Live</span></td></tr>
+                        <tr><td><strong>Homepage speaker gallery</strong></td><td>Gallery</td><td>Current</td><td><span class="flag flag-off">Disabled</span></td></tr>
+                        <tr><td><strong>Day-one itinerary</strong></td><td>Itinerary</td><td>Current</td><td><span class="flag flag-live">Live</span></td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+              <div class="section">
+                <div class="section-h"><h3>Configuration</h3><span class="muted">Conference agenda</span></div>
+                <div class="section-b">
+                  <label class="label">Name<input value="Conference agenda" /></label>
+                  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+                    <label class="label">Widget<select><option>Agenda</option></select></label>
+                    <label class="label">Theme<select><option>Light</option></select></label>
+                    <label class="label">Revision<select><option>Current published</option></select></label>
+                  </div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+                    <label class="label">Track<select><option>All tracks</option></select></label>
+                    <label class="label">Room<select><option>All rooms</option></select></label>
+                    <label class="label">Format<input placeholder="keynote, talk…" /></label>
+                  </div>
+                  <div class="checks" style="display:grid;grid-template-columns:1fr 1fr 1fr">
+                    <label><input type="checkbox" checked /> Titles</label>
+                    <label><input type="checkbox" checked /> Date and time</label>
+                    <label><input type="checkbox" checked /> Room</label>
+                    <label><input type="checkbox" checked /> Track</label>
+                    <label><input type="checkbox" checked /> Speakers</label>
+                    <label><input type="checkbox" /> Descriptions</label>
+                  </div>
+                </div>
+              </div>
+              <div class="section">
+                <div class="section-h"><h3>Install</h3><span class="muted">iframe + feed</span></div>
+                <div class="section-b">
+                  <pre class="code mono" style="border-radius:10px">&lt;iframe src="https://…/embed/cfg_agenda" title="Conference agenda" style="width:100%;min-height:640px;border:0"&gt;&lt;/iframe&gt;</pre>
+                  <div style="display:flex;gap:8px">
+                    <button type="button" class="btn btn-secondary btn-sm">Copy embed code</button>
+                    <button type="button" class="btn btn-secondary btn-sm">Copy feed URL</button>
+                    <button type="button" class="btn btn-ghost btn-sm">Open public</button>
+                  </div>
+                </div>
+              </div>
+              <div class="section">
+                <div class="section-h"><h3>Preview</h3><span class="muted">Public-safe draft</span></div>
+                <div class="section-b">
+                  <div class="preview-frame">
+                    <div class="preview-body">
+                      <div class="session"><strong>Opening keynote: Charts that hold water</strong><span>Thu 09:00 · Ballroom A</span></div>
+                      <div class="session"><strong>Municipal open data desks</strong><span>Thu 10:30 · Room 12</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 10 -->
+    <section class="option o10" id="o10">
+      <div class="option-head">
+        <div>
+          <div class="option-num">Direction 10</div>
+          <h2>Stage and Script</h2>
+          <p>Theater metaphor: the public embed is the stage; saved configs are a cue script underneath. Dramatic hierarchy; install is a stagehand action.</p>
+        </div>
+      </div>
+      <div class="desk">
+        <aside class="rail">
+          <div class="brand"><strong>ChartStead</strong><span>Pacific Open Data Summit 2026</span></div>
+          <div class="nav"><button type="button" class="active">Embeds</button></div>
+        </aside>
+        <div class="main">
+          <div class="toolbar">
+            <div class="toolbar-tools">
+              <label class="field">Cue
+                <select><option>01 · Conference agenda</option><option>02 · Keynote track sessions</option></select>
+              </label>
+              <label class="field">Theme<select><option>Light</option></select></label>
+            </div>
+            <div class="toolbar-actions">
+              <button type="button" class="btn btn-secondary btn-sm">Copy iframe</button>
+              <button type="button" class="btn btn-primary btn-sm">New cue</button>
+            </div>
+          </div>
+          <div class="work">
+            <div class="theater">
+              <div class="stage-wrap">
+                <div class="label-top">
+                  <span>Stage · public-safe embed</span>
+                  <span>Conference agenda · Current · Live</span>
+                </div>
+                <div class="stage-card">
+                  <div class="preview-chrome"><span>iframe preview</span><span>no organizer nav</span></div>
+                  <div class="preview-body">
+                    <div class="session"><strong>Opening keynote: Charts that hold water</strong><span>Thu 09:00 · Ballroom A · Keynotes · Amira Chen</span></div>
+                    <div class="session"><strong>Municipal open data desks</strong><span>Thu 10:30 · Room 12 · Civic · Jordan Blake, Sam Okonkwo</span></div>
+                    <div class="session"><strong>Mapping overnight service gaps</strong><span>Thu 11:15 · Room 8 · Data · Priya Natarajan</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="script">
+                <div class="script-h">
+                  <span>Cue script</span>
+                  <span class="muted" style="font-weight:600">Select a cue to edit filters and fields</span>
+                </div>
+                <div class="cue on">
+                  <span class="t">01</span>
+                  <div><strong>Conference agenda</strong><div class="sub muted">Agenda · all tracks</div></div>
+                  <span class="flag flag-cur">Current</span>
+                  <span class="flag flag-live">Live</span>
+                  <button type="button" class="btn btn-ghost btn-sm">Edit</button>
+                </div>
+                <div class="cue">
+                  <span class="t">02</span>
+                  <div><strong>Keynote track sessions</strong><div class="sub muted">Sessions · Keynotes only</div></div>
+                  <span class="flag flag-pin">Pinned r3</span>
+                  <span class="flag flag-live">Live</span>
+                  <button type="button" class="btn btn-ghost btn-sm">Edit</button>
+                </div>
+                <div class="cue">
+                  <span class="t">03</span>
+                  <div><strong>Homepage speaker gallery</strong><div class="sub muted">Gallery · dark</div></div>
+                  <span class="flag flag-cur">Current</span>
+                  <span class="flag flag-off">Disabled</span>
+                  <button type="button" class="btn btn-ghost btn-sm">Edit</button>
+                </div>
+                <div class="cue">
+                  <span class="t">04</span>
+                  <div><strong>Day-one itinerary</strong><div class="sub muted">Itinerary · day 1</div></div>
+                  <span class="flag flag-cur">Current</span>
+                  <span class="flag flag-live">Live</span>
+                  <button type="button" class="btn btn-ghost btn-sm">Edit</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

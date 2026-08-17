@@ -1,6 +1,6 @@
 # 63 — Show full message history in the Messages inspector
 
-**Status:** in-review
+**Status:** in-progress
 
 **Blocked by:** None — can start immediately.
 
@@ -20,6 +20,8 @@ Do not change Course Check send, approval, or outbox semantics. This is history 
 - [ ] A Tailscale demo URL and what-to-test list are recorded before `in-review`.
 
 ## Comments
+
+- 2026-08-16 — Tyler: history still wrong/slow. Root cause: Messages UI only listed Course Check communication plans; seeded/sent mail lives in outbox_messages. “3 open” is onboarding tasks, not opened messages. Fixing UI to show all outbound outbox (+ plans) per speaker; skipping inbound speaker→organizer (rabbit hole). Killing extra demos for speed.
 - 2026-08-17 — Single-demo QA URL (other batch demos killed to keep host responsive): http://100.105.117.93:5863/demo → Messages. 64–67 merged to main and marked done.
 
 - 2026-08-16 — Still open for Tyler QA (not merged). Demo will be on single port with 63 worktree.

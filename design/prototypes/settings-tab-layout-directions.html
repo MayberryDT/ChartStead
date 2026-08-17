@@ -1,0 +1,1651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ChartStead Settings — layout directions v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --primary: #081D3A;
+    --secondary: #2F5D98;
+    --subtle: #F3F5F7;
+    --muted-surface: #E9EDF2;
+    --on: #081D3A;
+    --on-var: #526071;
+    --on-muted: #5B6878;
+    --outline: #D7DEE7;
+    --outline-strong: #AEBAC8;
+    --selection: #EAF2FB;
+    --info: #EAF2FB;
+    --on-info: #244E7D;
+    --ok: #E9F8F1;
+    --on-ok: #087A4D;
+    --warn: #FFF4E5;
+    --on-warn: #8A4D09;
+    --harbor: #e8f0f8;
+    --harbor-edge: #c9d8e8;
+    --focus: #2F5D98;
+    --font: Inter, system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+    --shadow-1: 0 1px 2px rgba(8, 29, 58, 0.06), 0 4px 12px rgba(8, 29, 58, 0.04);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: var(--font);
+    color: var(--on);
+    background: #e8edf3;
+    line-height: 1.4;
+  }
+
+  /* Page chrome: buttons only */
+  .page-head {
+    position: sticky; top: 0; z-index: 50;
+    background: #fff;
+    border-bottom: 1px solid var(--outline);
+  }
+  .page-head-inner {
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 10px 14px;
+  }
+  .index {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .index a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 36px;
+    padding: 0 12px;
+    border: 1px solid var(--outline-strong);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--on);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .index a:hover {
+    border-color: var(--secondary);
+    color: var(--secondary);
+    background: var(--selection);
+  }
+
+  .wrap {
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 14px 14px 72px;
+    display: grid;
+    gap: 20px;
+  }
+
+  .option {
+    scroll-margin-top: 60px;
+    border: 1px solid var(--outline);
+    border-radius: 10px;
+    background: #fff;
+    overflow: hidden;
+    box-shadow: var(--shadow-1);
+  }
+  .option-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 36px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--outline);
+    background: var(--subtle);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .option-meta .num {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--on-muted);
+  }
+
+  /* Shared organizer chrome */
+  .desk {
+    display: grid;
+    grid-template-columns: 56px 1fr;
+    min-height: 640px;
+    background: var(--subtle);
+  }
+  .rail {
+    background: var(--primary);
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 0;
+  }
+  .rail .mark {
+    width: 28px; height: 28px;
+    border-radius: 6px;
+    background: #173B70;
+    display: grid; place-items: center;
+    font-weight: 700; font-size: 12px;
+    margin-bottom: 6px;
+  }
+  .rail .nav-dot {
+    width: 32px; height: 32px;
+    border-radius: 6px;
+    display: grid; place-items: center;
+    font-size: 10px;
+    color: rgba(255,255,255,0.5);
+  }
+  .rail .nav-dot.on {
+    background: rgba(255,255,255,0.12);
+    color: #fff;
+  }
+  .desk-main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+  }
+
+  /* Tools-only shell toolbar — matches Submissions/Agenda */
+  .shell-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 52px;
+    padding: 8px 12px;
+    background: var(--harbor);
+    border-bottom: 1px solid var(--harbor-edge);
+  }
+  .shell-toolbar-tools-only .topbar-tools {
+    flex: 1;
+    min-width: 0;
+  }
+  .topbar-tools-inner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .topbar-tools-spacer { flex: 1; min-width: 8px; }
+  .topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .field.search-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    min-width: 200px;
+    max-width: 280px;
+    flex: 1;
+    padding: 0 10px;
+    border: 1px solid var(--outline-strong);
+    border-radius: 6px;
+    background: #fff;
+  }
+  .field.search-field svg {
+    width: 14px; height: 14px;
+    stroke: var(--on-muted);
+    fill: none;
+    stroke-width: 2;
+    flex-shrink: 0;
+  }
+  .field.search-field input {
+    border: 0;
+    outline: 0;
+    width: 100%;
+    min-height: 34px;
+    font: inherit;
+    font-size: 13px;
+    background: transparent;
+  }
+
+  .seg {
+    display: inline-flex;
+    align-items: stretch;
+    border: 1px solid var(--outline-strong);
+    border-radius: 6px;
+    background: #fff;
+    overflow: hidden;
+  }
+  .seg button {
+    appearance: none;
+    border: 0;
+    border-right: 1px solid var(--outline);
+    background: transparent;
+    color: var(--on-var);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    min-height: 36px;
+    padding: 0 11px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .seg button:last-child { border-right: 0; }
+  .seg button[aria-pressed="true"],
+  .seg button.on {
+    background: var(--selection);
+    color: var(--secondary);
+  }
+
+  .track-btn {
+    appearance: none;
+    min-height: 36px;
+    padding: 0 12px;
+    border: 1px solid var(--outline-strong);
+    border-radius: 6px;
+    background: #fff;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--on);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .metric {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+    min-height: 36px;
+    padding: 2px 10px;
+    border: 1px solid var(--outline);
+    border-radius: 6px;
+    background: rgba(255,255,255,0.7);
+    line-height: 1.15;
+  }
+  .metric strong {
+    font-size: 14px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .metric span {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--on-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .metric.is-ok strong { color: var(--on-ok); }
+  .metric.is-warn strong { color: var(--on-warn); }
+  .metric.is-muted strong { color: var(--on-muted); }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 36px;
+    padding: 0 12px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn-sm { min-height: 36px; font-size: 12.5px; }
+  .btn-primary { background: var(--secondary); color: #fff; }
+  .btn-secondary { background: #fff; color: var(--on); border-color: var(--outline-strong); }
+  .btn-ghost { background: transparent; color: var(--on-var); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn:focus-visible, .seg button:focus-visible, .track-btn:focus-visible,
+  input:focus-visible, select:focus-visible, summary:focus-visible, a:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  .work { flex: 1; min-height: 0; overflow: auto; background: #fff; }
+
+  label.field-block {
+    display: grid;
+    gap: 5px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--on-var);
+  }
+  input[type="text"], input[type="date"], input[type="password"], select, textarea {
+    font: inherit;
+    min-height: 40px;
+    padding: 8px 10px;
+    border: 1px solid var(--outline-strong);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--on);
+    width: 100%;
+  }
+  .check {
+    display: flex; align-items: flex-start; gap: 8px;
+    font-size: 13px; font-weight: 500;
+  }
+  .check input { width: 16px; height: 16px; margin-top: 2px; }
+  .muted { color: var(--on-muted); font-size: 12.5px; font-weight: 400; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .status-ok { color: var(--on-ok); font-weight: 600; }
+  .status-warn { color: var(--on-warn); font-weight: 600; }
+  .status-muted { color: var(--on-muted); font-weight: 600; }
+  .flag {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    padding: 0 8px;
+    border-radius: 2px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .flag-ok { background: var(--ok); color: var(--on-ok); }
+  .flag-warn { background: var(--warn); color: var(--on-warn); }
+  .flag-info { background: var(--info); color: var(--on-info); }
+  .flag-off { background: var(--muted-surface); color: var(--on-muted); }
+
+  table.op {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  table.op th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--on-muted);
+    background: var(--subtle);
+    border-bottom: 1px solid var(--outline);
+    padding: 8px 12px;
+  }
+  table.op td {
+    border-bottom: 1px solid var(--outline);
+    padding: 11px 12px;
+    vertical-align: middle;
+  }
+  table.op tr:hover td { background: #fafcfe; }
+  table.op tr.selected td { background: var(--selection); }
+  table.op th button {
+    appearance: none; border: 0; background: none;
+    font: inherit; font-size: inherit; font-weight: inherit;
+    color: inherit; letter-spacing: inherit; text-transform: inherit;
+    padding: 0; cursor: pointer;
+  }
+
+  .callout {
+    background: var(--info);
+    color: var(--on-info);
+    border-radius: 6px;
+    padding: 12px 14px;
+  }
+  .callout strong { display: block; font-size: 13px; margin-bottom: 4px; }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    max-width: 640px;
+  }
+  .form-grid .span2 { grid-column: 1 / -1; }
+  .actions-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+  }
+
+  /* ===== Direction work surfaces ===== */
+
+  /* 01 Section pane */
+  .d01 .pane { padding: 18px 20px 28px; max-width: 820px; }
+  .d01 .pane h2 {
+    margin: 0 0 4px;
+    font-size: 18px;
+    letter-spacing: -0.02em;
+  }
+  .d01 .pane .lead { margin: 0 0 16px; color: var(--on-muted); font-size: 13px; }
+  .d01 .pane[hidden] { display: none; }
+
+  /* 02 Master-detail */
+  .d02 .split {
+    display: grid;
+    grid-template-columns: 1fr 1.1fr;
+    min-height: 560px;
+  }
+  .d02 .list { border-right: 1px solid var(--outline); min-width: 0; }
+  .d02 .detail { padding: 16px 18px; min-width: 0; background: #fafcfe; }
+  .d02 .detail h2 { margin: 0 0 4px; font-size: 18px; }
+  .d02 .detail .lead { margin: 0 0 14px; color: var(--on-muted); font-size: 13px; }
+
+  /* 03 Continuous ledger */
+  .d03 .stream { padding: 8px 0 24px; }
+  .d03 .block {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 20px;
+    padding: 20px 22px;
+    border-bottom: 1px solid var(--outline);
+  }
+  .d03 .block h2 {
+    margin: 0 0 4px;
+    font-size: 15px;
+  }
+  .d03 .block .side-lead {
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--on-muted);
+  }
+
+  /* 04 Twin keel */
+  .d04 .cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    min-height: 560px;
+  }
+  .d04 .col {
+    padding: 14px;
+    display: grid;
+    gap: 12px;
+    align-content: start;
+  }
+  .d04 .col + .col {
+    border-left: 1px solid var(--outline);
+    background: #fafcfe;
+  }
+  .d04 .panel {
+    border: 1px solid var(--outline);
+    border-radius: 8px;
+    background: #fff;
+    padding: 14px;
+  }
+  .d04 .panel h2 { margin: 0 0 4px; font-size: 14px; }
+  .d04 .panel .lead { margin: 0 0 12px; font-size: 12.5px; color: var(--on-muted); }
+
+  /* 05 Docket spine */
+  .d05 .spine-head {
+    display: grid;
+    grid-template-columns: 1.5fr 0.7fr 0.7fr 0.8fr;
+    gap: 8px;
+    padding: 9px 16px;
+    background: var(--subtle);
+    border-bottom: 1px solid var(--outline);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--on-muted);
+  }
+  .d05 details { border-bottom: 1px solid var(--outline); }
+  .d05 summary {
+    list-style: none;
+    display: grid;
+    grid-template-columns: 1.5fr 0.7fr 0.7fr 0.8fr;
+    gap: 8px;
+    align-items: center;
+    padding: 13px 16px;
+    cursor: pointer;
+    font-size: 13.5px;
+  }
+  .d05 summary::-webkit-details-marker { display: none; }
+  .d05 summary:hover { background: #fafcfe; }
+  .d05 details[open] summary {
+    background: var(--selection);
+    border-bottom: 1px solid var(--outline);
+  }
+  .d05 summary .name { font-weight: 600; }
+  .d05 summary .hint { font-size: 12px; color: var(--on-muted); font-weight: 400; }
+  .d05 .panel { padding: 14px 16px 18px; max-width: 720px; display: grid; gap: 12px; }
+
+  /* 06 Reviewers desk */
+  .d06 .split {
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    min-height: 560px;
+  }
+  .d06 .queue { border-right: 1px solid var(--outline); min-width: 0; }
+  .d06 .inspector {
+    padding: 16px;
+    background: #fafcfe;
+    display: grid;
+    gap: 14px;
+    align-content: start;
+  }
+  .d06 .inspector h2 { margin: 0; font-size: 16px; }
+  .d06 .inspector .kicker {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--on-muted);
+  }
+  .d06 .inspector-card {
+    border: 1px solid var(--outline);
+    border-radius: 8px;
+    background: #fff;
+    padding: 12px 14px;
+  }
+  .d06 .inspector-card h3 { margin: 0 0 8px; font-size: 13px; }
+
+  /* 07 Metrics + canvas */
+  .d07 .canvas { padding: 16px 18px 28px; display: grid; gap: 14px; max-width: 900px; }
+  .d07 .sec {
+    border: 1px solid var(--outline);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .d07 .sec-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--subtle);
+    border-bottom: 1px solid var(--outline);
+  }
+  .d07 .sec-bar h2 { margin: 0; font-size: 13.5px; }
+  .d07 .sec-body { padding: 14px; }
+
+  /* 08 Dense bands */
+  .d08 .board { padding: 10px; background: #f4f7fa; display: grid; gap: 8px; }
+  .d08 .band {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 14px;
+    align-items: start;
+    padding: 14px 16px;
+    background: #fff;
+    border: 1px solid var(--outline);
+    border-radius: 8px;
+  }
+  .d08 .band h2 { margin: 0 0 2px; font-size: 13.5px; }
+  .d08 .band .lead { margin: 0; font-size: 12px; color: var(--on-muted); }
+
+  /* 09 Tiered */
+  .d09 .body { padding: 16px; display: grid; gap: 14px; }
+  .d09 .tier-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--secondary);
+    margin: 0 0 2px 2px;
+  }
+  .d09 .grid2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .d09 .card {
+    border: 1px solid var(--outline);
+    border-radius: 8px;
+    background: #fff;
+    padding: 14px;
+    box-shadow: var(--shadow-1);
+  }
+  .d09 .card.span2 { grid-column: 1 / -1; }
+  .d09 .card h2 { margin: 0 0 4px; font-size: 14px; }
+  .d09 .card .lead { margin: 0 0 12px; font-size: 12.5px; color: var(--on-muted); }
+  .d09 details.adv {
+    border: 1px dashed var(--outline-strong);
+    border-radius: 8px;
+    background: rgba(255,255,255,0.75);
+  }
+  .d09 details.adv summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 12px 14px;
+    font-weight: 600;
+    font-size: 13.5px;
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .d09 details.adv summary::-webkit-details-marker { display: none; }
+  .d09 details.adv[open] summary { border-bottom: 1px solid var(--outline); }
+  .d09 details.adv .inner { padding: 12px 14px 14px; }
+
+  /* 10 Inspector berth */
+  .d10 .split {
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    min-height: 560px;
+  }
+  .d10 .main {
+    padding: 14px 16px 24px;
+    display: grid;
+    gap: 12px;
+    border-right: 1px solid var(--outline);
+  }
+  .d10 .sec {
+    border: 1px solid var(--outline);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .d10 .sec-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 9px 12px;
+    background: var(--subtle);
+    border-bottom: 1px solid var(--outline);
+  }
+  .d10 .sec-bar h2 { margin: 0; font-size: 13px; }
+  .d10 .sec-body { padding: 12px; }
+  .d10 .berth {
+    padding: 12px;
+    background: #f7fafc;
+    display: grid;
+    gap: 10px;
+    align-content: start;
+  }
+  .d10 .berth > h2 {
+    margin: 0;
+    font-size: 11px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--on-muted);
+  }
+  .d10 .pulse {
+    border: 1px solid var(--outline);
+    border-radius: 8px;
+    background: #fff;
+    padding: 11px 12px;
+  }
+  .d10 .pulse .title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .d10 .pair {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    font-size: 12.5px;
+    padding: 3px 0;
+  }
+  .d10 .pair dt { color: var(--on-muted); font-weight: 600; margin: 0; }
+  .d10 .pair dd { margin: 0; }
+
+  @media (max-width: 960px) {
+    .desk { grid-template-columns: 48px 1fr; }
+    .d02 .split, .d03 .block, .d04 .cols, .d06 .split,
+    .d08 .band, .d09 .grid2, .d10 .split, .form-grid {
+      grid-template-columns: 1fr;
+    }
+    .d05 .spine-head { display: none; }
+    .d05 summary { display: flex; flex-wrap: wrap; gap: 8px 14px; }
+  }
+</style>
+</head>
+<body>
+  <header class="page-head">
+    <div class="page-head-inner">
+      <nav class="index" aria-label="Directions">
+        <a href="#d01">01 Section panes</a>
+        <a href="#d02">02 Master-detail</a>
+        <a href="#d03">03 Continuous ledger</a>
+        <a href="#d04">04 Twin keel</a>
+        <a href="#d05">05 Docket spine</a>
+        <a href="#d06">06 Reviewers desk</a>
+        <a href="#d07">07 Metrics canvas</a>
+        <a href="#d08">08 Dense bands</a>
+        <a href="#d09">09 Everyday / advanced</a>
+        <a href="#d10">10 Status berth</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+
+    <!-- ========== 01 ========== -->
+    <article class="option" id="d01">
+      <div class="option-meta"><span class="num">01</span> Section panes — toolbar owns section + actions</div>
+      <div class="desk d01">
+        <aside class="rail" aria-hidden="true">
+          <div class="mark">C</div>
+          <div class="nav-dot">S</div><div class="nav-dot">F</div><div class="nav-dot">A</div>
+          <div class="nav-dot on">⚙</div>
+        </aside>
+        <div class="desk-main">
+          <header class="shell-toolbar shell-toolbar-tools-only">
+            <div class="topbar-tools">
+              <div class="topbar-tools-inner">
+                <div class="seg" role="tablist" aria-label="Settings section">
+                  <button type="button" class="on" data-sec="event">Event</button>
+                  <button type="button" data-sec="reviewers">Reviewers</button>
+                  <button type="button" data-sec="eval">Evaluation</button>
+                  <button type="button" data-sec="cc">Course Check</button>
+                  <button type="button" data-sec="auto">Automation</button>
+                  <button type="button" data-sec="airtable">Airtable</button>
+                </div>
+                <span class="topbar-tools-spacer"></span>
+              </div>
+            </div>
+            <div class="topbar-actions">
+              <button type="button" class="btn btn-secondary btn-sm" data-act-for="reviewers" hidden>Invite reviewer</button>
+              <button type="button" class="btn btn-secondary btn-sm" data-act-for="auto" hidden>Create API key</button>
+              <button type="button" class="btn btn-primary btn-sm" data-act-for="airtable" hidden>Connect demo</button>
+              <button type="button" class="btn btn-primary btn-sm" data-act-for="event">Save event</button>
+              <button type="button" class="btn btn-primary btn-sm" data-act-for="cc" hidden>Save policy</button>
+              <button type="button" class="btn btn-secondary btn-sm" data-act-for="eval" hidden>Enable advanced</button>
+              <button type="button" class="btn btn-secondary btn-sm" data-act-for="airtable" hidden>Retry pull</button>
+            </div>
+          </header>
+          <div class="work">
+            <section class="pane" data-pane="event">
+              <h2>Event configuration</h2>
+              <p class="lead">Workspace identity and program dates.</p>
+              <div class="form-grid">
+                <label class="field-block span2">Event name<input type="text" value="Pacific Open Data Summit 2026" /></label>
+                <label class="field-block">Slug<input class="mono" type="text" value="pacific-open-data-summit-2026" /></label>
+                <label class="field-block">Timezone
+                  <select><option>America/Los_Angeles</option></select>
+                </label>
+                <label class="field-block">Starts<input type="date" value="2026-09-14" /></label>
+                <label class="field-block">Ends<input type="date" value="2026-09-16" /></label>
+              </div>
+            </section>
+            <section class="pane" data-pane="reviewers" hidden>
+              <h2>Reviewers</h2>
+              <p class="lead">Track-scoped access. Owned only on Settings.</p>
+              <table class="op">
+                <thead><tr><th><button type="button">Reviewer ↕</button></th><th>Tracks</th><th>Status</th></tr></thead>
+                <tbody>
+                  <tr><td>Maya Chen</td><td>Civic data · Policy</td><td class="status-ok">Active</td></tr>
+                  <tr><td>Jonah Reed</td><td>Open source</td><td class="status-ok">Active</td></tr>
+                  <tr><td>Priya Nair</td><td>Civic data</td><td class="status-warn">Invited</td></tr>
+                </tbody>
+              </table>
+            </section>
+            <section class="pane" data-pane="eval" hidden>
+              <h2>Advanced evaluation plan</h2>
+              <p class="lead">Optional multi-round scorecards. Shared track queue stays default when off.</p>
+              <span class="flag flag-off">Disabled</span>
+            </section>
+            <section class="pane" data-pane="cc" hidden>
+              <h2>Course Check policy</h2>
+              <p class="lead">Stricter gates only — baseline protections always stay on.</p>
+              <div style="display:grid;gap:10px;max-width:480px">
+                <label class="check"><input type="checkbox" /> <span>Require two-person approval</span></label>
+                <label class="check"><input type="checkbox" checked /> <span>Approver must differ from requester</span></label>
+                <label class="check"><input type="checkbox" /> <span>Require a reason on every approval</span></label>
+                <label class="field-block">Maximum agent operating mode
+                  <select><option>Propose only</option><option selected>Delegated execution</option><option>Autonomous policy</option></select>
+                </label>
+              </div>
+            </section>
+            <section class="pane" data-pane="auto" hidden>
+              <h2>Automation access</h2>
+              <p class="lead">API keys and MCP for Course Check agents.</p>
+              <table class="op">
+                <thead><tr><th>Name</th><th>Scopes</th><th>State</th></tr></thead>
+                <tbody>
+                  <tr><td class="mono">ops-runner</td><td>decisions · drafts · sends</td><td class="status-ok">Active</td></tr>
+                  <tr><td class="mono">read-only-bot</td><td>decisions</td><td class="status-muted">Revoked</td></tr>
+                </tbody>
+              </table>
+            </section>
+            <section class="pane" data-pane="airtable" hidden>
+              <h2>Airtable sync</h2>
+              <p class="lead">Optional Program base. Core desk stays available offline.</p>
+              <p style="margin:0 0 12px"><span class="flag flag-ok">Healthy</span> <span class="muted">Last success Aug 12, 2:14 PM · Token saved</span></p>
+              <div class="callout" style="margin-bottom:14px;max-width:520px">
+                <strong>No Airtable account?</strong>
+                <span class="muted" style="color:var(--on-info)">Use the demo sandbox to verify pull end-to-end.</span>
+              </div>
+              <div class="form-grid">
+                <label class="field-block">Base ID<input class="mono" type="text" value="appChartSteadDemo" /></label>
+                <label class="field-block">Token<input type="password" value="••••••••" /></label>
+              </div>
+              <div class="actions-row">
+                <button type="button" class="btn btn-secondary btn-sm">Connect and pull</button>
+                <button type="button" class="btn btn-ghost btn-sm">Disconnect</button>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ========== 02 ========== -->
+    <article class="option" id="d02">
+      <div class="option-meta"><span class="num">02</span> Master-detail — section filter in toolbar, object list + editor</div>
+      <div class="desk d02">
+        <aside class="rail" aria-hidden="true"><div class="mark">C</div><div class="nav-dot on">⚙</div></aside>
+        <div class="desk-main">
+          <header class="shell-toolbar shell-toolbar-tools-only">
+            <div class="topbar-tools">
+              <div class="topbar-tools-inner">
+                <label class="field search-field">
+                  <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                  <input type="search" placeholder="Search settings…" aria-label="Search settings" />
+                </label>
+                <div class="seg" role="group" aria-label="Group">
+                  <button type="button" aria-pressed="true">All</button>
+                  <button type="button" aria-pressed="false">People</button>
+                  <button type="button" aria-pressed="false">Policy</button>
+                  <button type="button" aria-pressed="false">Integrations</button>
+                </div>
+                <span class="topbar-tools-spacer"></span>
+              </div>
+            </div>
+            <div class="topbar-actions">
+              <button type="button" class="btn btn-secondary btn-sm">Invite reviewer</button>
+              <button type="button" class="btn btn-primary btn-sm">Save</button>
+            </div>
+          </header>
+          <div class="work">
+            <div class="split">
+              <div class="list">
+                <table class="op">
+                  <thead><tr><th>Setting</th><th>State</th><th>Updated</th></tr></thead>
+                  <tbody>
+                    <tr><td>Event configuration</td><td class="status-ok">Saved</td><td class="mono">Aug 10</td></tr>
+                    <tr class="selected"><td>Reviewers</td><td>3 · 1 invited</td><td class="mono">Aug 11</td></tr>
+                    <tr><td>Evaluation plan</td><td class="status-muted">Off</td><td class="mono">—</td></tr>
+                    <tr><td>Course Check policy</td><td>Distinct approver</td><td class="mono">Aug 9</td></tr>
+                    <tr><td>Automation access</td><td>1 active key</td><td class="mono">Aug 2</td></tr>
+                    <tr><td>Airtable sync</td><td class="status-ok">Healthy</td><td class="mono">2:14 PM</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="detail">
+                <h2>Reviewers</h2>
+                <p class="lead">Grant or remove track access for signed-in reviewers.</p>
+                <table class="op">
+                  <thead><tr><th>Reviewer</th><th>Tracks</th><th>Status</th></tr></thead>
+                  <tbody>
+                    <tr><td>Maya Chen</td><td>Civic data · Policy</td><td class="status-ok">Active</td></tr>
+                    <tr><td>Jonah Reed</td><td>Open source</td><td class="status-ok">Active</td></tr>
+                    <tr><td>Priya Nair</td><td>Civic data</td><td class="status-warn">Invited</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ========== 03 ========== -->
+    <article class="option" id="d03">
+      <div class="option-meta"><span class="num">03</span> Continuous ledger — jump tools + one global Save strip</div>
+      <div class="desk d03">
+        <aside class="rail" aria-hidden="true"><div class="mark">C</div><div class="nav-dot on">⚙</div></aside>
+        <div class="desk-main">
+          <header class="shell-toolbar shell-toolbar-tools-only">
+            <div class="topbar-tools">
+              <div class="topbar-tools-inner">
+                <div class="seg" role="navigation" aria-label="Jump to section">
+                  <button type="button">Event</button>
+                  <button type="button">Reviewers</button>
+                  <button type="button">Evaluation</button>
+                  <button type="button">Course Check</button>
+                  <button type="button">Automation</button>
+                  <button type="button" class="on">Airtable</button>
+                </div>
+                <span class="topbar-tools-spacer"></span>
+                <button type="button" class="btn btn-secondary btn-sm">Invite reviewer</button>
+                <button type="button" class="btn btn-secondary btn-sm">Create API key</button>
+              </div>
+            </div>
+            <div class="topbar-actions">
+              <button type="button" class="btn btn-primary btn-sm">Save changes</button>
+            </div>
+          </header>
+          <div class="work">
+            <div class="stream">
+              <section class="block">
+                <div>
+                  <h2>Event</h2>
+                  <p class="side-lead">Identity and dates</p>
+                </div>
+                <div class="form-grid">
+                  <label class="field-block span2">Event name<input type="text" value="Pacific Open Data Summit 2026" /></label>
+                  <label class="field-block">Starts<input type="date" value="2026-09-14" /></label>
+                  <label class="field-block">Ends<input type="date" value="2026-09-16" /></label>
+                </div>
+              </section>
+              <section class="block">
+                <div>
+                  <h2>Reviewers</h2>
+                  <p class="side-lead">Track-scoped access</p>
+                </div>
+                <table class="op">
+                  <thead><tr><th>Reviewer</th><th>Tracks</th><th>Status</th></tr></thead>
+                  <tbody>
+                    <tr><td>Maya Chen</td><td>Civic · Policy</td><td class="status-ok">Active</td></tr>
+                    <tr><td>Jonah Reed</td><td>Open source</td><td class="status-ok">Active</td></tr>
+                    <tr><td>Priya Nair</td><td>Civic data</td><td class="status-warn">Invited</td></tr>
+                  </tbody>
+                </table>
+              </section>
+              <section class="block">
+                <div>
+                  <h2>Airtable</h2>
+                  <p class="side-lead">Optional sync</p>
+                </div>
+                <div>
+                  <p style="margin:0 0 10px"><span class="status-ok">Healthy</span> <span class="muted">· Aug 12, 2:14 PM · Token saved</span></p>
+                  <div class="form-grid">
+                    <label class="field-block">Base ID<input class="mono" type="text" value="appChartSteadDemo" /></label>
+                    <label class="field-block">Token<input type="password" value="••••••••" /></label>
+                  </div>
+                  <div class="actions-row">
+                    <button type="button" class="btn btn-primary btn-sm">Connect demo</button>
+                    <button type="button" class="btn btn-secondary btn-sm">Retry pull</button>
+                    <button type="button" class="btn btn-ghost btn-sm">Disconnect</button>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ========== 04 ========== -->
+    <article class="option" id="d04">
+      <div class="option-meta"><span class="num">04</span> Twin keel — toolbar scope switch Everyday / Integrations</div>
+      <div class="desk d04">
+        <aside class="rail" aria-hidden="true"><div class="mark">C</div><div class="nav-dot on">⚙</div></aside>
+        <div class="desk-main">
+          <header class="shell-toolbar shell-toolbar-tools-only">
+            <div class="topbar-tools">
+              <div class="topbar-tools-inner">
+                <div class="seg" role="group" aria-label="Desk scope">
+                  <button type="button" aria-pressed="true">Both columns</button>
+                  <button type="button" aria-pressed="false">Event ops</button>
+                  <button type="button" aria-pressed="false">Integrations</button>
+                </div>
+                <span class="topbar-tools-spacer"></span>
+                <span class="metric is-ok"><strong>Healthy</strong><span>Airtable</span></span>
+                <span class="metric"><strong>3</strong><span>Reviewers</span></span>
+                <span class="metric is-muted"><strong>Off</strong><span>Evaluation</span></span>
+              </div>
+            </div>
+            <div class="topbar-actions">
+              <button type="button" class="btn btn-secondary btn-sm">Invite reviewer</button>
+              <button type="button" class="btn btn-primary btn-sm">Save event</button>
+            </div>
+          </header>
+          <div class="work">
+            <div class="cols">
+              <div class="col">
+                <section class="panel">
+                  <h2>Event configuration</h2>
+                  <p class="lead">Name, slug, program dates.</p>
+                  <div style="display:grid;gap:10px">
+                    <label class="field-block">Event name<input type="text" value="Pacific Open Data Summit 2026" /></label>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                      <label class="field-block">Starts<input type="date" value="2026-09-14" /></label>
+                      <label class="field-block">Ends<input type="date" value="2026-09-16" /></label>
+                    </div>
+                  </div>
+                </section>
+                <section class="panel">
+                  <h2>Reviewers</h2>
+                  <p class="lead">2 active · 1 invited</p>
+                  <table class="op">
+                    <thead><tr><th>Name</th><th>Tracks</th><th></th></tr></thead>
+                    <tbody>
+                      <tr><td>Maya Chen</td><td>Civic · Policy</td><td class="status-ok">Active</td></tr>
+                      <tr><td>Jonah Reed</td><td>OSS</td><td class="status-ok">Active</td></tr>
+                      <tr><td>Priya Nair</td><td>Civic</td><td class="status-warn">Invited</td></tr>
+                    </tbody>
+                  </table>
+                </section>
+                <section class="panel">
+                  <h2>Course Check policy</h2>
+                  <p class="lead">Stricter gates only.</p>
+                  <div style="display:grid;gap:8px">
+                    <label class="check"><input type="checkbox" checked /> <span>Distinct approver</span></label>
+                    <label class="check"><input type="checkbox" /> <span>Two-person approval</span></label>
+                  </div>
+                </section>
+              </div>
+              <div class="col">
+                <section class="panel">
+                  <h2>Airtable sync</h2>
+                  <p class="lead"><span class="status-ok">Healthy</span> · last pull 2:14 PM</p>
+                  <div style="display:grid;gap:10px">
+                    <label class="field-block">Base ID<input class="mono" type="text" value="appChartSteadDemo" /></label>
+                    <label class="field-block">Token<input type="password" value="••••••••" /></label>
+                  </div>
+                  <div class="actions-row">
+                    <button type="button" class="btn btn-primary btn-sm">Demo sandbox</button>
+                    <button type="button" class="btn btn-secondary btn-sm">Retry</button>
+                  </div>
+                </section>
+                <section class="panel">
+                  <h2>Automation</h2>
+                  <p class="lead">API keys · MCP</p>
+                  <table class="op">
+                    <thead><tr><th>Key</th><th>State</th></tr></thead>
+                    <tbody>
+                      <tr><td class="mono">ops-runner</td><td class="status-ok">Active</td></tr>
+                      <tr><td class="mono">read-only-bot</td><td class="status-muted">Revoked</td></tr>
+                    </tbody>
+                  </table>
+                  <div class="actions-row"><button type="button" class="btn btn-secondary btn-sm">Create key</button></div>
+                </section>
+                <section class="panel">
+                  <h2>Evaluation plan</h2>
+                  <p class="lead">Multi-round scorecards</p>
+                  <span class="flag flag-off">Disabled</span>
+                  <div class="actions-row"><button type="button" class="btn btn-secondary btn-sm">Enable</button></div>
+                </section>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ========== 05 ========== -->
+    <article class="option" id="d05">
+      <div class="option-meta"><span class="num">05</span> Docket spine — search + status filter in toolbar, expand rows</div>
+      <div class="desk d05">
+        <aside class="rail" aria-hidden="true"><div class="mark">C</div><div class="nav-dot on">⚙</div></aside>
+        <div class="desk-main">
+          <header class="shell-toolbar shell-toolbar-tools-only">
+            <div class="topbar-tools">
+              <div class="topbar-tools-inner">
+                <label class="field search-field">
+                  <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                  <input type="search" placeholder="Filter sections…" aria-label="Filter sections" />
+                </label>
+                <div class="seg" role="group" aria-label="Status">
+                  <button type="button" aria-pressed="true">All</button>
+                  <button type="button" aria-pressed="false">Needs attention</button>
+                  <button type="button" aria-pressed="false">Integrations</button>
+                </div>
+                <span class="topbar-tools-spacer"></span>
+              </div>
+            </div>
+            <div class="topbar-actions">
+              <button type="button" class="btn btn-secondary btn-sm">Expand all</button>
+              <button type="button" class="btn btn-primary btn-sm">Invite reviewer</button>
+            </div>
+          </header>
+          <div class="work">
+            <div class="spine-head"><div>Section</div><div>Status</div><div>Changed</div><div>Action</div></div>
+            <details>
+              <summary>
+                <div><div class="name">Event configuration</div><div class="hint">Pacific Open Data Summit 2026</div></div>
+                <div class="status-ok">Saved</div>
+                <div class="mono">Aug 10</div>
+                <div>Edit</div>
+              </summary>
+              <div class="panel">
+                <div class="form-grid">
+                  <label class="field-block">Event name<input type="text" value="Pacific Open Data Summit 2026" /></label>
+                  <label class="field-block">Slug<input class="mono" type="text" value="pacific-open-data-summit-2026" /></label>
+                </div>
+                <div class="actions-row"><button type="button" class="btn btn-primary btn-sm">Save event</button></div>
+              </div>
+            </details>
+            <details>
+              <summary>
+                <div><div class="name">Reviewers</div><div class="hint">3 assigned · track-scoped</div></div>
+                <div class="status-ok">Active</div>
+                <div class="mono">Aug 11</div>
+                <div>Manage</div>
+              </summary>
+              <div class="panel">
+                <table class="op">
+                  <thead><tr><th>Reviewer</th><th>Tracks</th><th>Status</th></tr></thead>
+                  <tbody>
+                    <tr><td>Maya Chen</td><td>Civic · Policy</td><td class="status-ok">Active</td></tr>
+                    <tr><td>Priya Nair</td><td>Civic data</td><td class="status-warn">Invited</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </details>
+            <details open>
+              <summary>
+                <div><div class="name">Airtable sync</div><div class="hint">appChartSteadDemo · token saved</div></div>
+                <div class="status-ok">Healthy</div>
+                <div class="mono">2:14 PM</div>
+                <div>Pull</div>
+              </summary>
+              <div class="panel">
+                <div class="form-grid">
+                  <label class="field-block">Base ID<input class="mono" type="text" value="appChartSteadDemo" /></label>
+                  <label class="field-block">Token<input type="password" value="••••••••" /></label>
+                </div>
+                <div class="actions-row">
+                  <button type="button" class="btn btn-primary btn-sm">Connect demo</button>
+                  <button type="button" class="btn btn-secondary btn-sm">Retry pull</button>
+                  <button type="button" class="btn btn-ghost btn-sm">Disconnect</button>
+                </div>
+              </div>
+            </details>
+            <details>
+              <summary>
+                <div><div class="name">Automation access</div><div class="hint">API keys · MCP</div></div>
+                <div>1 active</div>
+                <div class="mono">Aug 2</div>
+                <div>Keys</div>
+              </summary>
+              <div class="panel">
+                <table class="op">
+                  <thead><tr><th>Name</th><th>Scopes</th><th>State</th></tr></thead>
+                  <tbody>
+                    <tr><td class="mono">ops-runner</td><td>decisions · drafts · sends</td><td class="status-ok">Active</td></tr>
+                  </tbody>
+                </table>
+                <div class="actions-row"><button type="button" class="btn btn-secondary btn-sm">Create API key</button></div>
+              </div>
+            </details>
+            <details>
+              <summary>
+                <div><div class="name">Course Check policy</div><div class="hint">Distinct approver on</div></div>
+                <div class="status-ok">Baseline +1</div>
+                <div class="mono">Aug 9</div>
+                <div>Edit</div>
+              </summary>
+              <div class="panel">
+                <label class="check"><input type="checkbox" checked /> <span>Distinct approver required</span></label>
+                <label class="check"><input type="checkbox" /> <span>Two-person approval</span></label>
+                <div class="actions-row"><button type="button" class="btn btn-primary btn-sm">Save policy</button></div>
+              </div>
+            </details>
+            <details>
+              <summary>
+                <div><div class="name">Evaluation plan</div><div class="hint">Shared track queue in use</div></div>
+                <div class="status-muted">Disabled</div>
+                <div class="mono">—</div>
+                <div>Enable</div>
+              </summary>
+              <div class="panel">
+                <button type="button" class="btn btn-secondary btn-sm">Enable advanced review</button>
+              </div>
+            </details>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ========== 06 ========== -->
+    <article class="option" id="d06">
+      <div class="option-meta"><span class="num">06</span> Reviewers desk — Submissions-style queue toolbar; other settings in inspector</div>
+      <div class="desk d06">
+        <aside class="rail" aria-hidden="true"><div class="mark">C</div><div class="nav-dot on">⚙</div></aside>
+        <div class="desk-main">
+          <header class="shell-toolbar shell-toolbar-tools-only">
+            <div class="topbar-tools">
+              <div class="topbar-tools-inner">
+                <label class="field search-field">
+                  <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                  <input type="search" placeholder="Search reviewers…" aria-label="Search reviewers" />
+                </label>
+                <div class="seg" role="group" aria-label="Reviewer status">
+                  <button type="button" aria-pressed="true">All</button>
+                  <button type="button" aria-pressed="false">Active</button>
+                  <button type="button" aria-pressed="false">Invited</button>
+                </div>
+                <button type="button" class="track-btn">All tracks ▾</button>
+                <span class="topbar-tools-spacer"></span>
+              </div>
+            </div>
+            <div class="topbar-actions">
+              <button type="button" class="btn btn-primary btn-sm">Invite reviewer</button>
+            </div>
+          </header>
+          <div class="work">
+            <div class="split">
+              <div class="queue">
+                <table class="op">
+                  <thead>
+                    <tr>
+                      <th><button type="button">Reviewer ↕</button></th>
+                      <th><button type="button">Tracks ↕</button></th>
+                      <th><button type="button">Status ↕</button></th>
+                      <th><button type="button">Added ↕</button></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr class="selected"><td>Maya Chen</td><td>Civic data · Policy</td><td class="status-ok">Active</td><td class="mono">Jul 12</td></tr>
+                    <tr><td>Jonah Reed</td><td>Open source</td><td class="status-ok">Active</td><td class="mono">Jul 18</td></tr>
+                    <tr><td>Priya Nair</td><td>Civic data</td><td class="status-warn">Invited</td><td class="mono">Aug 11</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <aside class="inspector">
+                <div class="kicker">Selected reviewer</div>
+                <h2>Maya Chen</h2>
+                <div class="inspector-card">
+                  <h3>Tracks</h3>
+                  <label class="check"><input type="checkbox" checked /> <span>Civic data</span></label>
+                  <label class="check"><input type="checkbox" checked /> <span>Policy</span></label>
+                  <label class="check"><input type="checkbox" /> <span>Open source</span></label>
+                  <div class="actions-row">
+                    <button type="button" class="btn btn-primary btn-sm">Save tracks</button>
+                    <button type="button" class="btn btn-ghost btn-sm">Remove</button>
+                  </div>
+                </div>
+                <div class="kicker">Event health</div>
+                <div class="inspector-card">
+                  <h3>Airtable</h3>
+                  <p style="margin:0 0 8px"><span class="status-ok">Healthy</span> <span class="muted">2:14 PM</span></p>
+                  <button type="button" class="btn btn-secondary btn-sm">Open Airtable settings</button>
+                </div>
+                <div class="inspector-card">
+                  <h3>Automation</h3>
+                  <p style="margin:0 0 8px" class="muted">1 active key · MCP ready</p>
+                  <button type="button" class="btn btn-secondary btn-sm">Manage keys</button>
+                </div>
+                <div class="inspector-card">
+                  <h3>Course Check</h3>
+                  <p style="margin:0 0 8px" class="muted">Distinct approver on</p>
+                  <button type="button" class="btn btn-secondary btn-sm">Edit policy</button>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ========== 07 ========== -->
+    <article class="option" id="d07">
+      <div class="option-meta"><span class="num">07</span> Metrics canvas — Agenda-style counts in toolbar, stacked sections below</div>
+      <div class="desk d07">
+        <aside class="rail" aria-hidden="true"><div class="mark">C</div><div class="nav-dot on">⚙</div></aside>
+        <div class="desk-main">
+          <header class="shell-toolbar shell-toolbar-tools-only">
+            <div class="topbar-tools">
+              <div class="topbar-tools-inner">
+                <span class="metric"><strong>3</strong><span>Reviewers</span></span>
+                <span class="metric is-warn"><strong>1</strong><span>Invited</span></span>
+                <span class="metric"><strong>1</strong><span>API keys</span></span>
+                <span class="metric is-ok"><strong>✓</strong><span>Airtable</span></span>
+                <span class="metric is-muted"><strong>—</strong><span>Evaluation</span></span>
+                <span class="topbar-tools-spacer"></span>
+                <button type="button" class="btn btn-secondary btn-sm">Invite reviewer</button>
+                <button type="button" class="btn btn-secondary btn-sm">Create API key</button>
+                <button type="button" class="btn btn-secondary btn-sm">Retry pull</button>
+              </div>
+            </div>
+            <div class="topbar-actions">
+              <button type="button" class="btn btn-primary btn-sm">Connect demo</button>
+            </div>
+          </header>
+          <div class="work">
+            <div class="canvas">
+              <section class="sec">
+                <div class="sec-bar"><h2>Event configuration</h2><button type="button" class="btn btn-primary btn-sm">Save</button></div>
+                <div class="sec-body">
+                  <div class="form-grid">
+                    <label class="field-block span2">Event name<input type="text" value="Pacific Open Data Summit 2026" /></label>
+                    <label class="field-block">Starts<input type="date" value="2026-09-14" /></label>
+                    <label class="field-block">Ends<input type="date" value="2026-09-16" /></label>
+                  </div>
+                </div>
+              </section>
+              <section class="sec">
+                <div class="sec-bar"><h2>Reviewers</h2><button type="button" class="btn btn-secondary btn-sm">Invite</button></div>
+                <div class="sec-body" style="padding:0">
+                  <table class="op">
+                    <thead><tr><th>Reviewer</th><th>Tracks</th><th>Status</th></tr></thead>
+                    <tbody>
+                      <tr><td>Maya Chen</td><td>Civic · Policy</td><td class="status-ok">Active</td></tr>
+                      <tr><td>Jonah Reed</td><td>Open source</td><td class="status-ok">Active</td></tr>
+                      <tr><td>Priya Nair</td><td>Civic data</td><td class="status-warn">Invited</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+              <section class="sec">
+                <div class="sec-bar"><h2>Airtable sync</h2><span class="flag flag-ok">Healthy</span></div>
+                <div class="sec-body">
+                  <div class="form-grid">
+                    <label class="field-block">Base ID<input class="mono" type="text" value="appChartSteadDemo" /></label>
+                    <label class="field-block">Token<input type="password" value="••••••••" /></label>
+                  </div>
+                </div>
+              </section>
+              <section class="sec">
+                <div class="sec-bar"><h2>Course Check policy</h2><button type="button" class="btn btn-primary btn-sm">Save</button></div>
+                <div class="sec-body">
+                  <label class="check"><input type="checkbox" checked /> <span>Distinct approver required</span></label>
+                  <label class="check"><input type="checkbox" /> <span>Two-person approval</span></label>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ========== 08 ========== -->
+    <article class="option" id="d08">
+      <div class="option-meta"><span class="num">08</span> Dense bands — toolbar is the only chrome; bands are pure forms</div>
+      <div class="desk d08">
+        <aside class="rail" aria-hidden="true"><div class="mark">C</div><div class="nav-dot on">⚙</div></aside>
+        <div class="desk-main">
+          <header class="shell-toolbar shell-toolbar-tools-only">
+            <div class="topbar-tools">
+              <div class="topbar-tools-inner">
+                <div class="seg" role="group" aria-label="Jump">
+                  <button type="button">Event</button>
+                  <button type="button">Reviewers</button>
+                  <button type="button">Policy</button>
+                  <button type="button">Keys</button>
+                  <button type="button" class="on">Airtable</button>
+                  <button type="button">Eval</button>
+                </div>
+                <span class="topbar-tools-spacer"></span>
+                <button type="button" class="btn btn-secondary btn-sm">Invite reviewer</button>
+                <button type="button" class="btn btn-secondary btn-sm">Create key</button>
+                <button type="button" class="btn btn-secondary btn-sm">Retry pull</button>
+                <button type="button" class="btn btn-ghost btn-sm">Disconnect</button>
+              </div>
+            </div>
+            <div class="topbar-actions">
+              <button type="button" class="btn btn-primary btn-sm">Connect demo</button>
+            </div>
+          </header>
+          <div class="work">
+            <div class="board">
+              <div class="band">
+                <div><h2>Event</h2><p class="lead">Identity · dates</p></div>
+                <div class="form-grid" style="max-width:none">
+                  <label class="field-block span2">Name<input type="text" value="Pacific Open Data Summit 2026" /></label>
+                  <label class="field-block">Starts<input type="date" value="2026-09-14" /></label>
+                  <label class="field-block">Ends<input type="date" value="2026-09-16" /></label>
+                </div>
+              </div>
+              <div class="band">
+                <div><h2>Reviewers</h2><p class="lead">Track access</p></div>
+                <table class="op">
+                  <thead><tr><th>Name</th><th>Tracks</th><th>Status</th></tr></thead>
+                  <tbody>
+                    <tr><td>Maya Chen</td><td>Civic · Policy</td><td class="status-ok">Active</td></tr>
+                    <tr><td>Priya Nair</td><td>Civic</td><td class="status-warn">Invited</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="band">
+                <div><h2>Airtable</h2><p class="lead"><span class="status-ok">Healthy</span></p></div>
+                <div class="form-grid" style="max-width:none">
+                  <label class="field-block">Base ID<input class="mono" type="text" value="appChartSteadDemo" /></label>
+                  <label class="field-block">Token<input type="password" value="••••••••" /></label>
+                </div>
+              </div>
+              <div class="band">
+                <div><h2>Course Check</h2><p class="lead">Gates</p></div>
+                <div style="display:flex;flex-wrap:wrap;gap:12px 18px">
+                  <label class="check"><input type="checkbox" checked /> <span>Distinct approver</span></label>
+                  <label class="check"><input type="checkbox" /> <span>Two-person</span></label>
+                  <label class="check"><input type="checkbox" /> <span>Reason required</span></label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ========== 09 ========== -->
+    <article class="option" id="d09">
+      <div class="option-meta"><span class="num">09</span> Everyday / advanced — toolbar mode switch (Agenda day-tabs energy)</div>
+      <div class="desk d09">
+        <aside class="rail" aria-hidden="true"><div class="mark">C</div><div class="nav-dot on">⚙</div></aside>
+        <div class="desk-main">
+          <header class="shell-toolbar shell-toolbar-tools-only">
+            <div class="topbar-tools">
+              <div class="topbar-tools-inner">
+                <div class="seg" role="tablist" aria-label="Settings mode">
+                  <button type="button" class="on" data-mode="everyday">Everyday</button>
+                  <button type="button" data-mode="advanced">Advanced &amp; integrations</button>
+                </div>
+                <span class="topbar-tools-spacer"></span>
+                <span class="metric"><strong>3</strong><span>Reviewers</span></span>
+                <span class="metric is-ok"><strong>OK</strong><span>Airtable</span></span>
+              </div>
+            </div>
+            <div class="topbar-actions">
+              <button type="button" class="btn btn-secondary btn-sm" data-mode-act="everyday">Invite reviewer</button>
+              <button type="button" class="btn btn-primary btn-sm" data-mode-act="everyday">Save event</button>
+              <button type="button" class="btn btn-primary btn-sm" data-mode-act="advanced" hidden>Connect demo</button>
+              <button type="button" class="btn btn-secondary btn-sm" data-mode-act="advanced" hidden>Create API key</button>
+            </div>
+          </header>
+          <div class="work">
+            <div class="body" data-mode-pane="everyday">
+              <div class="tier-label">Everyday</div>
+              <div class="grid2">
+                <section class="card">
+                  <h2>Event configuration</h2>
+                  <p class="lead">Name and program dates.</p>
+                  <div class="form-grid" style="max-width:none">
+                    <label class="field-block span2">Event name<input type="text" value="Pacific Open Data Summit 2026" /></label>
+                    <label class="field-block">Starts<input type="date" value="2026-09-14" /></label>
+                    <label class="field-block">Ends<input type="date" value="2026-09-16" /></label>
+                  </div>
+                </section>
+                <section class="card">
+                  <h2>Course Check policy</h2>
+                  <p class="lead">Optional stricter gates.</p>
+                  <div style="display:grid;gap:8px">
+                    <label class="check"><input type="checkbox" checked /> <span>Distinct approver</span></label>
+                    <label class="check"><input type="checkbox" /> <span>Two-person approval</span></label>
+                    <label class="check"><input type="checkbox" /> <span>Reason on approve</span></label>
+                  </div>
+                </section>
+                <section class="card span2">
+                  <h2>Reviewers</h2>
+                  <p class="lead">Track-scoped access — Settings owns this surface.</p>
+                  <table class="op">
+                    <thead><tr><th>Reviewer</th><th>Tracks</th><th>Status</th></tr></thead>
+                    <tbody>
+                      <tr><td>Maya Chen</td><td>Civic data · Policy</td><td class="status-ok">Active</td></tr>
+                      <tr><td>Jonah Reed</td><td>Open source</td><td class="status-ok">Active</td></tr>
+                      <tr><td>Priya Nair</td><td>Civic data</td><td class="status-warn">Invited</td></tr>
+                    </tbody>
+                  </table>
+                </section>
+              </div>
+            </div>
+            <div class="body" data-mode-pane="advanced" hidden>
+              <div class="tier-label">Advanced &amp; integrations</div>
+              <details class="adv" open>
+                <summary>Airtable sync <span class="status-ok">Healthy</span></summary>
+                <div class="inner">
+                  <div class="form-grid">
+                    <label class="field-block">Base ID<input class="mono" type="text" value="appChartSteadDemo" /></label>
+                    <label class="field-block">Token<input type="password" value="••••••••" /></label>
+                  </div>
+                  <div class="actions-row">
+                    <button type="button" class="btn btn-secondary btn-sm">Retry pull</button>
+                    <button type="button" class="btn btn-ghost btn-sm">Disconnect</button>
+                  </div>
+                </div>
+              </details>
+              <details class="adv" style="margin-top:10px">
+                <summary>Automation access <span class="muted">1 active key</span></summary>
+                <div class="inner">
+                  <table class="op">
+                    <thead><tr><th>Name</th><th>Scopes</th><th>State</th></tr></thead>
+                    <tbody>
+                      <tr><td class="mono">ops-runner</td><td>decisions · drafts · sends</td><td class="status-ok">Active</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+              <details class="adv" style="margin-top:10px">
+                <summary>Evaluation plan <span class="status-muted">Disabled</span></summary>
+                <div class="inner">
+                  <button type="button" class="btn btn-secondary btn-sm">Enable advanced review</button>
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ========== 10 ========== -->
+    <article class="option" id="d10">
+      <div class="option-meta"><span class="num">10</span> Status berth — toolbar commands; live truth pinned right</div>
+      <div class="desk d10">
+        <aside class="rail" aria-hidden="true"><div class="mark">C</div><div class="nav-dot on">⚙</div></aside>
+        <div class="desk-main">
+          <header class="shell-toolbar shell-toolbar-tools-only">
+            <div class="topbar-tools">
+              <div class="topbar-tools-inner">
+                <label class="field search-field">
+                  <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                  <input type="search" placeholder="Jump to a setting…" aria-label="Jump to a setting" />
+                </label>
+                <div class="seg" role="group" aria-label="Focus">
+                  <button type="button" aria-pressed="true">All</button>
+                  <button type="button" aria-pressed="false">Unsaved</button>
+                  <button type="button" aria-pressed="false">Integrations</button>
+                </div>
+                <span class="topbar-tools-spacer"></span>
+                <button type="button" class="btn btn-secondary btn-sm">Invite reviewer</button>
+                <button type="button" class="btn btn-secondary btn-sm">Create API key</button>
+                <button type="button" class="btn btn-secondary btn-sm">Retry pull</button>
+              </div>
+            </div>
+            <div class="topbar-actions">
+              <button type="button" class="btn btn-primary btn-sm">Save all</button>
+            </div>
+          </header>
+          <div class="work">
+            <div class="split">
+              <div class="main">
+                <section class="sec">
+                  <div class="sec-bar"><h2>Event configuration</h2></div>
+                  <div class="sec-body">
+                    <div class="form-grid" style="max-width:none">
+                      <label class="field-block span2">Event name<input type="text" value="Pacific Open Data Summit 2026" /></label>
+                      <label class="field-block">Starts<input type="date" value="2026-09-14" /></label>
+                      <label class="field-block">Ends<input type="date" value="2026-09-16" /></label>
+                    </div>
+                  </div>
+                </section>
+                <section class="sec">
+                  <div class="sec-bar"><h2>Reviewers</h2></div>
+                  <div class="sec-body" style="padding:0">
+                    <table class="op">
+                      <thead><tr><th>Reviewer</th><th>Tracks</th><th>Status</th></tr></thead>
+                      <tbody>
+                        <tr><td>Maya Chen</td><td>Civic · Policy</td><td class="status-ok">Active</td></tr>
+                        <tr><td>Jonah Reed</td><td>Open source</td><td class="status-ok">Active</td></tr>
+                        <tr><td>Priya Nair</td><td>Civic data</td><td class="status-warn">Invited</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+                <section class="sec">
+                  <div class="sec-bar"><h2>Airtable sync</h2></div>
+                  <div class="sec-body">
+                    <div class="form-grid" style="max-width:none">
+                      <label class="field-block">Base ID<input class="mono" type="text" value="appChartSteadDemo" /></label>
+                      <label class="field-block">Token<input type="password" value="••••••••" /></label>
+                    </div>
+                  </div>
+                </section>
+                <section class="sec">
+                  <div class="sec-bar"><h2>Course Check policy</h2></div>
+                  <div class="sec-body">
+                    <label class="check"><input type="checkbox" checked /> <span>Distinct approver required</span></label>
+                    <label class="check"><input type="checkbox" /> <span>Two-person approval</span></label>
+                  </div>
+                </section>
+              </div>
+              <aside class="berth" aria-label="Live status">
+                <h2>Live status</h2>
+                <div class="pulse">
+                  <div class="title">Airtable <span class="flag flag-ok">Healthy</span></div>
+                  <div class="pair"><dt>Last pull</dt><dd>2:14 PM</dd></div>
+                  <div class="pair"><dt>Token</dt><dd>Saved</dd></div>
+                  <div class="pair"><dt>Base</dt><dd class="mono">app…Demo</dd></div>
+                </div>
+                <div class="pulse">
+                  <div class="title">Reviewers</div>
+                  <div class="pair"><dt>Active</dt><dd>2</dd></div>
+                  <div class="pair"><dt>Invited</dt><dd>1</dd></div>
+                </div>
+                <div class="pulse">
+                  <div class="title">Course Check</div>
+                  <div class="pair"><dt>Baseline</dt><dd class="status-ok">On</dd></div>
+                  <div class="pair"><dt>Distinct approver</dt><dd>On</dd></div>
+                </div>
+                <div class="pulse">
+                  <div class="title">Automation</div>
+                  <div class="pair"><dt>Active keys</dt><dd>1</dd></div>
+                  <div class="pair"><dt>Evaluation</dt><dd class="status-muted">Off</dd></div>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+  </main>
+
+  <script>
+    // 01 section panes
+    document.querySelectorAll('.d01').forEach((root) => {
+      const tabs = root.querySelectorAll('.seg button[data-sec]');
+      const panes = root.querySelectorAll('[data-pane]');
+      const acts = root.querySelectorAll('[data-act-for]');
+      function show(id) {
+        tabs.forEach((b) => b.classList.toggle('on', b.dataset.sec === id));
+        panes.forEach((p) => { p.hidden = p.dataset.pane !== id; });
+        acts.forEach((a) => { a.hidden = a.dataset.actFor !== id; });
+      }
+      tabs.forEach((b) => b.addEventListener('click', () => show(b.dataset.sec)));
+      show('event');
+    });
+
+    // 09 mode switch
+    document.querySelectorAll('.d09').forEach((root) => {
+      const tabs = root.querySelectorAll('.seg button[data-mode]');
+      const panes = root.querySelectorAll('[data-mode-pane]');
+      const acts = root.querySelectorAll('[data-mode-act]');
+      function show(id) {
+        tabs.forEach((b) => b.classList.toggle('on', b.dataset.mode === id));
+        panes.forEach((p) => { p.hidden = p.dataset.modePane !== id; });
+        acts.forEach((a) => { a.hidden = a.dataset.modeAct !== id; });
+      }
+      tabs.forEach((b) => b.addEventListener('click', () => show(b.dataset.mode)));
+      show('everyday');
+    });
+
+    // generic seg press toggle within a group (visual only)
+    document.querySelectorAll('.seg').forEach((seg) => {
+      if (seg.querySelector('[data-sec], [data-mode]')) return;
+      seg.querySelectorAll('button').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          seg.querySelectorAll('button').forEach((b) => {
+            b.classList.remove('on');
+            if (b.hasAttribute('aria-pressed')) b.setAttribute('aria-pressed', 'false');
+          });
+          btn.classList.add('on');
+          if (btn.hasAttribute('aria-pressed')) btn.setAttribute('aria-pressed', 'true');
+        });
+      });
+    });
+  </script>
+</body>
+</html>
