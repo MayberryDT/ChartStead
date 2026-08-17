@@ -2083,14 +2083,17 @@ a.overview-metric:focus-visible {
     url("/chartstead-bathymetry.svg");
 }
 
+/* —— Public CFP and Submitter Journey —— */
 .cfp-panel {
   width: min(100%, 720px);
-  padding: 36px;
+  padding: clamp(24px, 5vw, 40px);
   background: var(--surface);
   border: 1px solid var(--outline);
   border-top: 3px solid var(--cfp-accent, var(--primary));
   box-shadow: var(--shadow-2);
+  border-radius: var(--r-control);
   overflow: visible;
+  box-sizing: border-box;
 }
 
 .cfp-panel h1 {
@@ -2103,6 +2106,41 @@ a.overview-metric:focus-visible {
 .cfp-panel > p {
   color: var(--on-surface-variant);
   line-height: 1.6;
+  margin: 0 0 16px;
+}
+
+.cfp-deadline {
+  margin: 12px 0 18px;
+  padding: 10px 14px;
+  background: var(--surface-subtle);
+  border-left: 3px solid var(--cfp-accent, var(--primary));
+  border-radius: 0 var(--r-control) var(--r-control) 0;
+  font-size: 13px;
+  color: var(--on-surface);
+}
+
+.cfp-account {
+  margin: 20px 0 32px;
+  padding: 18px 20px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--outline);
+  border-radius: var(--r-control);
+  box-sizing: border-box;
+}
+
+.cfp-account p {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--on-surface-variant);
+}
+
+.cfp-account p:last-child {
+  margin-bottom: 0;
+}
+
+.cfp-account .magic-link-form {
+  margin-top: 12px;
 }
 
 .cfp-survey {
@@ -2120,15 +2158,16 @@ a.overview-metric:focus-visible {
   --sjs-corner-radius: var(--r-control);
   --sjs-special-red: var(--error);
   --sjs-special-red-light: var(--error-container);
-  margin-top: 12px;
-  /* Room for focus rings that SurveyJS draws outside the field box. */
+  margin-top: 16px;
   overflow: visible;
-  padding-inline: 4px;
+  padding: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 /* Welcome HTML sits inside the survey — keep it tight under the event intro. */
 .cfp-survey .cfp-welcome {
-  margin: 0;
+  margin: 0 0 20px;
   padding: 0;
 }
 
@@ -2147,52 +2186,123 @@ a.overview-metric:focus-visible {
   font-size: 14px;
 }
 
-.cfp-survey .sd-row:first-child {
-  border-bottom: none;
-  padding-top: 0;
-}
-
-.cfp-survey .sd-row:first-child .sd-question,
-.cfp-survey .sd-row:first-child .sd-element {
-  padding-top: 0;
-  padding-bottom: 8px;
-}
-
 .cfp-survey .sd-root-modern,
 .cfp-survey .sd-container-modern,
 .cfp-survey .sd-body,
 .cfp-survey .sd-body__page,
-.cfp-survey .sd-page,
-.cfp-survey .sd-row,
-.cfp-survey .sd-element,
-.cfp-survey .sd-question,
-.cfp-survey .sd-paneldynamic,
-.cfp-survey .sd-paneldynamic__panel {
+.cfp-survey .sd-page {
   overflow: visible;
   background: transparent;
-}
-
-.cfp-survey .sd-body,
-.cfp-survey .sd-page {
   padding: 0;
+  margin: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
+/* Eliminate all card boxes and outlines around individual questions */
 .cfp-survey .sd-row {
-  box-shadow: none;
-  border-bottom: 1px solid var(--surface-muted);
-  margin-inline: 0;
-  padding-inline: 2px;
+  box-shadow: none !important;
+  border: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
 }
 
+.cfp-survey .sd-element--with-frame,
+.cfp-survey .sd-element,
 .cfp-survey .sd-question {
-  padding: 16px 2px;
+  box-shadow: none !important;
+  border: none !important;
+  background: transparent !important;
+  padding: 10px 0 !important;
+  margin: 0 !important;
+  overflow: visible !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.cfp-survey .sd-question__header,
+.cfp-survey .sd-element__header {
+  padding: 0 0 6px !important;
+  margin: 0 !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.cfp-survey .sd-question__title,
+.cfp-survey .sd-title {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: var(--on-surface) !important;
+  line-height: 1.35 !important;
+}
+
+.cfp-survey .sd-question__description,
+.cfp-survey .sd-description {
+  font-size: 12.5px !important;
+  color: var(--on-surface-variant) !important;
+  margin-top: 3px !important;
+  line-height: 1.4 !important;
+}
+
+.cfp-survey .sd-question__required-text {
+  color: var(--error) !important;
+  margin-left: 3px !important;
+}
+
+/* Ensure no elements overflow or get cut off on the right */
+.cfp-survey .sd-question__content,
+.cfp-survey .sd-element__content,
+.cfp-survey .sd-text__content,
+.cfp-survey .sd-comment__content {
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  overflow: visible !important;
 }
 
 .cfp-survey .sd-input,
+.cfp-survey input.sd-input,
+.cfp-survey textarea.sd-input,
 .cfp-survey .sd-dropdown,
-.cfp-survey .sd-comment {
+.cfp-survey .sd-comment,
+.cfp-survey .sd-text,
+.cfp-survey input.sd-text,
+.cfp-survey .sd-selectbase {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  max-width: 100% !important;
   border: 1px solid var(--outline);
+  border-radius: var(--r-control);
+  background: var(--surface);
   box-shadow: none;
+  font-size: 14px;
+  color: var(--on-surface);
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+
+.cfp-survey input.sd-input,
+.cfp-survey input.sd-text {
+  height: 42px;
+  padding: 0 12px;
+}
+
+.cfp-survey textarea.sd-input,
+.cfp-survey textarea.sd-comment {
+  min-height: 100px;
+  padding: 10px 12px;
+  line-height: 1.5;
+}
+
+.cfp-survey .sd-dropdown {
+  min-height: 42px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
 }
 
 .cfp-survey .sd-input:focus,
@@ -2212,8 +2322,70 @@ a.overview-metric:focus-visible {
   background: var(--error-container);
 }
 
-/* SurveyJS framed questions pull error bars outside with negative margins, which
-   clips the first few characters against the panel. Keep errors in-flow. */
+/* Dynamic Panels (Speakers / Co-speakers) */
+.cfp-survey .sd-paneldynamic,
+.cfp-survey .sd-paneldynamic__panels-container {
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  overflow: visible !important;
+}
+
+.cfp-survey .sd-paneldynamic__panel {
+  box-shadow: none !important;
+  border: 1px solid var(--outline) !important;
+  border-radius: var(--r-control) !important;
+  background: var(--surface-subtle) !important;
+  padding: 16px 18px !important;
+  margin-bottom: 12px !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+.cfp-survey .sd-paneldynamic__panel-header {
+  padding: 0 0 8px !important;
+  font-size: 13.5px !important;
+  font-weight: 600 !important;
+  color: var(--on-surface) !important;
+}
+
+.cfp-survey .sd-paneldynamic__panel-footer,
+.cfp-survey .sd-paneldynamic__footer,
+.cfp-survey .sd-paneldynamic__buttons-container,
+.cfp-survey .sd-action-bar {
+  margin: 0 !important;
+  padding: 8px 0 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  overflow: visible !important;
+}
+
+.cfp-survey .sd-paneldynamic__remove-btn,
+.cfp-survey .sd-paneldynamic__add-btn,
+.cfp-survey .sd-action,
+.cfp-survey .sd-btn {
+  overflow: visible;
+  min-height: 40px;
+  border-radius: var(--r-control);
+  background-image: none;
+  box-shadow: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cfp-survey .sd-paneldynamic__remove-btn:focus-visible,
+.cfp-survey .sd-paneldynamic__add-btn:focus-visible,
+.cfp-survey .sd-btn:focus-visible,
+.cfp-survey .sd-action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* SurveyJS Error boxes */
 .cfp-survey .sd-element--with-frame > .sd-element__erbox,
 .cfp-survey .sd-element--with-frame > .sd-question__erbox--below-question,
 .cfp-survey .sd-element--with-frame > .sd-question__erbox--above-question,
@@ -2249,30 +2421,12 @@ a.overview-metric:focus-visible {
   word-break: break-word;
 }
 
-.cfp-survey .sd-paneldynamic__panel-footer,
-.cfp-survey .sd-paneldynamic__footer,
-.cfp-survey .sd-paneldynamic__buttons-container {
-  overflow: visible;
-  padding-inline: 2px;
-}
-
-.cfp-survey .sd-paneldynamic__remove-btn,
-.cfp-survey .sd-paneldynamic__add-btn,
-.cfp-survey .sd-action,
-.cfp-survey .sd-btn {
-  overflow: visible;
-  min-height: 44px;
-  border-radius: var(--r-control);
-  background-image: none;
-  box-shadow: none;
-}
-
-.cfp-survey .sd-paneldynamic__remove-btn:focus-visible,
-.cfp-survey .sd-paneldynamic__add-btn:focus-visible,
-.cfp-survey .sd-btn:focus-visible,
-.cfp-survey .sd-action:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+/* Navigation buttons */
+.cfp-survey .sd-navigation {
+  margin-top: 24px !important;
+  padding: 0 !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
 }
 
 .cfp-survey .sd-navigation__complete-btn,
@@ -2280,6 +2434,11 @@ a.overview-metric:focus-visible {
   background: var(--secondary) !important;
   border-color: var(--secondary) !important;
   color: var(--on-secondary) !important;
+  min-height: 44px !important;
+  padding: 0 24px !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  border-radius: var(--r-control) !important;
 }
 
 .cfp-survey .sd-navigation__complete-btn:hover,
@@ -2289,9 +2448,11 @@ a.overview-metric:focus-visible {
 }
 
 .cfp-foot {
-  margin: 18px 0 0;
+  margin: 24px 0 0;
   color: var(--on-surface-muted);
   font-size: 12.5px;
+  border-top: 1px solid var(--surface-muted);
+  padding-top: 16px;
 }
 
 .cfp-foot a,
@@ -2302,46 +2463,65 @@ a.overview-metric:focus-visible {
   text-underline-offset: 2px;
 }
 
+/* Confirmation and Proposal Detail metadata */
 .confirm-meta {
   display: grid;
-  gap: 12px;
-  margin: 22px 0 0;
+  gap: 0;
+  margin: 24px 0 0;
   padding: 0;
+  border: 1px solid var(--outline);
+  border-radius: var(--r-control);
+  overflow: hidden;
+  background: var(--surface);
 }
 
 .confirm-meta div {
-  display: grid;
-  gap: 4px;
-  padding: 12px;
-  background: var(--surface-subtle);
-  border: 1px solid var(--outline);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 13px 18px;
+  background: var(--surface);
+  border: none;
+  border-bottom: 1px solid var(--surface-muted);
+}
+
+.confirm-meta div:last-child {
+  border-bottom: none;
 }
 
 .confirm-meta dt {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--on-surface-muted);
+  flex-shrink: 0;
 }
 
 .confirm-meta dd {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
+  color: var(--on-surface);
+  text-align: right;
+  word-break: break-word;
 }
 
 .confirm-meta code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: 0.04em;
+  background: var(--surface-subtle);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
 }
 
 .confirm-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
-  align-items: flex-end;
-  margin-top: 22px;
+  align-items: center;
+  margin-top: 24px;
 }
 
 .confirm-actions .primary-action {

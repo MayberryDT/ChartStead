@@ -158,6 +158,21 @@ export function CfpPage() {
               <p>
                 Want to save and resume a draft? Sign in or create an optional submitter account. It only gives access to your own proposals.
               </p>
+              <button
+                className="primary-action"
+                type="button"
+                onClick={() =>
+                  void authClient.signIn.social({
+                    provider: "google",
+                    callbackURL: `${window.location.pathname}${window.location.search}`,
+                  })
+                }
+              >
+                Continue with Google
+              </button>
+              <div className="sign-in-divider">
+                <span>or use a secure email link</span>
+              </div>
               <form className="magic-link-form" onSubmit={requestMagicLink}>
                 <label htmlFor="cfp-account-email">Email address</label>
                 <div>
