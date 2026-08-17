@@ -25,4 +25,4 @@ Tyler walks the product as a real user, not as an agent checking boxes. Cover or
 - 2026-08-17 — Walkthrough findings filed as Competition 63 (Messages history), 64 (Agenda multi-day switcher), 65 (Speakers search layout), 66 (Forms preview follows selection), 67 (obvious locked Submissions rows). Competition 60 is done.
 - 2026-08-16 — Tyler: this is its own ticket; walk the app as a real user end to end and make sure everything works and looks right.
 
-- 2026-08-17 — frontier-reconcile: Still blocked on: Competition 19 (blocked — human-tandem only); Competition 59 (blocked — human-tandem only); Competition 63 (in-review); Course Check 11 (blocked — human-tandem only); Course Check 12 (blocked — human-tandem only).
+- 2026-08-17 — frontier-reconcile: Still blocked on: Competition 59 (in-progress); Competition 63 (in-review); Course Check 11 (blocked — human-tandem only); Course Check 12 (blocked — human-tandem only).
