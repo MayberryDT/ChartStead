@@ -1034,17 +1034,6 @@ table.grid tbody tr.form-row[aria-selected="true"] td:first-child {
   overflow: auto;
 }
 
-.forms-preview-header {
-  flex-shrink: 0;
-}
-
-.forms-preview-welcome {
-  margin: 0;
-  font-size: 12.5px;
-  line-height: 1.35;
-  color: var(--on-surface-variant);
-}
-
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
@@ -9806,7 +9795,55 @@ table.grid tbody tr.embed-row[aria-selected="true"] td:first-child {
 
 .topbar-tools .speaker-directory-tools .topbar-search {
   min-width: min(220px, 28vw);
-  flex: 0 1 280px;
+  max-width: 320px;
+  flex: 1 1 220px;
+}
+
+/* Match Forms/Submissions: icon + input share one flex control (never grid-stack .field). */
+.speaker-directory-tools label:not(.field) {
+  display: grid;
+  gap: 5px;
+  color: var(--on-surface-variant);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.speaker-directory-tools label:not(.field) input {
+  width: 100%;
+  border: 1px solid var(--outline-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--on-surface);
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: normal;
+  text-transform: none;
+  min-height: 40px;
+  padding: 0 10px;
+}
+
+.topbar-tools .speaker-directory-tools .field.topbar-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.topbar-tools .speaker-directory-tools .field.topbar-search input {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  width: auto;
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
 }
 
 .topbar-tools .speaker-directory-tools .app-select-toolbar {
